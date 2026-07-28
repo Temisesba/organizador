@@ -346,7 +346,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Petra';
+const BUILD_VERSION = 'Sagrada Familia';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2439,6 +2439,7 @@ function openFieldTemplateModal(){
   overlay.innerHTML = `<div class="modal">
     <div class="modal-head"><b>+ Plantilla de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Esta misma lista de campos la puedes insertar después como texto (#campo debajo del otro) o como columna izquierda de una tabla Cornell — eliges al momento de insertarla.</p>
       <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Nombre</label>
       <input type="text" id="ftplNombre" placeholder="ej. Enfermedad">
       <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Campos (uno por línea, sin #)</label>
@@ -2464,9 +2465,14 @@ function saveFieldTemplate(btn){
 function openFieldTemplatePicker(){
   if(!DATA.plantillas_prop.length){ showToast('Crea una plantilla de campos primero, en 🧩 Tablas'); return; }
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  overlay.innerHTML = `<div class="modal" style="width:min(420px,100%)">
+  overlay.innerHTML = `<div class="modal" style="width:min(460px,100%)">
     <div class="modal-head"><b>🏷️ Insertar plantilla de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <div class="modal-body">${DATA.plantillas_prop.map(pt=>`<button class="mini-btn" style="margin-bottom:6px" onclick="insertFieldTemplate('${pt.ID}');this.closest('.modal-overlay').remove()">${escHtml(pt.Nombre)} — ${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')}</button>`).join('')}</div>
+    <div class="modal-body">${DATA.plantillas_prop.map(pt=>`
+      <div class="settings-row" style="align-items:flex-start">
+        <span style="flex:1;font-size:13px">${escHtml(pt.Nombre)}<br><span style="color:var(--text-dim);font-size:12px">${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')}</span></span>
+        <button class="icon-btn" onclick="insertFieldTemplate('${pt.ID}');this.closest('.modal-overlay').remove()" title="Insertar como texto (#campo, uno debajo del otro)">📄</button>
+        <button class="icon-btn" onclick="insertFieldTemplateAsCornell('${pt.ID}');this.closest('.modal-overlay').remove()" title="Insertar como columna izquierda de una tabla Cornell">📐</button>
+      </div>`).join('')}</div>
   </div>`;
   document.body.appendChild(overlay);
 }
@@ -2477,6 +2483,34 @@ function insertFieldTemplate(id){
   focusMainEditor();
   document.execCommand('insertHTML', false, html);
   scheduleSave();
+}
+/* La misma plantilla de campos también sirve para armar la columna
+   izquierda (cue) de una tabla Cornell de un jalón — si la nota ya está
+   en modo Cornell, se agregan las filas de la plantilla al final de la
+   tabla que ya hay; si no, se enciende el modo Cornell con esas filas ya
+   listas (mismo camino que toggleCornell(), para que note.Cornell quede
+   marcado y todo lo demás la reconozca como Cornell). */
+function insertFieldTemplateAsCornell(id){
+  const pt = DATA.plantillas_prop.find(x=>x.ID===id); if(!pt) return;
+  let campos=[]; try{ campos = JSON.parse(pt.CamposJSON||'[]'); }catch(e){}
+  if(!campos.length) return;
+  const mainEl = document.getElementById('mainArea'); if(!mainEl) return;
+  const existing = mainEl.querySelector('table.cornell-table');
+  if(existing){
+    campos.forEach(c=>{
+      const row = existing.insertRow(-1);
+      const cue = row.insertCell(-1); cue.className='cornell-cue-cell'; cue.innerHTML = '#'+escHtml(c);
+      row.insertCell(-1).innerHTML = '<br>';
+    });
+    scheduleSave();
+  } else {
+    const note = collectNoteFromForm();
+    const trs = campos.map(c=>'<tr><td class="cornell-cue-cell">#'+escHtml(c)+'</td><td><br></td></tr>').join('');
+    note.Contenido = '<table class="rt-table cornell-table">'+trs+'</table>';
+    note.Cornell = '1';
+    persistCurrentNote(note);
+    reopenEditorFor(note);
+  }
 }
 
 /* ---- Tablas por etiqueta de bloque (párrafo con #tag inline) — modo

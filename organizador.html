@@ -318,6 +318,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
     <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel">Sync</span></button>
     <button class="btn secondary no-print" onclick="openQuickDatoModal()" title="Anotar rápido: #etiqueta, lo que sea — se va a tu listado de Datos generales">+ Dato general</button>
+    <button class="icon-btn no-print" onclick="openTimeLogModal()" title="Registro de tiempo — qué estás haciendo ahora">⏱</button>
     <button class="btn no-print" onclick="openNoteEditor(null)">+ Nota</button>
   </header>
 
@@ -376,7 +377,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Machu Picchu II';
+const BUILD_VERSION = 'Petra II';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2062,6 +2063,148 @@ function renderQuickDatoList(){
       <span style="flex:1;font-size:13px">${escHtml(n.Titulo)} <span style="color:var(--text-dim)">— ${escHtml(noteSnippetText(n).slice(0,40))}</span></span>
       <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
     </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Aún no hay nada aquí — el primero que guardes aparece arriba.</p>';
+}
+
+/* ============ Registro de tiempo: bloques que se cierran solos ==========
+   No es una cuadrícula de 24 horas fijas — vas anotando cuando cambias de
+   actividad, y el bloque anterior "termina" en automático cuando empieza
+   el siguiente (nunca se guarda un "fin" explícito, se calcula al vuelo).
+   Un bloque sospechosamente largo (>2h) se marca para ofrecer dividirlo,
+   en vez de forzar a llenar horas vacías que no pasó nada en ellas. */
+const TIEMPO_NOTEBOOK = 'Registro de tiempo';
+async function ensureTiempoNotebook(){
+  let nb = DATA.notebooks.find(n=>n.Nombre===TIEMPO_NOTEBOOK);
+  if(!nb) nb = await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:TIEMPO_NOTEBOOK, TagsHeredados:'', Color:'#3d7a4f', TagAuto:'' });
+  return nb;
+}
+function timeLogEntriesForDate(dateObj){
+  const dayStr = dateObj.toDateString();
+  return activeNotes().filter(n=>n.Notebook===TIEMPO_NOTEBOOK && new Date(n.Fecha).toDateString()===dayStr)
+    .sort((a,b)=>String(a.Fecha).localeCompare(String(b.Fecha)));
+}
+function fmtHM(d){ return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }
+function fmtDuration(ms){
+  const mins = Math.max(0, Math.round(ms/60000));
+  const h = Math.floor(mins/60), m = mins%60;
+  return (h?h+'h ':'')+(m||!h?m+'m':'');
+}
+let _timeLogViewDate = new Date();
+function openTimeLogModal(){
+  _timeLogViewDate = new Date();
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(560px,100%)">
+    <div class="modal-head"><b>⏱ Registro de tiempo</b><button class="icon-btn" onclick="hideGlobalTagSuggest();this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">"#etiqueta, qué estás haciendo" — el bloque anterior se cierra solo cuando registras uno nuevo.</p>
+      <input type="text" id="timeLogInput" value="#" placeholder="#trabajo escribiendo la tesis">
+      <div style="margin-top:8px"><button class="btn" id="timeLogSaveBtn" onclick="saveTimeLogEntry()">Registrar ahora</button></div>
+      <div id="timeLogSummary" style="margin-top:14px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:14px 0">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <button class="icon-btn" onclick="shiftTimeLogDate(-1)">◀</button>
+        <b id="timeLogDateLabel"></b>
+        <button class="icon-btn" onclick="shiftTimeLogDate(1)">▶</button>
+      </div>
+      <div id="timeLogTimeline" style="margin-top:8px"></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const inp = document.getElementById('timeLogInput');
+  inp.focus(); inp.setSelectionRange(1,1);
+  inp.addEventListener('input', ()=>updateTagSuggestFromInput(inp));
+  inp.addEventListener('keydown', e=>{ if(handleTagSuggestKeydown(e)) return; if(e.key==='Enter'){ e.preventDefault(); saveTimeLogEntry(); } });
+  inp.addEventListener('blur', ()=>scheduleHideGlobalTagSuggest());
+  renderTimeLogView();
+}
+function shiftTimeLogDate(delta){
+  _timeLogViewDate = new Date(_timeLogViewDate);
+  _timeLogViewDate.setDate(_timeLogViewDate.getDate()+delta);
+  renderTimeLogView();
+}
+async function saveTimeLogEntry(){
+  const inp = document.getElementById('timeLogInput');
+  const raw = (inp.value||'').trim(); if(!raw) return;
+  const btn = document.getElementById('timeLogSaveBtn');
+  await withSavingFeedback(btn, async ()=>{
+    const m = raw.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)\s*[,:]?\s*(.*)$/);
+    const tag = m ? m[1] : '';
+    const texto = m ? m[2] : raw;
+    const nb = await ensureTiempoNotebook();
+    const note = {
+      ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(),
+      Titulo: texto || (tag?('#'+tag):raw.slice(0,40)),
+      Contenido: '<p>'+escHtml(texto||raw)+'</p>',
+      Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:''
+    };
+    await saveEntity('NOTAS', note);
+    if(tag) ensureTagsRegistered('#'+tag);
+    inp.value='#'; inp.focus(); inp.setSelectionRange(1,1);
+    _timeLogViewDate = new Date();
+    renderTimeLogView(); renderSidebar();
+  });
+}
+function renderTimeLogView(){
+  const label = document.getElementById('timeLogDateLabel'); if(!label) return;
+  const isToday = _timeLogViewDate.toDateString()===new Date().toDateString();
+  label.textContent = isToday ? 'Hoy' : _timeLogViewDate.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
+  const entries = timeLogEntriesForDate(_timeLogViewDate);
+  const totals = {};
+  const rows = entries.map((n,i)=>{
+    const start = new Date(n.Fecha);
+    const end = i+1<entries.length ? new Date(entries[i+1].Fecha) : (isToday ? new Date() : start);
+    const durMs = Math.max(0, end-start);
+    const long = durMs > 2*60*60*1000;
+    const tagKey = n.Tags || '(sin etiqueta)';
+    totals[tagKey] = (totals[tagKey]||0) + durMs;
+    const tagBadge = n.Tags ? `<span class="tag-badge" style="border-color:${tagColor(n.Tags)}">#${escHtml(n.Tags)}</span>` : '';
+    const endLabel = (i+1<entries.length || !isToday) ? fmtHM(end) : 'ahora';
+    return `<div class="settings-row" style="align-items:flex-start${long?';background:rgba(211,124,60,.12)':''}">
+      <span style="flex:1">
+        <b>${fmtHM(start)}–${endLabel}</b> <span style="color:var(--text-dim);font-size:12px">(${fmtDuration(durMs)})</span><br>
+        ${escHtml(n.Titulo)} ${tagBadge}
+        ${long?`<div style="margin-top:4px"><button class="mini-btn" onclick="splitTimeLogEntry('${n.ID}','${entries[i+1]?entries[i+1].ID:''}')">✂️ Dividir — ¿de verdad duró tanto?</button></div>`:''}
+      </span>
+      <button class="icon-btn" onclick="openNoteEditor('${n.ID}')" title="Editar texto">✏️</button>
+      <button class="icon-btn" onclick="deleteTimeLogEntryUI('${n.ID}')" title="Borrar">🗑️</button>
+    </div>`;
+  }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin registros este día</p>';
+  document.getElementById('timeLogTimeline').innerHTML = rows;
+
+  const summaryHTML = Object.entries(totals).sort((a,b)=>b[1]-a[1]).map(([tag,ms])=>
+    `<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>${tag==='(sin etiqueta)'?tag:'#'+escHtml(tag)}</span><b>${fmtDuration(ms)}</b></div>`
+  ).join('');
+  document.getElementById('timeLogSummary').innerHTML = entries.length ? `<b style="font-size:12px;color:var(--text-dim)">RESUMEN DEL DÍA</b>${summaryHTML}` : '';
+}
+/* "Dividir" un bloque largo: pregunta a qué hora cambiaste de actividad y
+   qué empezaste a hacer, e inserta un registro nuevo justo ahí — el
+   bloque original automáticamente "termina" antes, sin tocarlo, porque
+   la duración siempre se calcula contra el siguiente registro. */
+function splitTimeLogEntry(beforeId, afterId){
+  const before = getNote(beforeId); if(!before) return;
+  const start = new Date(before.Fecha);
+  const end = afterId ? new Date(getNote(afterId).Fecha) : new Date();
+  const midpoint = new Date((start.getTime()+end.getTime())/2);
+  const hhmm = prompt('¿A qué hora cambiaste de actividad? (HH:MM)', fmtHM(midpoint));
+  if(!hhmm) return;
+  const parts = hhmm.split(':').map(s=>parseInt(s,10));
+  if(parts.length<2 || isNaN(parts[0]) || isNaN(parts[1])){ showToast('Formato de hora inválido, usa HH:MM'); return; }
+  const splitTime = new Date(start); splitTime.setHours(parts[0], parts[1], 0, 0);
+  const texto = prompt('¿Qué empezaste a hacer a partir de esa hora?'); if(!texto || !texto.trim()) return;
+  const m = texto.trim().match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)\s*[,:]?\s*(.*)$/);
+  const tag = m ? m[1] : '';
+  const rest = m ? m[2] : texto.trim();
+  ensureTiempoNotebook().then(nb=>saveEntity('NOTAS', {
+    ID:'', Fecha:splitTime.toISOString(), FechaEdicion:new Date().toISOString(),
+    Titulo: rest || (tag?('#'+tag):texto.trim()),
+    Contenido:'<p>'+escHtml(rest||texto.trim())+'</p>',
+    Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:''
+  })).then(()=>{ if(tag) ensureTagsRegistered('#'+tag); renderTimeLogView(); renderSidebar(); });
+}
+function deleteTimeLogEntryUI(id){
+  if(!confirm('¿Borrar este registro de tiempo? (se manda a la papelera)')) return;
+  const note = getNote(id); if(!note) return;
+  note.Papelera = new Date().toISOString();
+  saveEntity('NOTAS', note).then(()=>{ renderTimeLogView(); renderSidebar(); });
 }
 
 /* ============ Exportar a PDF (impresión del navegador) ============ */

@@ -103,6 +103,16 @@ main{flex:1;overflow-y:auto;padding:14px;min-width:0}
 [data-theme="eink"] .tag-badge{border:1.5px solid #000}
 .nc-foot{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-dim)}
 
+/* "capítulo" (nota con campos/Cornell) mostrado como tarjetitas por fila */
+.chapter-group{grid-column:1/-1;background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--radius);padding:12px;box-shadow:var(--shadow);cursor:pointer}
+.chapter-group:hover{border-color:var(--accent)}
+.chapter-title{font-weight:700;font-size:14.5px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.chapter-meta{font-weight:400;font-size:11px;color:var(--text-dim);white-space:nowrap}
+.field-cards-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.field-card{background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;padding:8px 10px;min-width:130px;max-width:220px;flex:1 1 130px}
+.field-card-tag{font-weight:700;font-size:12px;color:var(--accent);margin-bottom:3px}
+.field-card-text{font-size:12px;color:var(--text-dim)}
+
 /* table */
 table.org-table{border-collapse:collapse;width:100%;background:var(--bg-elev);font-size:13px}
 table.org-table th,table.org-table td{border:1px solid var(--border);padding:6px 8px;text-align:left}
@@ -704,7 +714,10 @@ function renderMain(){
 
 function cardsHTML(notes){
   if(!notes.length) return '<p style="color:var(--text-dim)">Sin notas aquí todavía — crea la primera con "+ Nota".</p>';
-  return '<div class="cards-grid">' + notes.map(noteCardHTML).join('') + '</div>';
+  return '<div class="cards-grid">' + notes.map(n=>{
+    const pairs = extractFieldPairs(n);
+    return pairs.length ? chapterGroupHTML(n, pairs) : noteCardHTML(n);
+  }).join('') + '</div>';
 }
 function noteCardHTML(n){
   const tags = effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)}">#${escHtml(t)}</span>`).join('');
@@ -714,6 +727,23 @@ function noteCardHTML(n){
     <div class="nc-snip">${escHtml(snip)}</div>
     <div class="nc-tags">${tags}</div>
     <div class="nc-foot"><span>${n.Notebook?escHtml(n.Notebook):''}</span><span>${fmtDate(n.Fecha)}</span></div>
+  </div>`;
+}
+/* Nota tipo Cornell / con campos "#campo": el título hace de "capítulo" y
+   cada fila/campo es su propia tarjetita chica adentro — así se ve la
+   granularidad de bloque sin dejar de saber a qué nota/cuaderno pertenece. */
+function chapterGroupHTML(n, pairs){
+  const tags = effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)}">#${escHtml(t)}</span>`).join('');
+  const miniCards = pairs.map(p=>{
+    const isField = /^#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+$/.test(p.cue);
+    const label = isField ? p.cue : (p.cue || '—');
+    const text = stripHtmlToText(p.texto).slice(0,90);
+    return `<div class="field-card"><div class="field-card-tag">${escHtml(label)}</div><div class="field-card-text">${escHtml(text)}</div></div>`;
+  }).join('');
+  return `<div class="chapter-group" onclick="openNoteEditor('${n.ID}')" style="${n.Color?('border-left:4px solid '+n.Color):''}">
+    <div class="chapter-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}<span class="chapter-meta">${n.Notebook?(escHtml(n.Notebook)+' · '):''}${fmtDate(n.Fecha)}</span></div>
+    <div class="nc-tags">${tags}</div>
+    <div class="field-cards-row">${miniCards}</div>
   </div>`;
 }
 function fmtDate(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return String(iso).slice(0,10); return d.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'2-digit'}); }
@@ -1364,9 +1394,22 @@ function inlineMd(t){
 
 /* Cornell ahora es solo una tabla de 2 columnas (ver toggleCornell) — reusa
    el motor de tablas de arriba, no necesita código propio. */
+/* .textContent NO mete espacio ni salto de línea entre elementos de bloque
+   — "<p>#morfo</p><p>virus</p>".textContent da "#morfovirus" pegado, sin
+   separación, lo que rompía la detección de hashtags. Aquí sí se recorre
+   el árbol metiendo un salto de línea después de cada bloque/párrafo. */
 function stripHtmlToText(html){
   const d = document.createElement('div'); d.innerHTML = html||'';
-  return (d.textContent||'').replace(/\s+/g,' ').trim();
+  const parts = [];
+  const BLOCK = /^(P|DIV|H1|H2|H3|LI|TR|BLOCKQUOTE|TD|TH|UL|OL|TABLE)$/;
+  (function walk(node){
+    if(node.nodeType===3){ parts.push(node.textContent); return; }
+    if(node.nodeType!==1) return;
+    if(node.tagName==='BR'){ parts.push('\n'); return; }
+    Array.from(node.childNodes).forEach(walk);
+    if(BLOCK.test(node.tagName)) parts.push('\n');
+  })(d);
+  return parts.join('').replace(/[ \t]+/g,' ').replace(/\n{2,}/g,'\n').trim();
 }
 function noteSnippetText(n){
   const c = n.Contenido||'';

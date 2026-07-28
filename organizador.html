@@ -297,7 +297,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 /* ============ Estado y almacenamiento ============ */
 let GAS_URL = localStorage.getItem('org_gas_url') || '';
 let SHEET_ID = localStorage.getItem('org_sheet_id') || '';
-let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[] };
+let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[] };
 const FLAG_TAGS = [['task','⚑ tarea','#4a6fa5'],['importante','★ importante','#b3432b'],['noolvidar','⚠ no olvidar','#7d5ba6']];
 let currentView = localStorage.getItem('org_view') || 'cards';
 let activeNotebook = localStorage.getItem('org_active_notebook') || '';
@@ -417,12 +417,12 @@ function normalizeData(d){
     notas: d.notas||[], tags: d.tags||[], notebooks: d.notebooks||[],
     plantillas: d.plantillas||[], historial: d.historial||[],
     diccionario: d.diccionario||[], feedback: d.feedback||[],
-    bloque_tablas: d.bloque_tablas||[]
+    bloque_tablas: d.bloque_tablas||[], plantillas_prop: d.plantillas_prop||[]
   };
 }
 
 /* ============ CRUD genérico local + remoto ============ */
-const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas' };
+const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop' };
 function cacheData(){ try{ localStorage.setItem('org_data_cache', JSON.stringify(DATA)); }catch(e){} }
 async function saveEntity(table, obj){
   if(!obj.ID) obj.ID = uid();
@@ -511,6 +511,32 @@ function blockKeyValueTags(block){
     if(m) out[m[1]] = m[2];
   });
   return out;
+}
+
+/* ============ Campos por nota: "#campo" solo en su línea + el texto que
+   sigue es el valor — cada nota se puede leer como una fila de una base
+   de datos (columnas = campos), sin duplicar nada: se calcula del HTML. */
+function getNoteFields(note){
+  const html = note.Contenido||'';
+  const fields = {};
+  if(!/^\s*<[a-z]/i.test(html)) return fields;
+  const container = document.createElement('div'); container.innerHTML = html;
+  let curField = null; let curVal = [];
+  const flush = ()=>{ if(curField) fields[curField] = curVal.join(' ').trim(); curField=null; curVal=[]; };
+  Array.from(container.children).forEach(el=>{
+    const t = (el.textContent||'').trim();
+    const m = t.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)$/);
+    if(m){ flush(); curField = m[1].toLowerCase(); }
+    else if(curField && t){ curVal.push(t); }
+  });
+  flush();
+  return fields;
+}
+function allEntities(){
+  return DATA.notas.map(n=>({ note:n, entity: n.Titulo||'(sin título)', fields: getNoteFields(n) })).filter(e=>Object.keys(e.fields).length);
+}
+function allFieldNames(){
+  const set = new Set(); allEntities().forEach(e=>Object.keys(e.fields).forEach(k=>set.add(k))); return Array.from(set);
 }
 
 /* ============ Inbox: notas sin cuaderno que se auto-enrutan cuando llevan
@@ -777,6 +803,7 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableDelRow()" title="− fila">⊟▤</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableDelCol()" title="− columna">⊟▥</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V)">🖼️</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openFieldTemplatePicker()" title="Insertar plantilla de campos (#campo + valor)">🏷️</button>
     <span class="sep"></span>
     <button class="icon-btn" id="btnMark" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark')" title="Resaltar">🖍️</button>
     <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
@@ -1476,13 +1503,130 @@ function histAddItem(id){
    mismo bloque como columnas. */
 function openBlockTables(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  overlay.innerHTML = `<div class="modal" style="width:min(900px,100%)">
-    <div class="modal-head"><b>🧩 Tablas por bloque</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+  overlay.innerHTML = `<div class="modal" style="width:min(940px,100%)">
+    <div class="modal-head"><b>🧩 Tablas</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="tabs">
+      <button class="active" onclick="blockTablesTab(this,'campos')">Por campos de nota</button>
+      <button onclick="blockTablesTab(this,'bloque')">Por etiqueta de bloque</button>
+    </div>
     <div class="modal-body" id="blockTablesBody"></div>
   </div>`;
   document.body.appendChild(overlay);
-  renderBlockTablesBody();
+  renderFieldTablesBody();
 }
+function blockTablesTab(btn, tab){
+  btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
+  if(tab==='campos') renderFieldTablesBody(); else renderBlockTablesBody();
+}
+
+/* ---- Tablas por campos de nota: "#dx" solo en su línea + el texto de
+   abajo es el valor → cada nota es una fila, cada campo una columna. ---- */
+function renderFieldTablesBody(){
+  const body = document.getElementById('blockTablesBody'); if(!body) return;
+  const known = allFieldNames();
+  body.innerHTML = `
+    <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">
+      En tus notas, escribe un campo solo en su línea (ej. <code>#dx</code>) y el texto que sigue es su valor.
+      Cada nota se puede leer como una fila; aquí filtras por un campo (opcional) y eliges qué columnas mostrar.
+      ${known.length?('Campos detectados: '+known.map(k=>'#'+escHtml(k)).join(' ')):''}
+    </p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
+      <input type="text" id="ftNombre" placeholder="Nombre de la tabla (ej. Por morfología)" style="flex:1;min-width:140px">
+      <input type="text" id="ftCampo" placeholder="campo (opcional, ej. morfo)" style="flex:1;min-width:120px">
+      <input type="text" id="ftValor" placeholder="que contenga (ej. virus)" style="flex:1;min-width:120px">
+      <input type="text" id="ftCols" placeholder="columnas (ej. definicion, tx)" style="flex:1.4;min-width:160px">
+      <button class="btn" onclick="saveFieldTable()">+ Crear</button>
+    </div>
+    <div id="fieldTablesList"></div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:20px 0 14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b style="font-size:13.5px">🏷️ Plantillas de campos</b>
+      <button class="btn secondary" onclick="openFieldTemplateModal()">+ Nueva</button>
+    </div>
+    <div id="fieldTemplatesList"></div>`;
+  document.getElementById('fieldTablesList').innerHTML = DATA.bloque_tablas.filter(bt=>bt.Columnas).map(bt=>`
+    <div class="tpl-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b>${escHtml(bt.Nombre)}</b>
+        <span style="color:var(--text-dim);font-size:12px">${bt.CampoFiltro?('#'+escHtml(bt.CampoFiltro)+(bt.ValorFiltro?' ~ "'+escHtml(bt.ValorFiltro)+'"':'')):(bt.ValorFiltro?('"'+escHtml(bt.ValorFiltro)+'" en cualquier campo'):'todas')}</span>
+        <button class="icon-btn" onclick="deleteEntity('BLOQUE_TABLAS','${bt.ID}').then(renderFieldTablesBody)">🗑️</button>
+      </div>
+      ${fieldTableRenderHTML(bt)}
+    </div>`).join('') || '<p style="color:var(--text-dim)">Sin tablas todavía — crea una arriba.</p>';
+  document.getElementById('fieldTemplatesList').innerHTML = DATA.plantillas_prop.map(pt=>`
+    <div class="settings-row">
+      <span style="flex:1">${escHtml(pt.Nombre)} <span style="color:var(--text-dim);font-size:12px">(${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')})</span></span>
+      <button class="icon-btn" onclick="deleteEntity('PLANTILLAS_PROP','${pt.ID}').then(renderFieldTablesBody)">🗑️</button>
+    </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas — créalas aquí y luego insértalas desde 🏷️ en el editor de la nota.</p>';
+}
+function saveFieldTable(){
+  const nombre = document.getElementById('ftNombre').value.trim();
+  const campo = document.getElementById('ftCampo').value.trim().replace(/^#/,'').toLowerCase();
+  const valor = document.getElementById('ftValor').value.trim();
+  const cols = document.getElementById('ftCols').value.trim();
+  if(!nombre || !cols){ showToast('Ponle nombre y al menos una columna'); return; }
+  saveEntity('BLOQUE_TABLAS', { ID:uid(), Nombre:nombre, TagFiltro:'', CampoFiltro:campo, ValorFiltro:valor, Columnas:cols }).then(renderFieldTablesBody);
+}
+function fieldTableRenderHTML(bt){
+  const campo = (bt.CampoFiltro||'').toLowerCase();
+  const valor = (bt.ValorFiltro||'').toLowerCase();
+  const cols = (bt.Columnas||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  let rows = allEntities();
+  if(campo) rows = rows.filter(e=>(e.fields[campo]||'').toLowerCase().includes(valor));
+  else if(valor) rows = rows.filter(e=>Object.values(e.fields).some(v=>(v||'').toLowerCase().includes(valor)));
+  if(!rows.length) return '<p style="color:var(--text-dim);font-size:13px;margin-top:8px">Sin resultados todavía.</p>';
+  const head = '<th>'+(campo?escHtml(campo):'Nota')+'</th>' + cols.map(c=>'<th>'+escHtml(c)+'</th>').join('');
+  const body = rows.map(e=>'<tr><td class="title-cell" onclick="openNoteEditor(\''+e.note.ID+'\')">'+escHtml(e.entity)+'</td>'
+    + cols.map(c=>'<td>'+escHtml(e.fields[c]||'')+'</td>').join('') + '</tr>').join('');
+  return '<div style="overflow:auto;margin-top:8px"><table class="org-table"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+}
+function openFieldTemplateModal(){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-head"><b>+ Plantilla de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Nombre</label>
+      <input type="text" id="ftplNombre" placeholder="ej. Enfermedad">
+      <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Campos (uno por línea, sin #)</label>
+      <textarea id="ftplCampos" rows="6" placeholder="nombre enfermedad
+definicion
+morfo
+tx
+dx"></textarea>
+      <div style="margin-top:14px"><button class="btn" onclick="saveFieldTemplate(this)">Guardar</button></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('ftplNombre').focus();
+}
+function saveFieldTemplate(btn){
+  const nombre = document.getElementById('ftplNombre').value.trim();
+  const campos = document.getElementById('ftplCampos').value.split('\n').map(s=>s.trim().toLowerCase().replace(/\s+/g,'_')).filter(Boolean);
+  if(!nombre || !campos.length){ showToast('Ponle nombre y al menos un campo'); return; }
+  saveEntity('PLANTILLAS_PROP', { ID:uid(), Nombre:nombre, CamposJSON: JSON.stringify(campos) }).then(()=>{
+    btn.closest('.modal-overlay').remove(); renderFieldTablesBody();
+  });
+}
+function openFieldTemplatePicker(){
+  if(!DATA.plantillas_prop.length){ showToast('Crea una plantilla de campos primero, en 🧩 Tablas'); return; }
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(420px,100%)">
+    <div class="modal-head"><b>🏷️ Insertar plantilla de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">${DATA.plantillas_prop.map(pt=>`<button class="mini-btn" style="margin-bottom:6px" onclick="insertFieldTemplate('${pt.ID}');this.closest('.modal-overlay').remove()">${escHtml(pt.Nombre)} — ${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')}</button>`).join('')}</div>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+function insertFieldTemplate(id){
+  const pt = DATA.plantillas_prop.find(x=>x.ID===id); if(!pt) return;
+  let campos=[]; try{ campos = JSON.parse(pt.CamposJSON||'[]'); }catch(e){}
+  const html = campos.map(c=>'<p><b>#'+escHtml(c)+'</b></p><p><br></p>').join('');
+  focusMainEditor();
+  document.execCommand('insertHTML', false, html);
+  scheduleSave();
+}
+
+/* ---- Tablas por etiqueta de bloque (párrafo con #tag inline) — modo
+   anterior, útil cuando no usas el patrón de "campo solo en su línea". ---- */
 function renderBlockTablesBody(){
   const body = document.getElementById('blockTablesBody'); if(!body) return;
   body.innerHTML = `
@@ -1492,7 +1636,7 @@ function renderBlockTablesBody(){
       <button class="btn" onclick="saveBlockTable()">+ Crear</button>
     </div>
     <div id="blockTablesList"></div>`;
-  document.getElementById('blockTablesList').innerHTML = DATA.bloque_tablas.map(bt=>`
+  document.getElementById('blockTablesList').innerHTML = DATA.bloque_tablas.filter(bt=>bt.TagFiltro).map(bt=>`
     <div class="tpl-card">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <b>${escHtml(bt.Nombre)}</b> <span style="color:var(--text-dim);font-size:12px">#${escHtml(bt.TagFiltro)}</span>

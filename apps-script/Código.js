@@ -37,7 +37,8 @@ const TABLE_DEFS = {
   HISTORIAL:     ['ID', 'PlantillaID', 'Fecha', 'ItemsJSON', 'NotaID'],
   DICCIONARIO:   ['ID', 'Termino', 'Traduccion', 'Notas', 'Fecha'],
   FEEDBACK:      ['ID', 'Fecha', 'Original', 'Correccion', 'Contexto'],
-  BLOQUE_TABLAS: ['ID', 'Nombre', 'TagFiltro']
+  BLOQUE_TABLAS: ['ID', 'Nombre', 'TagFiltro', 'CampoFiltro', 'ValorFiltro', 'Columnas'],
+  PLANTILLAS_PROP: ['ID', 'Nombre', 'CamposJSON']
 };
 
 // ── Router GET (solo lectura ligera, ej. ping de conexión) ────

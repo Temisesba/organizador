@@ -368,7 +368,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Chichén Itzá';
+const BUILD_VERSION = 'Estatua de la Libertad';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -900,7 +900,11 @@ function toggleModalFullscreen(btn){
 function getFilteredSortedNotes(query){
   const q = (query!==undefined ? query : (document.getElementById('searchInput').value||'')).toLowerCase().trim();
   let notes = activeNotes().filter(n=>{
-    if(activeNotebook && n.Notebook!==activeNotebook) return false;
+    // activeNotebook==='' significa Inbox (notas SIN cuaderno), no "sin
+    // filtro" — con "&&" de por medio, la cadena vacía es falsy en JS y
+    // el filtro entero se saltaba cuando Inbox estaba activo, mostrando
+    // TODAS las notas de TODOS los cuadernos ahí adentro por error.
+    if((n.Notebook||'') !== (activeNotebook||'')) return false;
     if(activeTagFilters.size){
       const et = effectiveTags(n);
       const arr = Array.from(activeTagFilters);

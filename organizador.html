@@ -368,7 +368,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Big Ben';
+const BUILD_VERSION = 'Kremlin';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -796,7 +796,7 @@ function renderSidebar(){
   const fc = document.getElementById('flagCloud');
   fc.innerHTML = allFlags().map(([t,emoji,label,color])=>{
     const on = activeTagFilters.has(t);
-    return `<div class="tag-chip-row" style="${on?'background:var(--bg-soft);font-weight:700':''}" onclick="toggleTagFilter('${t}')">
+    return `<div class="tag-chip-row" style="${on?'background:var(--bg-soft);font-weight:700':''}" onclick="toggleFlagFilter('${t}')">
       <span class="nb-dot" style="background:${color}"></span>${emoji} ${escHtml(label)}<span class="cnt">${allTagsWithCounts().find(([tg])=>tg===t)?.[1]||0}</span>
     </div>`;
   }).join('');
@@ -805,9 +805,10 @@ function renderSidebar(){
   tc.innerHTML = allTagsWithCounts().filter(([t])=>!allFlags().some(f=>f[0]===t)).sort((a,b)=>a[0].localeCompare(b[0],'es')).map(([t,c])=>{
     const on = activeTagFilters.has(t);
     return `<div class="tag-chip-row" style="${on?'background:var(--bg-soft);font-weight:700':''}">
-      <span onclick="toggleTagFilter('${escAttr(t)}')" style="display:flex;align-items:center;gap:6px;flex:1;min-width:0">
+      <span onclick="toggleTagFilter('${escAttr(t)}')" class="tag-name-span" style="display:flex;align-items:center;gap:6px;flex:1;min-width:0">
         <span class="nb-dot" style="background:${tagColor(t)}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">#${escHtml(t)}</span><span class="cnt">${c}</span>
       </span>
+      <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();startInlineTagEdit('${escAttr(t)}', this)" title="Renombrar etiqueta">✏️</button>
       <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();openTagCompendium('${escAttr(t)}')" title="Ver todo lo etiquetado con #${escAttr(t)}">👁</button>
     </div>`;
   }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin etiquetas todavía</p>';
@@ -853,6 +854,15 @@ function renderSavedSearches(){
     </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin búsquedas guardadas</p>';
 }
 function toggleTagFilter(t){ activeTagFilters.has(t) ? activeTagFilters.delete(t) : activeTagFilters.add(t); renderSidebar(); renderMain(); }
+/* Las banderas rápidas son un buscador global a propósito — si estás
+   parado dentro de un cuaderno específico y le das a una bandera, primero
+   te saca a "ver todo" (Inbox) para que el filtro busque en TODAS tus
+   notas; si no, verla filtrada solo al cuaderno actual no tiene sentido
+   (podrías tener tareas en otros cuadernos que no se mostrarían). */
+function toggleFlagFilter(t){
+  if(activeNotebook){ activeNotebook=''; localStorage.setItem('org_active_notebook',''); }
+  toggleTagFilter(t);
+}
 function setTagFilterMode(mode){ tagFilterMode=mode; localStorage.setItem('org_tag_filter_mode',mode); renderSidebar(); renderMain(); }
 function clearTagFilters(){ activeTagFilters.clear(); renderSidebar(); renderMain(); }
 function renderTagFilterBar(){
@@ -910,11 +920,13 @@ function toggleModalFullscreen(btn){
 function getFilteredSortedNotes(query){
   const q = (query!==undefined ? query : (document.getElementById('searchInput').value||'')).toLowerCase().trim();
   let notes = activeNotes().filter(n=>{
-    // activeNotebook==='' significa Inbox (notas SIN cuaderno), no "sin
-    // filtro" — con "&&" de por medio, la cadena vacía es falsy en JS y
-    // el filtro entero se saltaba cuando Inbox estaba activo, mostrando
-    // TODAS las notas de TODOS los cuadernos ahí adentro por error.
-    if((n.Notebook||'') !== (activeNotebook||'')) return false;
+    // Inbox (activeNotebook==='') es realmente "ver TODO", como cualquier
+    // otra app de notas — cuadernos son solo una forma extra de filtrar,
+    // no una condición para aparecer. La ÚNICA excepción es Mejoras
+    // Organizador, que nunca debe verse fuera de Configuración. Si hay un
+    // cuaderno específico elegido, ahí sí filtra estrictamente a ese.
+    if(activeNotebook){ if(n.Notebook!==activeNotebook) return false; }
+    else if(n.Notebook===MEJORAS_NOTEBOOK) return false;
     if(activeTagFilters.size){
       const et = effectiveTags(n);
       const arr = Array.from(activeTagFilters);
@@ -1233,6 +1245,7 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openFieldTemplatePicker()" title="Insertar plantilla de campos (#campo + valor)">🏷️</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="sendSelectionToDic()" title="Mandar palabra/frase seleccionada al diccionario">📖</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertTimestamp()" title="Insertar fecha y hora (para notas de captura rápida)">🕐</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertHashAndSuggest()" title="Insertar # aquí y mostrar sugerencias de etiquetas ya usadas">#</button>
     <span class="sep"></span>
     <button class="icon-btn" id="btnMark" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark')" title="Resaltar (toca de nuevo el mismo color para quitarlo)">🖍️</button>
     <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
@@ -1375,9 +1388,13 @@ function findTagByName(name){
   const key = (name||'').trim().toLowerCase();
   return key ? DATA.tags.find(x=>(x.Etiqueta||'').trim().toLowerCase()===key) : null;
 }
+// Todas las etiquetas se registran/renombran SIEMPRE en minúsculas — así
+// "Dengue" y "dengue" nunca se vuelven dos etiquetas distintas por un
+// simple tema de mayúsculas.
 function ensureTagsRegistered(tagsStr){
   parseTagsText(tagsStr).forEach(t=>{
-    if(!findTagByName(t)) saveEntity('TAGS', { ID:uid(), Etiqueta:t, Color:randomColor(), EsComando:'', Descripcion:'' });
+    const name = t.toLowerCase();
+    if(!findTagByName(name)) saveEntity('TAGS', { ID:uid(), Etiqueta:name, Color:randomColor(), EsComando:'', Descripcion:'' });
   });
 }
 function bindEditorEvents(note){
@@ -1449,6 +1466,17 @@ function insertTimestamp(){
   const txt = now.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
   document.execCommand('insertHTML', false, '<span style="color:var(--text-dim);font-size:.85em">🕐 '+txt+'</span>&nbsp;');
   scheduleSave();
+}
+/* Botón "#" — inserta el carácter y dispara la sugerencia A MANO en vez
+   de esperar a que el evento 'input' del tecleo la muestre sola. El
+   autocompletado normal depende de que el navegador dispare 'input'
+   correctamente en el contenteditable; en algunos dispositivos/teclados
+   eso no siempre pasa igual que en un <input> normal, así que este botón
+   es una entrada alterna que no depende de eso. */
+function insertHashAndSuggest(){
+  focusMainEditor();
+  document.execCommand('insertHTML', false, '#');
+  updateTagSuggestFromEditable();
 }
 /* ============ Autocompletado de #etiqueta — UN SOLO popup flotante
    reusado por cualquier campo de texto (cuerpo de la nota, campo
@@ -1955,7 +1983,7 @@ function openQuickDatoModal(){
       <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">
         "#etiqueta, lo que quieras" — se guarda solo en tu listado de Datos generales, ordenado por fecha. Ábrela después para agregarle más.
       </p>
-      <input type="text" id="quickDatoInput" placeholder="#cancion, ayer la vi">
+      <input type="text" id="quickDatoInput" value="#" placeholder="#cancion, ayer la vi">
       <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center">
         <button class="btn" onclick="saveQuickDato()">Guardar</button>
         <button class="mini-btn" style="width:auto" onclick="openNoteEditor(null);this.closest('.modal-overlay').remove()">Ver como nota completa →</button>
@@ -1966,6 +1994,7 @@ function openQuickDatoModal(){
   document.body.appendChild(overlay);
   const inp = document.getElementById('quickDatoInput');
   inp.focus();
+  inp.setSelectionRange(1,1); // cursor justo después del # que ya viene puesto
   inp.addEventListener('input', ()=>updateTagSuggestFromInput(inp));
   inp.addEventListener('keydown', e=>{ if(handleTagSuggestKeydown(e)) return; if(e.key==='Enter'){ e.preventDefault(); saveQuickDato(); } });
   inp.addEventListener('blur', ()=>scheduleHideGlobalTagSuggest());
@@ -1983,17 +2012,19 @@ async function saveQuickDato(){
   const tag = m ? m[1] : '';
   const texto = m ? m[2] : raw;
   const nb = await ensureDatosGeneralesNotebook();
+  // el # ya va en el título y en la etiqueta del campo Tags — repetirlo
+  // también dentro del cuerpo era mostrarlo tres veces por nada.
   const note = {
     ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(),
     Titulo: tag ? ('#'+tag) : raw.slice(0,40),
-    Contenido: '<p>'+(tag?('<b>#'+escHtml(tag)+'</b> '):'')+escHtml(texto)+'</p>',
+    Contenido: '<p>'+escHtml(texto)+'</p>',
     Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:''
   };
   await saveEntity('NOTAS', note);
   if(tag) ensureTagsRegistered('#'+tag);
   renderAll();
   showToast('✅ Guardado en Datos generales');
-  inp.value=''; inp.focus();
+  inp.value='#'; inp.focus(); inp.setSelectionRange(1,1);
   renderQuickDatoList();
 }
 function renderQuickDatoList(){
@@ -2883,7 +2914,7 @@ function pickFlagEmoji(btn, emoji){
   btn.classList.add('active');
 }
 function saveNewFlag(){
-  const name = (document.getElementById('flagName').value||'').trim().replace(/^#/,'');
+  const name = (document.getElementById('flagName').value||'').trim().replace(/^#/,'').toLowerCase();
   if(!name){ showToast('Ponle un nombre a la bandera'); return; }
   const color = document.getElementById('flagColor').value;
   const emoji = window._pickedFlagEmoji || FLAG_EMOJI_CHOICES[0];
@@ -2912,20 +2943,22 @@ function renderSettingsTags(){
 }
 function promptNewTag(){
   const n=prompt('Nombre de la etiqueta (sin #):'); if(!n) return;
-  const name = n.trim().replace(/^#/,''); if(!name) return;
+  const name = n.trim().replace(/^#/,'').toLowerCase(); if(!name) return;
   if(findTagByName(name)){ showToast('Ya existe la etiqueta #'+name); return; }
   saveEntity('TAGS',{ID:uid(),Etiqueta:name,Color:randomColor(),EsComando:'',Descripcion:''}).then(()=>{renderSettingsTags();renderSidebar();});
 }
 async function mergeDuplicateTagsUI(){
-  const seen = new Map(); const dupIds = [];
+  const seen = new Map(); const dupIds = []; const toLowercase = [];
   DATA.tags.forEach(t=>{
     const key = (t.Etiqueta||'').trim().toLowerCase(); if(!key) return;
-    if(seen.has(key)) dupIds.push(t.ID); else seen.set(key, t);
+    if(seen.has(key)) dupIds.push(t.ID);
+    else { seen.set(key, t); if(t.Etiqueta!==key) toLowercase.push(t); }
   });
-  if(!dupIds.length){ showToast('No hay etiquetas duplicadas'); return; }
-  const ok = confirm('Hay '+dupIds.length+' etiqueta(s) repetida(s) con el mismo nombre (por ejemplo, creadas por el navegador al mismo tiempo desde dos notas distintas) — se combinan en una sola. Tus notas no cambian, solo se limpia la lista de etiquetas.');
+  if(!dupIds.length && !toLowercase.length){ showToast('No hay etiquetas duplicadas'); return; }
+  const ok = confirm('Hay '+dupIds.length+' etiqueta(s) repetida(s) (contando también las que solo difieren en mayúsculas/minúsculas) — se combinan en una sola y se dejan en minúsculas. Tus notas no cambian, solo se limpia la lista de etiquetas.');
   if(!ok) return;
   for(const id of dupIds) await deleteEntity('TAGS', id);
+  for(const t of toLowercase){ t.Etiqueta = t.Etiqueta.toLowerCase(); await saveEntity('TAGS', t); }
   renderSettingsTags(); renderSidebar();
   showToast('Combinadas '+dupIds.length+' etiqueta(s) repetida(s)');
 }
@@ -2933,27 +2966,59 @@ async function mergeDuplicateTagsUI(){
    "#palabra" suelta dentro del texto — renombrar/eliminar tiene que tocar
    los dos, si no la etiqueta "vieja" reaparece sola la próxima vez que se
    guarde esa nota (ensureTagsRegistered la vuelve a detectar). */
+// Case-insensitive a propósito: notas viejas pueden tener "#Dengue" en el
+// cuerpo aunque el registro ya diga "dengue" — si no se buscara sin
+// importar mayúsculas, esas variantes nunca se encontrarían al renombrar.
 function notesUsingTag(name){
-  return DATA.notas.filter(n => parseTagsText(n.Tags).includes(name) || inlineTagsFromContent(n).includes(name));
+  const key = name.toLowerCase();
+  return DATA.notas.filter(n => parseTagsText(n.Tags).some(t=>t.toLowerCase()===key) || inlineTagsFromContent(n).some(t=>t.toLowerCase()===key));
 }
 function tagRegex(name){
-  return new RegExp('#'+name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-])','g');
+  return new RegExp('#'+name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-])','gi');
 }
 async function renameTagEverywhere(oldName, newName){
-  if(!newName || oldName===newName) return;
+  newName = newName.toLowerCase();
+  if(!newName || oldName.toLowerCase()===newName) return;
   const affected = notesUsingTag(oldName);
   for(const n of affected){
-    n.Tags = parseTagsText(n.Tags).map(t=>t===oldName?newName:t).join(' ');
+    n.Tags = parseTagsText(n.Tags).map(t=>t.toLowerCase()===oldName.toLowerCase()?newName:t).join(' ');
     n.Contenido = (n.Contenido||'').replace(tagRegex(oldName), '#'+newName);
     n.FechaEdicion = new Date().toISOString();
     await saveEntity('NOTAS', n);
   }
   if(affected.length) showToast('Renombrada en '+affected.length+' nota'+(affected.length>1?'s':''));
 }
+/* Renombrar directo desde el ✏️ del panel lateral, sin pasar por
+   Configuración. A diferencia de updateTagField (que parte de una fila
+   YA existente en el registro de etiquetas), aquí "t" puede ser una
+   etiqueta que solo vive suelta dentro del texto de las notas y nunca se
+   registró formalmente — si no hay fila en TAGS, se crea una nueva con
+   el nombre ya corregido en vez de fallar. */
+function startInlineTagEdit(name, btn){
+  const row = btn.closest('.tag-chip-row'); if(!row) return;
+  const span = row.querySelector('.tag-name-span'); if(!span) return;
+  span.outerHTML = `<input type="text" class="tag-inline-edit" value="${escAttr(name)}" style="flex:1;min-width:0" onclick="event.stopPropagation()" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();} if(event.key==='Escape'){this.dataset.cancel='1';this.blur();}" onblur="finishInlineTagEdit(this,'${escAttr(name)}')">`;
+  const input = row.querySelector('.tag-inline-edit');
+  input.focus(); input.select();
+}
+function finishInlineTagEdit(input, oldName){
+  if(input.dataset.cancel){ renderSidebar(); return; }
+  const newName = input.value.trim().replace(/^#/,'').toLowerCase();
+  if(!newName || newName===oldName){ renderSidebar(); return; }
+  renameTagFromSidebar(oldName, newName);
+}
+async function renameTagFromSidebar(oldName, newName){
+  await renameTagEverywhere(oldName, newName);
+  const t = findTagByName(oldName);
+  if(t){ t.Etiqueta = newName; await saveEntity('TAGS', t); }
+  else { await saveEntity('TAGS', { ID:uid(), Etiqueta:newName, Color:randomColor(), EsComando:'', Descripcion:'' }); }
+  renderAll();
+}
 async function removeTagEverywhere(name){
+  const key = name.toLowerCase();
   const affected = notesUsingTag(name);
   for(const n of affected){
-    n.Tags = parseTagsText(n.Tags).filter(t=>t!==name).join(' ');
+    n.Tags = parseTagsText(n.Tags).filter(t=>t.toLowerCase()!==key).join(' ');
     n.Contenido = (n.Contenido||'').replace(tagRegex(name), '');
     n.FechaEdicion = new Date().toISOString();
     await saveEntity('NOTAS', n);
@@ -2971,7 +3036,7 @@ function updateTagField(id, field, val){
   const t=DATA.tags.find(x=>x.ID===id); if(!t) return;
   if(field==='Etiqueta'){
     const oldName = t.Etiqueta;
-    const newName = val.trim().replace(/^#/,'');
+    const newName = val.trim().replace(/^#/,'').toLowerCase();
     if(newName && newName!==oldName) renameTagEverywhere(oldName, newName).then(()=>{ t.Etiqueta=newName; saveEntity('TAGS', t).then(()=>renderAll()); });
     return;
   }

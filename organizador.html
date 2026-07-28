@@ -182,6 +182,9 @@ table.rt-table td,table.rt-table th{border:1px solid var(--border);padding:6px 9
 table.rt-table tr:nth-child(even) td{background:var(--bg-soft)}
 table.rt-table td.cornell-cue-cell{font-weight:700;color:var(--accent);background:var(--accent-soft, var(--bg-soft));width:26%}
 table.cornell-table{border:2px solid var(--accent)}
+table.rt-table td.grid-row-header,table.rt-table td.grid-col-header{font-weight:700;color:var(--accent);background:var(--accent-soft, var(--bg-soft))}
+table.rt-table td.grid-corner{background:var(--bg-soft);opacity:.5}
+table.grid-table{border:2px solid var(--accent)}
 .cornell-bar{display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:12px;color:var(--accent);font-weight:600}
 
 @media (max-width:640px){
@@ -377,6 +380,16 @@ function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now
    quedarse solo en memoria como en las pruebas) — por eso nunca alcanzar
    ===  '1' a secas; hay que aceptar los dos. */
 function isCornellNote(note){ return note && (note.Cornell==='1' || note.Cornell===1); }
+/* "Tabla de etiquetas": a diferencia de Cornell (metadato note.Cornell),
+   esto se detecta directo del HTML guardado — si la nota tiene una
+   <table class="grid-table"> adentro, ya es de este tipo. No hace falta
+   una columna nueva en el Sheet: la marca vive en el propio contenido,
+   igual que "cornell-table" ya vive en el HTML de las notas Cornell. */
+function isGridNote(note){ return /<table[^>]*\bclass="[^"]*\bgrid-table\b/i.test((note&&note.Contenido)||''); }
+/* Convierte el texto de un encabezado de fila/columna en una etiqueta
+   válida — así "Vías respiratorias" se vuelve #vías_respiratorias solo,
+   sin que el usuario tenga que escribir el # a mano en cada encabezado. */
+function slugTag(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_áéíóúñ-]/g,''); }
 function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._toastT); window._toastT=setTimeout(()=>t.classList.remove('show'),2400); }
 
 /* ============ Setup inicial ============ */
@@ -529,11 +542,31 @@ function inlineTagsFromContent(note){
   const text = stripHtmlToText(note.Contenido||'');
   return Array.from(new Set((text.match(/#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ:-]+)/g)||[]).map(t=>t.slice(1))));
 }
+/* Los encabezados de una tabla de etiquetas cuentan como etiquetas de la
+   nota aunque no lleven "#" escrito — si no, filtrar/buscar por "dengue"
+   no encontraría la nota (inlineTagsFromContent solo agarra "#texto"
+   literal). Se escanean los encabezados directo, no a través de
+   extractFieldPairs, para que un encabezado cuente aunque sus celdas de
+   datos todavía estén vacías. */
+function gridTagsFromContent(note){
+  if(!isGridNote(note)) return [];
+  const container = document.createElement('div'); container.innerHTML = note.Contenido||'';
+  const table = container.querySelector('table.grid-table'); if(!table) return [];
+  const set = new Set();
+  Array.from(table.rows).forEach((row, ri)=>{
+    Array.from(row.cells).forEach((cell, ci)=>{
+      if(ri===0 && ci===0) return; // esquina, no es etiqueta
+      if(ri===0 || ci===0){ const tag = slugTag(cell.textContent); if(tag) set.add(tag); }
+    });
+  });
+  return Array.from(set);
+}
 function effectiveTags(note){
   const own = parseTagsText(note.Tags);
   const inh = notebookInherited(note.Notebook);
   const inline = inlineTagsFromContent(note);
-  return Array.from(new Set([...own, ...inh, ...inline]));
+  const grid = gridTagsFromContent(note);
+  return Array.from(new Set([...own, ...inh, ...inline, ...grid]));
 }
 function tagColor(name){
   const flag = allFlags().find(f=>f[0]===name);
@@ -611,6 +644,22 @@ function extractFieldPairs(note){
       const cells = r.querySelectorAll('td');
       return { cue: (cells[0]?cells[0].textContent:'').trim(), texto: cells[1]?cells[1].innerHTML:'' };
     });
+  }
+  if(isGridNote(note)){
+    const table = container.querySelector('table.grid-table'); if(!table) return [];
+    const rows = Array.from(table.rows); if(rows.length<2) return [];
+    const colTags = Array.from(rows[0].cells).slice(1).map(c=>slugTag(c.textContent));
+    const pairs = [];
+    rows.slice(1).forEach(row=>{
+      const rowTag = slugTag(row.cells[0] ? row.cells[0].textContent : '');
+      Array.from(row.cells).slice(1).forEach((cell, ci)=>{
+        const text = (cell.textContent||'').trim(); if(!text) return; // celda vacía todavía, sin tarjeta
+        const colTag = colTags[ci] || '';
+        const cue = ['#'+rowTag, colTag?('#'+colTag):null].filter(Boolean).join(' ');
+        pairs.push({ cue, texto: cell.innerHTML, extraTags: [rowTag, colTag].filter(Boolean) });
+      });
+    });
+    return pairs;
   }
   // "cf-cue" marca el párrafo como inicio de fila aunque el cue no sea un
   // "#campo" (ej. filas Cornell con solo una palabra suelta como cue) —
@@ -901,7 +950,8 @@ function chapterGroupHTML(n, pairs, highlight){
     const isField = /^#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+$/.test(p.cue);
     const label = isField ? p.cue : (p.cue || '—');
     const text = stripHtmlToText(p.texto).slice(0,90);
-    const innerTags = tagsInText(p.texto).map(t=>{
+    const cellTagNames = Array.from(new Set([...(p.extraTags||[]), ...tagsInText(p.texto)]));
+    const innerTags = cellTagNames.map(t=>{
       const hit = highlight.includes(t.toLowerCase());
       return `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(t)}">#${escHtml(t)}</span>`;
     }).join('');
@@ -1114,6 +1164,8 @@ function editorInnerHTML(note, isModal){
         <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableAddCol)" style="justify-content:flex-start">⊞▥ + columna</button>
         <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableDelRow)" style="justify-content:flex-start">⊟▤ − fila</button>
         <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableDelCol)" style="justify-content:flex-start">⊟▥ − columna</button>
+        <span style="border-top:1px solid var(--border);margin:2px 0"></span>
+        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(insertGridTable)" title="Tabla donde el encabezado de cada fila y columna se vuelve etiqueta sola de cada celda" style="justify-content:flex-start">🏷️▦ Tabla de etiquetas</button>
       </div>
     </span>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V, o insertar OCR) — se puede agrandar/achicar jalando la esquina">🖼️</button>
@@ -1546,6 +1598,30 @@ function insertRichTable(){
   document.execCommand('insertHTML', false, '<table class="rt-table">'+trs+'</table><p><br></p>');
   scheduleSave();
 }
+/* "Tabla de etiquetas": encabezado de fila (primera columna) y encabezado
+   de columna (primera fila) se convierten SOLOS en etiquetas de cada
+   celda de en medio — no hace falta escribir "#" en los encabezados. Cada
+   celda de en medio se vuelve una tarjeta en la vista de tarjetas, con
+   las etiquetas de su fila + columna + lo que escribas dentro con "#" +
+   las del cuaderno (estas últimas ya se ven arriba del capítulo). */
+function insertGridTable(){
+  const rowsStr = prompt('¿Cuántas filas de datos (sin contar el encabezado)?', '2'); if(rowsStr===null) return;
+  const colsStr = prompt('¿Cuántas columnas de datos (sin contar la columna de etiquetas)?', '2'); if(colsStr===null) return;
+  const rows = Math.max(1, parseInt(rowsStr,10)||2);
+  const cols = Math.max(1, parseInt(colsStr,10)||2);
+  focusMainEditor();
+  let html = '<table class="rt-table grid-table"><tr><td class="grid-corner"><br></td>';
+  for(let c=0;c<cols;c++) html += '<td class="grid-col-header"><br></td>';
+  html += '</tr>';
+  for(let r=0;r<rows;r++){
+    html += '<tr><td class="grid-row-header"><br></td>';
+    for(let c=0;c<cols;c++) html += '<td><br></td>';
+    html += '</tr>';
+  }
+  html += '</table><p><br></p>';
+  document.execCommand('insertHTML', false, html);
+  scheduleSave();
+}
 function currentTableFromSelection(){
   const sel = window.getSelection(); if(!sel.rangeCount) return null;
   let node = sel.anchorNode; if(node && node.nodeType===3) node = node.parentNode;
@@ -1563,6 +1639,7 @@ function tableAddRow(){
   for(let i=0;i<cols;i++){
     const c = row.insertCell(-1); c.innerHTML='<br>';
     if(t.classList.contains('cornell-table') && i===0) c.className='cornell-cue-cell';
+    if(t.classList.contains('grid-table') && i===0) c.className='grid-row-header';
   }
   scheduleSave();
 }
@@ -1580,7 +1657,10 @@ function addCornellRowDirect(){
 }
 function tableAddCol(){
   const t = currentTableFromSelection(); if(!t){ showToast('Pon el cursor dentro de una tabla'); return; }
-  Array.from(t.rows).forEach(row=>{ const c=row.insertCell(-1); c.innerHTML='<br>'; });
+  Array.from(t.rows).forEach((row,ri)=>{
+    const c=row.insertCell(-1); c.innerHTML='<br>';
+    if(t.classList.contains('grid-table') && ri===0) c.className='grid-col-header';
+  });
   scheduleSave();
 }
 function tableDelRow(){

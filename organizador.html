@@ -368,7 +368,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Estatua de la Libertad';
+const BUILD_VERSION = 'Torre Eiffel';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -743,8 +743,12 @@ function autoRouteNotebook(note){
    secciones son <div> fijos en el HTML (no se recrean en cada
    renderSidebar(), solo su contenido interno) así que basta aplicar el
    estado guardado UNA vez al arrancar. */
-let sbCollapsed = new Set();
-try{ sbCollapsed = new Set(JSON.parse(localStorage.getItem('org_sb_collapsed')||'[]')); }catch(e){}
+const SB_SECTIONS = ['cuaderno','banderas','etiquetas','busquedas','checklists'];
+let sbCollapsed = new Set(SB_SECTIONS); // plegadas por defecto la primera vez
+try{
+  const saved = localStorage.getItem('org_sb_collapsed');
+  if(saved!==null) sbCollapsed = new Set(JSON.parse(saved)); // ya se guardó una preferencia real, se respeta
+}catch(e){}
 function applySbCollapsedState(){
   document.querySelectorAll('.sb-section').forEach(sec=>{
     sec.classList.toggle('collapsed', sbCollapsed.has(sec.dataset.sb));
@@ -1226,6 +1230,8 @@ function editorInnerHTML(note, isModal){
     <span class="sep"></span>
     <button class="icon-btn" id="btnMark" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark')" title="Resaltar (toca de nuevo el mismo color para quitarlo)">🖍️</button>
     <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
+    <span class="sep"></span>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openAIDrawer()" title="Asistente IA">✨</button>
     <span class="sep"></span>
     ${allFlags().map(([t,emoji,label,color])=>`<button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('${t}')" title="Insertar #${escAttr(t)} (${escAttr(label)}) aquí donde está el cursor" style="color:${color}">${emoji}</button>`).join('')}
     <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">

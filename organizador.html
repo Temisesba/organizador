@@ -87,8 +87,11 @@ header .spacer{flex:1}
 
 .layout{display:flex;flex:1;min-height:0}
 aside{width:230px;flex:none;border-right:1px solid var(--border);background:var(--bg-elev);overflow-y:auto;padding:10px}
-aside h3{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin:16px 0 6px}
-aside h3:first-child{margin-top:2px}
+aside h3{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin:16px 0 6px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;gap:6px}
+.sb-section:first-child h3{margin-top:2px}
+.sb-arrow{font-size:10px;transition:transform .15s}
+.sb-section.collapsed .sb-arrow{transform:rotate(-90deg)}
+.sb-section.collapsed .sb-content{display:none}
 .nb-item,.tag-chip-row{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:13.5px}
 .nb-item:hover,.tag-chip-row:hover{background:var(--bg-soft)}
 .nb-item.active{background:var(--accent);color:var(--accent-text)}
@@ -303,6 +306,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" onclick="cycleTheme()" title="Cambiar tema" id="btnTheme">🌓</button>
     <button class="icon-btn no-print" onclick="openAIDrawer()" title="Asistente IA">✨</button>
     <button class="icon-btn no-print" onclick="openChecklists()" title="Checklists">☑️</button>
+    <button class="icon-btn no-print" onclick="openTrashUI()" title="Papelera">🗑️</button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
     <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel">Sync</span></button>
     <button class="btn secondary no-print" onclick="openQuickDatoModal()" title="Anotar rápido: #etiqueta, lo que sea — se va a tu listado de Datos generales">+ Dato general</button>
@@ -311,25 +315,43 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 
   <div class="layout">
     <aside id="sidebar">
-      <h3>Cuaderno activo</h3>
-      <div class="nb-item" id="nbNone" onclick="setActiveNotebook('')">📥 Inbox <span class="cnt" id="inboxCount"></span></div>
-      <div id="notebookList"></div>
-      <button class="mini-btn" onclick="promptNewNotebook()">+ nuevo cuaderno</button>
+      <div class="sb-section" data-sb="cuaderno">
+        <h3 onclick="toggleSbSection('cuaderno')">Cuaderno activo <span class="sb-arrow">▾</span></h3>
+        <div class="sb-content">
+          <div class="nb-item" id="nbNone" onclick="setActiveNotebook('')">📥 Inbox <span class="cnt" id="inboxCount"></span></div>
+          <div id="notebookList"></div>
+          <button class="mini-btn" onclick="promptNewNotebook()">+ nuevo cuaderno</button>
+        </div>
+      </div>
 
-      <h3>Banderas rápidas</h3>
-      <div id="flagCloud"></div>
+      <div class="sb-section" data-sb="banderas">
+        <h3 onclick="toggleSbSection('banderas')">Banderas rápidas <span class="sb-arrow">▾</span></h3>
+        <div class="sb-content"><div id="flagCloud"></div></div>
+      </div>
 
-      <h3>Etiquetas</h3>
-      <div id="tagFilterBar"></div>
-      <div id="tagCloud"></div>
+      <div class="sb-section" data-sb="etiquetas">
+        <h3 onclick="toggleSbSection('etiquetas')">Etiquetas <span class="sb-arrow">▾</span></h3>
+        <div class="sb-content">
+          <div id="tagFilterBar"></div>
+          <div id="tagCloud"></div>
+        </div>
+      </div>
 
-      <h3>Búsquedas guardadas</h3>
-      <div id="savedSearchList"></div>
-      <button class="mini-btn" onclick="promptSaveSearch()">+ guardar búsqueda actual</button>
+      <div class="sb-section" data-sb="busquedas">
+        <h3 onclick="toggleSbSection('busquedas')">Búsquedas guardadas <span class="sb-arrow">▾</span></h3>
+        <div class="sb-content">
+          <div id="savedSearchList"></div>
+          <button class="mini-btn" onclick="promptSaveSearch()">+ guardar búsqueda actual</button>
+        </div>
+      </div>
 
-      <h3>Checklists</h3>
-      <div id="tplQuickList"></div>
-      <button class="mini-btn" onclick="openChecklists()">Ver todos →</button>
+      <div class="sb-section" data-sb="checklists">
+        <h3 onclick="toggleSbSection('checklists')">Checklists <span class="sb-arrow">▾</span></h3>
+        <div class="sb-content">
+          <div id="tplQuickList"></div>
+          <button class="mini-btn" onclick="openChecklists()">Ver todos →</button>
+        </div>
+      </div>
     </aside>
 
     <main id="viewArea"></main>
@@ -346,7 +368,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Cristo Redentor';
+const BUILD_VERSION = 'Chichén Itzá';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -574,9 +596,16 @@ function tagColor(name){
   const t = DATA.tags.find(x=>x.Etiqueta===name);
   return (t && t.Color) || '#8a5a3b';
 }
+/* Notas movidas a la papelera (n.Papelera con fecha) quedan fuera de
+   TODO lo que el usuario ve normalmente — cuadernos, Inbox, búsqueda,
+   nubes de etiquetas, tablas por campo/bloque — pero siguen existiendo en
+   DATA.notas (y en el Sheet) hasta que se restauren o se borren para
+   siempre desde 🗑️ Papelera. getNote(id) sigue viendo TODAS las notas,
+   trashed o no, porque la propia Papelera necesita poder encontrarlas. */
+function activeNotes(){ return DATA.notas.filter(n=>!n.Papelera); }
 function allTagsWithCounts(){
   const counts = {};
-  DATA.notas.forEach(n=>effectiveTags(n).forEach(t=>counts[t]=(counts[t]||0)+1));
+  activeNotes().forEach(n=>effectiveTags(n).forEach(t=>counts[t]=(counts[t]||0)+1));
   return Object.entries(counts).sort((a,b)=>b[1]-a[1]);
 }
 /* soporte de etiquetas tipo #clave:valor para columnas dinámicas en tabla */
@@ -590,7 +619,7 @@ function keyValueTags(note){
 }
 function allDynamicKeys(){
   const keys = new Set();
-  DATA.notas.forEach(n=>Object.keys(keyValueTags(n)).forEach(k=>keys.add(k)));
+  activeNotes().forEach(n=>Object.keys(keyValueTags(n)).forEach(k=>keys.add(k)));
   return Array.from(keys);
 }
 
@@ -616,7 +645,7 @@ function getNoteBlocks(note){
       ownTags: own, effectiveTags: Array.from(new Set([...own, ...inherited])) };
   }).filter(b=>b.text);
 }
-function allBlocks(){ return DATA.notas.flatMap(n=>getNoteBlocks(n)); }
+function allBlocks(){ return activeNotes().flatMap(n=>getNoteBlocks(n)); }
 function blockKeyValueTags(block){
   const out = {};
   block.effectiveTags.forEach(t=>{
@@ -688,7 +717,7 @@ function getNoteFields(note){
   return fields;
 }
 function allEntities(){
-  return DATA.notas.map(n=>{
+  return activeNotes().map(n=>{
     const origin = Array.from(new Set([...parseTagsText(n.Tags), ...notebookInherited(n.Notebook)]));
     return { note:n, entity: n.Titulo||'(sin título)', origin, fields: getNoteFields(n) };
   }).filter(e=>Object.keys(e.fields).length);
@@ -708,6 +737,24 @@ function autoRouteNotebook(note){
 }
 
 /* ============ Sidebar ============ */
+/* Títulos del panel lateral (Cuaderno activo, Banderas, Etiquetas…)
+   plegables — el estado se recuerda por nombre de sección, no por índice,
+   así no se desordena si algún día se agrega/quita una sección. Las
+   secciones son <div> fijos en el HTML (no se recrean en cada
+   renderSidebar(), solo su contenido interno) así que basta aplicar el
+   estado guardado UNA vez al arrancar. */
+let sbCollapsed = new Set();
+try{ sbCollapsed = new Set(JSON.parse(localStorage.getItem('org_sb_collapsed')||'[]')); }catch(e){}
+function applySbCollapsedState(){
+  document.querySelectorAll('.sb-section').forEach(sec=>{
+    sec.classList.toggle('collapsed', sbCollapsed.has(sec.dataset.sb));
+  });
+}
+function toggleSbSection(key){
+  if(sbCollapsed.has(key)) sbCollapsed.delete(key); else sbCollapsed.add(key);
+  localStorage.setItem('org_sb_collapsed', JSON.stringify(Array.from(sbCollapsed)));
+  applySbCollapsedState();
+}
 function toggleSidebar(){
   const el = document.getElementById('sidebar');
   el.classList.toggle('open'); // comportamiento en celular (desliza)
@@ -728,13 +775,13 @@ function renderSidebar(){
   renderTagFilterBar();
   const nbList = document.getElementById('notebookList');
   nbList.innerHTML = DATA.notebooks.filter(nb=>nb.Nombre!==MEJORAS_NOTEBOOK).map(nb=>{
-    const cnt = DATA.notas.filter(n=>n.Notebook===nb.Nombre).length;
+    const cnt = activeNotes().filter(n=>n.Notebook===nb.Nombre).length;
     return `<div class="nb-item ${activeNotebook===nb.Nombre?'active':''}" onclick="setActiveNotebook('${escAttr(nb.Nombre)}')">
       <span class="nb-dot" style="background:${nb.Color||'#8a5a3b'}"></span>${escHtml(nb.Nombre)}${nb.TagAuto?' <small title="se auto-enruta desde el Inbox con #'+escAttr(nb.TagAuto)+'">🔀</small>':''}<span class="cnt">${cnt}</span>
     </div>`;
   }).join('');
   document.getElementById('nbNone').classList.toggle('active', activeNotebook==='');
-  document.getElementById('inboxCount').textContent = DATA.notas.filter(n=>!n.Notebook).length;
+  document.getElementById('inboxCount').textContent = activeNotes().filter(n=>!n.Notebook).length;
 
   const fc = document.getElementById('flagCloud');
   fc.innerHTML = allFlags().map(([t,emoji,label,color])=>{
@@ -852,7 +899,7 @@ function toggleModalFullscreen(btn){
 
 function getFilteredSortedNotes(query){
   const q = (query!==undefined ? query : (document.getElementById('searchInput').value||'')).toLowerCase().trim();
-  let notes = DATA.notas.filter(n=>{
+  let notes = activeNotes().filter(n=>{
     if(activeNotebook && n.Notebook!==activeNotebook) return false;
     if(activeTagFilters.size){
       const et = effectiveTags(n);
@@ -1044,7 +1091,7 @@ function initSplitResizerOnce(){
 /* ============ Editor de notas ============ */
 function newBlankNote(){
   const inherited = notebookInherited(activeNotebook);
-  return { ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(), Titulo:'', Contenido:'', Tags:inherited.join(' '), Notebook:activeNotebook, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'' };
+  return { ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(), Titulo:'', Contenido:'', Tags:inherited.join(' '), Notebook:activeNotebook, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'' };
 }
 /* Si la nota que se estaba editando se queda vacía (nunca se le puso
    título ni contenido) se descarta sola en vez de quedar como basura en
@@ -1827,10 +1874,57 @@ function copyNoteUI(){
   const text = (note.Titulo||'')+'\n\n'+(note.Contenido||'');
   navigator.clipboard && navigator.clipboard.writeText(text).then(()=>showToast('Copiado al portapapeles')).catch(()=>showToast('No se pudo copiar'));
 }
+/* Borrar una nota ya NO la quita del Sheet — la marca con fecha en
+   "Papelera" y activeNotes() la esconde de todas partes; sigue existiendo
+   hasta que se restaure o se borre definitivamente desde 🗑️ Papelera. Se
+   purgan solas después de 30 días (autoPurgeOldTrash, en boot()). */
 function deleteNoteUI(id){
   if(!id){ closeNoteEditor(); return; }
-  if(!confirm('¿Eliminar esta nota?')) return;
-  deleteEntity('NOTAS', id).then(()=>{ closeNoteEditor(); editingNoteId=null; renderAll(); showToast('Nota eliminada'); });
+  if(!confirm('¿Mover esta nota a la papelera? Se puede recuperar desde ahí.')) return;
+  const note = getNote(id); if(!note) return;
+  note.Papelera = new Date().toISOString();
+  saveEntity('NOTAS', note).then(()=>{ closeNoteEditor(); editingNoteId=null; renderAll(); showToast('🗑️ Movida a la papelera'); });
+}
+function trashedNotes(){ return DATA.notas.filter(n=>n.Papelera).sort((a,b)=>String(b.Papelera).localeCompare(String(a.Papelera))); }
+function openTrashUI(){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(560px,100%)">
+    <div class="modal-head"><b>🗑️ Papelera</b><span><button class="icon-btn" onclick="emptyTrashUI()" title="Eliminar definitivamente todo lo de la papelera">🧹 Vaciar</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
+    <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 16px 8px">Las notas eliminadas quedan aquí 30 días antes de borrarse solas para siempre.</p>
+    <div class="modal-body" id="trashBody"></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  renderTrashList();
+}
+function renderTrashList(){
+  const body = document.getElementById('trashBody'); if(!body) return;
+  const items = trashedNotes();
+  body.innerHTML = items.map(n=>`<div class="settings-row">
+      <span style="flex:1;font-size:13px">${escHtml(n.Titulo||'(sin título)')}<br><span style="color:var(--text-dim);font-size:11px">eliminada ${fmtDate(n.Papelera)}</span></span>
+      <button class="icon-btn" onclick="restoreNoteUI('${n.ID}')" title="Restaurar">↩️</button>
+      <button class="icon-btn" onclick="permanentlyDeleteNoteUI('${n.ID}')" title="Eliminar definitivamente">🗑️</button>
+    </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">La papelera está vacía</p>';
+}
+function restoreNoteUI(id){
+  const note = getNote(id); if(!note) return;
+  note.Papelera = '';
+  saveEntity('NOTAS', note).then(()=>{ renderTrashList(); renderAll(); showToast('Nota restaurada'); });
+}
+function permanentlyDeleteNoteUI(id){
+  if(!confirm('¿Eliminar definitivamente? Esto ya no se puede deshacer.')) return;
+  deleteEntity('NOTAS', id).then(()=>{ renderTrashList(); showToast('Eliminada para siempre'); });
+}
+function emptyTrashUI(){
+  const items = trashedNotes(); if(!items.length) return;
+  if(!confirm('¿Eliminar definitivamente las '+items.length+' notas de la papelera? Esto ya no se puede deshacer.')) return;
+  Promise.all(items.map(n=>deleteEntity('NOTAS', n.ID))).then(()=>{ renderTrashList(); showToast('Papelera vacía'); });
+}
+/* Limpieza automática — igual que Gmail/Drive, 30 días en la papelera y
+   se borran solas para siempre; se corre una vez al arrancar. */
+function autoPurgeOldTrash(){
+  const cutoff = Date.now() - 30*24*60*60*1000;
+  const old = DATA.notas.filter(n=>n.Papelera && new Date(n.Papelera).getTime() < cutoff);
+  old.forEach(n=>deleteEntity('NOTAS', n.ID));
 }
 
 /* ============ + Dato general: captura ultrarrápida "#etiqueta, texto" ==
@@ -1889,7 +1983,7 @@ async function saveQuickDato(){
 function renderQuickDatoList(){
   const wrap = document.getElementById('quickDatoList'); if(!wrap) return;
   const nb = DATA.notebooks.find(n=>n.Nombre==='Datos generales');
-  const items = nb ? DATA.notas.filter(n=>n.Notebook==='Datos generales').sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha))).slice(0,8) : [];
+  const items = nb ? activeNotes().filter(n=>n.Notebook==='Datos generales').sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha))).slice(0,8) : [];
   wrap.innerHTML = items.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteEditor('${n.ID}')">
       <span style="flex:1;font-size:13px">${escHtml(n.Titulo)} <span style="color:var(--text-dim)">— ${escHtml(noteSnippetText(n).slice(0,40))}</span></span>
       <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
@@ -2890,7 +2984,22 @@ function renderSettingsConnection(){
   body.innerHTML = `<p><b>Versión</b><br><span style="font-size:13px">🗺️ ${escHtml(BUILD_VERSION)}</span> <span style="color:var(--text-dim);font-size:12px">— dime qué lugar ves aquí para saber si estamos viendo lo mismo</span></p>
     <p><b>Sheet vinculado</b><br><span style="font-size:12px;color:var(--text-dim);word-break:break-all">${escHtml(SHEET_ID)}</span></p>
     <p><b>Web App</b><br><span style="font-size:12px;color:var(--text-dim);word-break:break-all">${escHtml(GAS_URL)}</span></p>
-    <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();reopenSetup()">Cambiar Sheet vinculado</button>`;
+    <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();reopenSetup()">Cambiar Sheet vinculado</button>
+    <button class="btn secondary" onclick="checkDuplicateNoteIds()" title="Revisa si dos notas quedaron con el mismo ID — eso puede hacer que borrar una borre la otra sin querer" style="margin-left:8px">🔍 Revisar notas duplicadas</button>`;
+}
+/* Diagnóstico: si dos notas terminaron con el mismo ID (posible resabio
+   de una versión vieja con la carrera de guardado en blur), borrar una
+   por su ID puede arrastrar a la otra también — es justo lo que reportó
+   el usuario ("eliminé la vacía pero me eliminó la no vacía y la
+   vacía"). Solo informa, no toca nada solo — separar IDs a mano es
+   arriesgado sin ver primero cuáles son. */
+function checkDuplicateNoteIds(){
+  const seen = new Map(); const dupes = [];
+  DATA.notas.forEach(n=>{ if(seen.has(n.ID)) dupes.push(n); else seen.set(n.ID, n); });
+  if(!dupes.length){ showToast('✅ No hay notas con ID repetido'); return; }
+  alert('⚠️ Se encontraron '+dupes.length+' nota(s) con el mismo ID que otra — borrar una de estas puede borrar también a la otra:\n\n'
+    + dupes.map(n=>'• '+(n.Titulo||'(sin título)')+' — '+fmtDate(n.Fecha)).join('\n')
+    + '\n\nAvísame para ayudarte a separarlas con seguridad (ahora que borrar manda a la papelera, ya no se pierde nada mientras tanto).');
 }
 /* Apartado abierto para ir dejando ideas/sugerencias de la app conforme se
    te ocurran, aunque no me las digas de una vez — se guardan como notas
@@ -2929,7 +3038,7 @@ async function addMejora(){
 }
 function renderMejorasList(){
   const wrap = document.getElementById('mejorasList'); if(!wrap) return;
-  const items = DATA.notas.filter(n=>n.Notebook==='Mejoras Organizador').sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha)));
+  const items = activeNotes().filter(n=>n.Notebook==='Mejoras Organizador').sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha)));
   wrap.innerHTML = items.map(n=>`<div class="settings-row">
       <span style="flex:1;font-size:13px;cursor:pointer" onclick="openNoteEditor('${n.ID}')">${escHtml(noteSnippetText(n).slice(0,90))}</span>
       <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
@@ -2958,8 +3067,9 @@ function boot(){
   document.getElementById('vwTable').classList.toggle('active', currentView==='table');
   document.getElementById('vwSplit').classList.toggle('active', currentView==='split');
   syncSortUI();
+  applySbCollapsedState();
   renderAll();
-  syncNow(false).then(migrateLocalFlagsAndSearchesOnce);
+  syncNow(false).then(migrateLocalFlagsAndSearchesOnce).then(autoPurgeOldTrash);
   initSplitResizerOnce();
   initEditorResizerOnce();
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }

@@ -353,24 +353,18 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <div class="spacer"></div>
     <button class="icon-btn no-print" onclick="openHelpSheet()" title="Comandos y etiquetas (/ayuda)">❔</button>
     <button class="icon-btn no-print" onclick="openBlockTables()" title="Tablas por bloque">🧩</button>
-    <button class="icon-btn no-print" onclick="cycleTheme()" title="Cambiar tema" id="btnTheme">🌓</button>
     <button class="icon-btn no-print" onclick="openAIDrawer()" title="Asistente IA">✨</button>
-    <button class="icon-btn no-print" onclick="openChecklists()" title="Checklists">☑️</button>
-    <button class="icon-btn no-print" onclick="openTrashUI()" title="Papelera">🗑️</button>
+    <button class="icon-btn no-print" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
     <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel">Sync</span></button>
-    <button class="btn secondary no-print" onclick="openQuickDatoModal()" title="Anotar rápido: #etiqueta, lo que sea — se va a tu listado de Datos generales">+ Dato general</button>
-    <button class="btn secondary no-print" onclick="openFieldTemplatePicker()" title="Llenar una plantilla de campos (Diario, Metas, Somatometría…) con un formulario directo, sin abrir una nota primero">+ Plantilla</button>
-    <button class="icon-btn no-print" onclick="openTimeLogModal()" title="Registro de tiempo — qué estás haciendo ahora">⏱</button>
-    <button class="icon-btn no-print" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
-    <button class="btn no-print" onclick="openNoteEditor(null)">+ Nota</button>
+    <button class="btn no-print" onclick="openCreateMenu()" title="Nueva nota, dato, plantilla o registro de tiempo">+</button>
   </header>
 
   <div id="reminderBanner" class="no-print"></div>
   <div class="layout">
     <aside id="sidebar">
       <div class="sb-section" data-sb="cuaderno">
-        <h3 onclick="toggleSbSection('cuaderno')">Cuaderno activo <span class="sb-arrow">▾</span></h3>
+        <h3 onclick="toggleSbSection('cuaderno')">Cuadernos <span class="sb-arrow">▾</span></h3>
         <div class="sb-content">
           <div class="nb-item" id="nbNone" onclick="setActiveNotebook('')">📥 Inbox <span class="cnt" id="inboxCount"></span></div>
           <div id="notebookList"></div>
@@ -422,7 +416,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Petra III';
+const BUILD_VERSION = 'Angkor Wat';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -451,6 +445,7 @@ function initGoogleAuth(){
       googleAccessToken = resp.access_token;
       showToast('✅ Google Calendar conectado');
       renderCalendarView();
+      renderGCalConnectionStatus();
     }
   });
 }
@@ -514,7 +509,7 @@ function renderCalendarView(){
   });
   authBar.innerHTML = googleAccessToken
     ? `<span style="color:var(--accent);font-size:12px">✅ Conectado</span>`
-    : `<button class="btn" onclick="connectGoogleCalendar()">🔗 Conectar Google Calendar</button>`;
+    : `<span style="color:var(--text-dim);font-size:12px">No conectado — ve a Configuración → Conexión para conectarlo</span>`;
   if(_calViewMode==='month') renderCalMonthGrid();
   else if(_calViewMode==='week') renderCalWeekGrid();
   else renderCalDayView();
@@ -1282,6 +1277,11 @@ function toggleViewFullscreen(){
 function toggleModalFullscreen(btn){
   const modal = btn.closest('.modal'); if(!modal) return;
   const on = modal.classList.toggle('fullscreen');
+  /* el width:min(...) inline que traen varios modales gana por
+     especificidad sobre .modal.fullscreen{width:100vw} — sin esto la
+     pantalla completa solo crecía de alto, nunca de ancho. */
+  if(on){ modal.dataset.prevWidth = modal.style.width; modal.style.width = ''; }
+  else { modal.style.width = modal.dataset.prevWidth || ''; }
   btn.textContent = on ? '🗗' : '⛶';
   btn.title = on ? 'Salir de pantalla completa' : 'Pantalla completa';
 }
@@ -1625,6 +1625,7 @@ function editorInnerHTML(note, isModal){
       <input type="text" id="noteTags" value="${escAttr(note.Tags)}" placeholder="#etiquetas separadas por espacio">
     </div>
     <input type="color" id="noteColor" value="${note.Color||'#8a5a3b'}" title="Color de la nota">
+    <input type="datetime-local" id="noteFecha" value="${toDatetimeLocal(new Date(note.Fecha))}" title="Fecha de la nota — con esta se ubica en Calendario, así que una tarea con fecha futura aparece ese día" style="width:auto">
     <button class="icon-btn" onclick="pickFilesForNote()" title="Vincular archivo(s)">📎</button>
     <button class="icon-btn" onclick="pickFolderForNote()" title="Vincular carpeta">📁</button>
   </div>
@@ -1768,6 +1769,8 @@ function collectNoteFromForm(){
   if(tagsEl) base.Tags = tagsEl.value;
   const colorEl = document.getElementById('noteColor');
   if(colorEl) base.Color = colorEl.value;
+  const fechaEl = document.getElementById('noteFecha');
+  if(fechaEl && fechaEl.value){ const d=new Date(fechaEl.value); if(!isNaN(d)) base.Fecha = d.toISOString(); }
   const mainEl = document.getElementById('mainArea');
   if(mainEl) base.Contenido = normalizeContentHTML(mainEl.innerHTML);
   return base;
@@ -1817,7 +1820,7 @@ function ensureTagsRegistered(tagsStr){
   });
 }
 function bindEditorEvents(note){
-  ['noteTitle','noteNotebook','noteTags','noteColor'].forEach(id=>{
+  ['noteTitle','noteNotebook','noteTags','noteColor','noteFecha'].forEach(id=>{
     const el = document.getElementById(id); if(!el) return;
     el.addEventListener('input', scheduleSave);
     el.addEventListener('change', scheduleSave);
@@ -2390,6 +2393,24 @@ function autoPurgeOldTrash(){
   old.forEach(n=>deleteEntity('NOTAS', n.ID));
 }
 
+/* Un solo botón "+" en el encabezado en vez de cuatro por separado
+   (Nota, Dato general, Plantilla, Registro de tiempo) — menos ruido
+   visual, mismo alcance. */
+function openCreateMenu(){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(320px,100%)">
+    <div class="modal-head"><b>+ Nuevo</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openNoteEditor(null)">📝 Nota normal</button>
+      <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openQuickDatoModal()">⚡ Dato general</button>
+      <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openFieldTemplatePicker()">🏷️ Plantilla</button>
+      <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openTimeLogModal()">⏱ Registro de tiempo</button>
+    </div>
+  </div>`;
+  overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
 /* ============ + Dato general: captura ultrarrápida "#etiqueta, texto" ==
    cada una se guarda como su propia notita dentro del cuaderno especial
    "Datos generales", ordenadas por fecha — el modal se queda abierto para
@@ -2422,6 +2443,18 @@ function openQuickDatoModal(){
 async function ensureDatosGeneralesNotebook(){
   let nb = DATA.notebooks.find(n=>n.Nombre==='Datos generales');
   if(!nb) nb = await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:'Datos generales', TagsHeredados:'', Color:'#7d5ba6', TagAuto:'' });
+  return nb;
+}
+/* Las notas creadas con el llenado rápido de plantillas de campos
+   (Diario, Somatometría…) van siempre a este cuaderno fijo, sin
+   importar en cuál estabas navegando cuando le diste "+" → Plantilla —
+   si no, un Diario de hoy podía terminar metido dentro de "Tesis" solo
+   por ser el cuaderno activo en ese momento. Mismo patrón que "Datos
+   generales" para +Dato general. */
+const REGISTRO_PERSONAL_NOTEBOOK = 'Registro Personal';
+async function ensureRegistroPersonalNotebook(){
+  let nb = DATA.notebooks.find(n=>n.Nombre===REGISTRO_PERSONAL_NOTEBOOK);
+  if(!nb) nb = await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:REGISTRO_PERSONAL_NOTEBOOK, TagsHeredados:'', Color:'#3d7a4f', TagAuto:'' });
   return nb;
 }
 async function saveQuickDato(){
@@ -3435,6 +3468,7 @@ function renderFieldTablesBody(){
     <datalist id="fieldNamesDatalist">${known.map(k=>'<option value="'+escAttr(k)+'">').join('')}</datalist>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
       <input type="text" id="ftNombre" placeholder="Nombre de la tabla (ej. Por morfología)" style="flex:1;min-width:140px">
+      <input type="text" id="ftCarpeta" placeholder="carpeta (opcional, ej. Salud)" style="flex:.8;min-width:110px">
       <input type="text" id="ftCampo" list="fieldNamesDatalist" placeholder="campo (opcional, ej. morfo)" style="flex:1;min-width:120px">
       <input type="text" id="ftValor" placeholder="que contenga (ej. virus)" style="flex:1;min-width:120px">
       <input type="text" id="ftCols" list="fieldNamesDatalist" placeholder="columnas (ej. definicion, tx)" style="flex:1.4;min-width:160px">
@@ -3447,34 +3481,118 @@ function renderFieldTablesBody(){
       <button class="btn secondary" onclick="openFieldTemplateModal()">+ Nueva</button>
     </div>
     <div id="fieldTemplatesList"></div>`;
-  document.getElementById('fieldTablesList').innerHTML = DATA.bloque_tablas.filter(bt=>bt.Columnas).map(bt=>`
-    <div class="tpl-card">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <b>${escHtml(bt.Nombre)}</b>
-        <span style="color:var(--text-dim);font-size:12px">${bt.CampoFiltro?('#'+escHtml(bt.CampoFiltro)+(bt.ValorFiltro?' ~ "'+escHtml(bt.ValorFiltro)+'"':'')):(bt.ValorFiltro?('"'+escHtml(bt.ValorFiltro)+'" en cualquier campo'):'todas')}</span>
-        <button class="icon-btn" onclick="exportFieldTablePDF('${bt.ID}')" title="Exportar a PDF">🖨️</button>
-        <button class="icon-btn" onclick="deleteEntity('BLOQUE_TABLAS','${bt.ID}').then(renderFieldTablesBody)">🗑️</button>
-      </div>
-      ${fieldTableRenderHTML(bt)}
-    </div>`).join('') || '<p style="color:var(--text-dim)">Sin tablas todavía — crea una arriba.</p>';
+  renderFieldTablesList();
   document.getElementById('fieldTemplatesList').innerHTML = DATA.plantillas_prop.map(pt=>`
     <div class="settings-row">
       <span style="flex:1">${escHtml(pt.Nombre)} ${pt.UsaPersona?'<span class="tag-badge" title="Por persona">👤</span>':''}${pt.Recordatorio?'<span class="tag-badge" title="Recordatorio diario">⏰</span>':''}<br><span style="color:var(--text-dim);font-size:12px">${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')}</span></span>
       <button class="icon-btn" onclick="openFieldTemplateModal('${pt.ID}')" title="Editar plantilla">✏️</button>
-      <button class="icon-btn" onclick="deleteEntity('PLANTILLAS_PROP','${pt.ID}').then(renderFieldTablesBody)">🗑️</button>
+      <button class="icon-btn" onclick="deleteFieldTemplateUI('${pt.ID}')">🗑️</button>
     </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas — créalas aquí y luego insértalas desde 🏷️ en el editor de la nota, o con "+ Plantilla" en el encabezado.</p>';
 }
 async function saveFieldTable(){
   const nombre = document.getElementById('ftNombre').value.trim();
+  const carpeta = document.getElementById('ftCarpeta').value.trim();
   const campo = document.getElementById('ftCampo').value.trim().replace(/^#/,'').toLowerCase();
   const valor = document.getElementById('ftValor').value.trim();
   const cols = document.getElementById('ftCols').value.trim();
   if(!nombre || !cols){ showToast('Ponle nombre y al menos una columna'); return; }
   const btn = document.getElementById('ftCrearBtn');
   await withSavingFeedback(btn, async ()=>{
-    await saveEntity('BLOQUE_TABLAS', { ID:uid(), Nombre:nombre, TagFiltro:'', CampoFiltro:campo, ValorFiltro:valor, Columnas:cols });
+    await saveEntity('BLOQUE_TABLAS', { ID:uid(), Nombre:nombre, TagFiltro:'', CampoFiltro:campo, ValorFiltro:valor, Columnas:cols, Carpeta:carpeta });
     renderFieldTablesBody();
   });
+}
+function deleteFieldTableUI(id){
+  if(!confirm('¿Eliminar esta tabla guardada? No borra tus notas, solo esta vista.')) return;
+  deleteEntity('BLOQUE_TABLAS', id).then(renderFieldTablesBody);
+}
+function openEditFieldTableModal(id){
+  const bt = DATA.bloque_tablas.find(x=>x.ID===id); if(!bt) return;
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(460px,100%)">
+    <div class="modal-head"><b>✏️ Editar tabla</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Nombre</label>
+      <input type="text" id="btEditNombre" value="${escAttr(bt.Nombre)}">
+      <label style="font-size:12px;font-weight:600;display:block;margin:10px 0 4px">Carpeta (opcional, para agrupar)</label>
+      <input type="text" id="btEditCarpeta" value="${escAttr(bt.Carpeta||'')}" placeholder="ej. Salud">
+      <label style="font-size:12px;font-weight:600;display:block;margin:10px 0 4px">Campo (opcional)</label>
+      <input type="text" id="btEditCampo" value="${escAttr(bt.CampoFiltro||'')}" placeholder="ej. dx">
+      <label style="font-size:12px;font-weight:600;display:block;margin:10px 0 4px">Que contenga (opcional)</label>
+      <input type="text" id="btEditValor" value="${escAttr(bt.ValorFiltro||'')}">
+      <label style="font-size:12px;font-weight:600;display:block;margin:10px 0 4px">Columnas</label>
+      <input type="text" id="btEditCols" value="${escAttr(bt.Columnas||'')}">
+      <div style="margin-top:14px"><button class="btn" onclick="saveEditFieldTable('${id}',this)">Guardar</button></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('btEditNombre').focus();
+}
+function saveEditFieldTable(id, btn){
+  const bt = DATA.bloque_tablas.find(x=>x.ID===id); if(!bt) return;
+  const nombre = document.getElementById('btEditNombre').value.trim();
+  const cols = document.getElementById('btEditCols').value.trim();
+  if(!nombre || !cols){ showToast('Ponle nombre y al menos una columna'); return; }
+  const updated = Object.assign({}, bt, {
+    Nombre: nombre,
+    Carpeta: document.getElementById('btEditCarpeta').value.trim(),
+    CampoFiltro: document.getElementById('btEditCampo').value.trim().replace(/^#/,'').toLowerCase(),
+    ValorFiltro: document.getElementById('btEditValor').value.trim(),
+    Columnas: cols
+  });
+  saveEntity('BLOQUE_TABLAS', updated).then(()=>{
+    btn.closest('.modal-overlay').remove();
+    renderFieldTablesBody();
+  });
+}
+/* Cada tabla guardada se puede plegar (empieza plegada — con varias
+   tablas parecidas, como el "pcr"/"pcr1" que se fue acumulando, la
+   lista completa desplegada se vuelve muy larga) y agrupar en carpetas
+   opcionales (ej. "Salud") para cuando hay varias sobre el mismo tema
+   (Somatometría, Diario…). Las tablas sin carpeta se muestran sueltas,
+   sin envolverlas en un "Sin carpeta" que nadie pidió. */
+window._btCollapsed = window._btCollapsed || {};
+window._btFolderCollapsed = window._btFolderCollapsed || {};
+function isBtCollapsed(id){ return window._btCollapsed.hasOwnProperty(id) ? window._btCollapsed[id] : true; }
+function toggleBtCollapsed(id){ window._btCollapsed[id] = !isBtCollapsed(id); renderFieldTablesList(); }
+function toggleBtFolder(name){ window._btFolderCollapsed[name] = !window._btFolderCollapsed[name]; renderFieldTablesList(); }
+function btCardHTML(bt){
+  const collapsed = isBtCollapsed(bt.ID);
+  return `<div class="tpl-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleBtCollapsed('${bt.ID}')">
+      <span style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;overflow:hidden">
+        <span style="flex:none">${collapsed?'▸':'▾'}</span>
+        <b style="white-space:nowrap">${escHtml(bt.Nombre)}</b>
+        <span style="color:var(--text-dim);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${bt.CampoFiltro?('#'+escHtml(bt.CampoFiltro)+(bt.ValorFiltro?' ~ "'+escHtml(bt.ValorFiltro)+'"':'')):(bt.ValorFiltro?('"'+escHtml(bt.ValorFiltro)+'" en cualquier campo'):'todas')}</span>
+      </span>
+      <span style="display:flex;gap:2px;flex:none">
+        <button class="icon-btn" onclick="event.stopPropagation();openEditFieldTableModal('${bt.ID}')" title="Editar">✏️</button>
+        <button class="icon-btn" onclick="event.stopPropagation();exportFieldTablePDF('${bt.ID}')" title="Exportar a PDF">🖨️</button>
+        <button class="icon-btn" onclick="event.stopPropagation();deleteFieldTableUI('${bt.ID}')" title="Eliminar">🗑️</button>
+      </span>
+    </div>
+    ${collapsed?'':fieldTableRenderHTML(bt)}
+  </div>`;
+}
+function renderFieldTablesList(){
+  const el = document.getElementById('fieldTablesList'); if(!el) return;
+  const tables = DATA.bloque_tablas.filter(bt=>bt.Columnas);
+  const byFolder = {}; const folderOrder = []; const noFolder = [];
+  tables.forEach(bt=>{
+    const f = (bt.Carpeta||'').trim();
+    if(!f){ noFolder.push(bt); return; }
+    if(!byFolder[f]){ byFolder[f]=[]; folderOrder.push(f); }
+    byFolder[f].push(bt);
+  });
+  const folderHTML = folderOrder.map(f=>{
+    const collapsed = !!window._btFolderCollapsed[f];
+    return `<div class="fill-section">
+      <div class="fill-section-title" style="cursor:pointer" onclick="toggleBtFolder('${escAttr(f)}')">${collapsed?'▸':'▾'} 📁 ${escHtml(f)} <span style="color:var(--text-dim);font-weight:400;font-size:12px">(${byFolder[f].length})</span></div>
+      ${collapsed?'':byFolder[f].map(bt=>btCardHTML(bt)).join('')}
+    </div>`;
+  }).join('');
+  const noFolderHTML = noFolder.map(bt=>btCardHTML(bt)).join('');
+  el.innerHTML = (folderHTML + noFolderHTML) || '<p style="color:var(--text-dim)">Sin tablas todavía — crea una arriba.</p>';
 }
 /* Escribe de vuelta el valor editado en la tabla hacia el campo real de la
    nota de origen (tabla Cornell o párrafos "#campo"/valor, según cómo esté
@@ -3503,6 +3621,13 @@ function handleFieldTableCellEdit(td){
   const ok = updateEntityField(noteId, field, td.textContent);
   if(ok){ const n=getNote(noteId); showToast('✏️ Actualizado en "'+(n?n.Titulo:'')+'"'); }
 }
+window._btSort = window._btSort || {};
+function toggleBtSort(id, col){
+  const cur = window._btSort[id];
+  const dir = (cur && cur.col===col && cur.dir==='asc') ? 'desc' : 'asc';
+  window._btSort[id] = { col, dir };
+  renderFieldTablesList();
+}
 function fieldTableRenderHTML(bt){
   const campo = (bt.CampoFiltro||'').toLowerCase();
   const valor = (bt.ValorFiltro||'').toLowerCase();
@@ -3511,7 +3636,18 @@ function fieldTableRenderHTML(bt){
   if(campo) rows = rows.filter(e=>(e.fields[campo]||'').toLowerCase().includes(valor));
   else if(valor) rows = rows.filter(e=>Object.values(e.fields).some(v=>(v||'').toLowerCase().includes(valor)));
   if(!rows.length) return '<p style="color:var(--text-dim);font-size:13px;margin-top:8px">Sin resultados todavía.</p>';
-  const head = '<th>'+(campo?escHtml(campo):'Nota')+'</th>' + cols.map(c=>'<th>'+escHtml(c)+'</th>').join('');
+  const sortState = window._btSort[bt.ID];
+  if(sortState){
+    rows = rows.slice().sort((a,b)=>{
+      const av = sortState.col==='__title__' ? a.entity : (a.fields[sortState.col]||'');
+      const bv = sortState.col==='__title__' ? b.entity : (b.fields[sortState.col]||'');
+      const cmp = String(av).localeCompare(String(bv), 'es', {numeric:true});
+      return sortState.dir==='asc' ? cmp : -cmp;
+    });
+  }
+  const arrow = c => sortState && sortState.col===c ? (sortState.dir==='asc'?' ▲':' ▼') : '';
+  const head = '<th style="cursor:pointer" onclick="toggleBtSort(\''+bt.ID+'\',\'__title__\')">'+(campo?escHtml(campo):'Nota')+arrow('__title__')+'</th>'
+    + cols.map(c=>'<th style="cursor:pointer" onclick="toggleBtSort(\''+bt.ID+'\',\''+escAttr(c)+'\')">'+escHtml(c)+arrow(c)+'</th>').join('');
   const body = rows.map(e=>{
     const originTxt = e.origin.length ? ' <span style="color:var(--text-dim);font-weight:400">('+e.origin.map(t=>'#'+escHtml(t)).join(' ')+')</span>' : '';
     return '<tr><td class="title-cell" onclick="openNoteEditor(\''+e.note.ID+'\')">'+escHtml(e.entity)+originTxt+'</td>'
@@ -3681,9 +3817,11 @@ async function saveQuickFieldFill(pt, campos, overlay){
       const val = (document.getElementById('qffField'+i).value||'').trim();
       return '<tr><td class="cornell-cue-cell">#'+escHtml(c)+'</td><td>'+(val?'<p>'+escHtml(val).replace(/\n/g,'</p><p>')+'</p>':'<br>')+'</td></tr>';
     }).join('');
+    const nb = await ensureRegistroPersonalNotebook();
     const note = newBlankNote();
     note.ID = uid();
     note.Titulo = titulo;
+    note.Notebook = nb.Nombre;
     note.Contenido = '<table class="rt-table cornell-table">'+trs+'</table>';
     note.Cornell = '1';
     note.PlantillaPropID = pt.ID;
@@ -3968,6 +4106,7 @@ function openSettings(){
       <button class="active" onclick="settingsTab(this,'tags')">Etiquetas</button>
       <button onclick="settingsTab(this,'notebooks')">Cuadernos</button>
       <button onclick="settingsTab(this,'personas')">👤 Personas</button>
+      <button onclick="settingsTab(this,'plantillas')">Plantillas</button>
       <button onclick="settingsTab(this,'appearance')">Apariencia</button>
       <button onclick="settingsTab(this,'connection')">Conexión</button>
       <button onclick="settingsTab(this,'mejoras')">💡 Mejoras</button>
@@ -3983,9 +4122,40 @@ function settingsTab(btn, tab){
   if(tab==='tags') renderSettingsTags();
   if(tab==='notebooks') renderSettingsNotebooks();
   if(tab==='personas') renderSettingsPersonas();
+  if(tab==='plantillas') renderSettingsPlantillas();
   if(tab==='appearance') renderSettingsAppearance();
   if(tab==='connection') renderSettingsConnection();
   if(tab==='mejoras') renderSettingsMejoras();
+}
+/* Todas las plantillas (checklist y de campos) juntas y editables desde
+   un solo lugar — antes cada tipo solo se editaba desde su propio
+   modal (Checklists / 🧩 Tablas), lo cual tiene sentido para crearlas
+   ahí mismo donde se usan, pero "editar todo" ya vive en Configuración
+   para lo demás (etiquetas, cuadernos, personas), así que esto solo
+   reutiliza los mismos modales de edición que ya existían. */
+function renderSettingsPlantillas(){
+  const body = document.getElementById('settingsBody'); if(!body) return;
+  const checklistRows = DATA.plantillas.map(p=>`
+    <div class="settings-row">
+      <span style="flex:1">☑️ ${escHtml(p.Nombre)} ${p.Recordatorio?'<span class="tag-badge" title="Recordatorio diario">⏰</span>':''}</span>
+      <button class="icon-btn" onclick="openTemplateModal('${p.ID}')" title="Editar">✏️</button>
+      <button class="icon-btn" onclick="deleteTemplateUI('${p.ID}')" title="Eliminar">🗑️</button>
+    </div>`).join('');
+  const fieldRows = DATA.plantillas_prop.map(pt=>`
+    <div class="settings-row">
+      <span style="flex:1">🏷️ ${escHtml(pt.Nombre)} ${pt.UsaPersona?'<span class="tag-badge" title="Por persona">👤</span>':''}${pt.Recordatorio?'<span class="tag-badge" title="Recordatorio diario">⏰</span>':''}</span>
+      <button class="icon-btn" onclick="openFieldTemplateModal('${pt.ID}')" title="Editar">✏️</button>
+      <button class="icon-btn" onclick="deleteFieldTemplateUI('${pt.ID}')" title="Eliminar">🗑️</button>
+    </div>`).join('');
+  body.innerHTML = `
+    <p style="font-weight:700;margin:0 0 6px">☑️ Checklists</p>
+    ${checklistRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin checklists — créalos desde ☑️ en el panel lateral.</p>'}
+    <p style="font-weight:700;margin:16px 0 6px">🏷️ Plantillas de campos</p>
+    ${fieldRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas de campos — créalas desde "+" → Plantilla.</p>'}`;
+}
+function deleteFieldTemplateUI(id){
+  if(!confirm('¿Eliminar esta plantilla de campos? Las notas que ya creaste con ella no se borran, solo la plantilla.')) return;
+  deleteEntity('PLANTILLAS_PROP', id).then(()=>{ renderSettingsPlantillas(); renderFieldTablesBody(); renderReminderBanner(); });
 }
 /* Personas: lista reutilizable (como Cuadernos) para plantillas "por
    persona" (ej. Somatometría de varios familiares) — evita que cada
@@ -3998,7 +4168,7 @@ function renderSettingsPersonas(){
     <div class="settings-row">
       <input type="color" value="${p.Color||'#8a5a3b'}" onchange="updatePersonaField('${p.ID}','Color',this.value)">
       <input type="text" value="${escAttr(p.Nombre)}" onchange="updatePersonaField('${p.ID}','Nombre',this.value)">
-      <button class="icon-btn" onclick="deleteEntity('PERSONAS','${p.ID}').then(renderSettingsPersonas)">🗑️</button>
+      <button class="icon-btn" onclick="deletePersonaUI('${p.ID}')">🗑️</button>
     </div>`).join('') || '<p style="color:var(--text-dim)">Sin personas todavía — agrégalas aquí, o desde "+ nueva persona" al llenar una plantilla que las use.</p>';
 }
 function promptNewPersona(){
@@ -4006,6 +4176,10 @@ function promptNewPersona(){
   return saveEntity('PERSONAS', { ID:uid(), Nombre:name.trim(), Color:randomColor() }).then(p=>{ renderSettingsPersonas(); return p; });
 }
 function updatePersonaField(id, field, val){ const p=DATA.personas.find(x=>x.ID===id); if(!p) return; p[field]=val; saveEntity('PERSONAS', p); }
+function deletePersonaUI(id){
+  if(!confirm('¿Eliminar esta persona? Las notas que ya guardaste con su nombre no se borran ni se les quita el campo #persona.')) return;
+  deleteEntity('PERSONAS', id).then(renderSettingsPersonas);
+}
 /* Las banderas rápidas (⚑★⚠ + las que agregues) se guardan en este mismo
    dispositivo (localStorage), no en el Sheet — son un atajo de la
    interfaz, no un dato de tus notas; las notas que crean solo llevan la
@@ -4210,7 +4384,16 @@ function renderSettingsConnection(){
     <p><b>Web App</b><br><span style="font-size:12px;color:var(--text-dim);word-break:break-all">${escHtml(GAS_URL)}</span></p>
     <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();reopenSetup()">Cambiar Sheet vinculado</button>
     <button class="btn secondary" onclick="checkDuplicateNoteIds()" title="Revisa si dos notas quedaron con el mismo ID — eso puede hacer que borrar una borre la otra sin querer" style="margin-left:8px">🔍 Revisar notas duplicadas</button>
-    <button class="btn secondary" onclick="seedLegacyTemplates()" title="Crea plantillas Cornell, un checklist y cuadernos con auto-ruteo basados en tu sistema anterior (hábitos, diario, metas, salud…) — no duplica si ya los tienes" style="margin-left:8px">🌱 Traer plantillas del sistema anterior</button>`;
+    <button class="btn secondary" onclick="seedLegacyTemplates()" title="Crea plantillas Cornell, un checklist y cuadernos con auto-ruteo basados en tu sistema anterior (hábitos, diario, metas, salud…) — no duplica si ya los tienes" style="margin-left:8px">🌱 Traer plantillas del sistema anterior</button>
+    <p style="margin-top:16px"><b>🗑️ Papelera</b></p>
+    <button class="btn secondary" onclick="openTrashUI()">Ver papelera</button>
+    <p style="margin-top:16px"><b>📅 Google Calendar</b><br><span id="gcalStatusText" style="font-size:12px;color:var(--text-dim)"></span></p>
+    <button class="btn secondary" onclick="connectGoogleCalendar()">🔗 Conectar Google Calendar</button>`;
+  renderGCalConnectionStatus();
+}
+function renderGCalConnectionStatus(){
+  const el = document.getElementById('gcalStatusText'); if(!el) return;
+  el.textContent = googleAccessToken ? '✅ Conectado' : 'No conectado';
 }
 /* Diagnóstico: si dos notas terminaron con el mismo ID (posible resabio
    de una versión vieja con la carrera de guardado en blur), borrar una
@@ -4351,13 +4534,6 @@ function renderMejorasList(){
 
 /* ============ Tema ============ */
 function setTheme(t){ document.documentElement.setAttribute('data-theme', t==='light'?'':t); localStorage.setItem('org_theme', t); }
-function cycleTheme(){
-  const order=['light','dark','eink'];
-  const cur = localStorage.getItem('org_theme')||'light';
-  setTheme(order[(order.indexOf(cur)+1)%order.length]);
-  showToast('Tema: '+(order[(order.indexOf(cur)+1)%order.length]));
-}
-
 /* ============ Arranque ============ */
 function boot(){
   document.getElementById('setupScreen').classList.add('hidden');

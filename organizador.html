@@ -78,6 +78,13 @@ header .spacer{flex:1}
 .view-switch button{border:none;border-radius:0;padding:7px 10px;background:var(--bg-elev)}
 .view-switch button.active{background:var(--accent);color:var(--accent-text)}
 
+.tag-filter-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:4px 2px 8px;font-size:11.5px}
+.tag-filter-bar .count{color:var(--text-dim)}
+.tag-filter-mode{display:flex;border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.tag-filter-mode button{border:none;padding:3px 9px;background:var(--bg-elev);font-size:11px;font-weight:700}
+.tag-filter-mode button.active{background:var(--accent);color:var(--accent-text)}
+.tag-filter-clear{border:none;background:none;color:var(--text-dim);text-decoration:underline;font-size:11px;padding:0}
+
 .layout{display:flex;flex:1;min-height:0}
 aside{width:230px;flex:none;border-right:1px solid var(--border);background:var(--bg-elev);overflow-y:auto;padding:10px}
 aside h3{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin:16px 0 6px}
@@ -302,6 +309,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
       <div id="flagCloud"></div>
 
       <h3>Etiquetas</h3>
+      <div id="tagFilterBar"></div>
       <div id="tagCloud"></div>
 
       <h3>Checklists</h3>
@@ -325,6 +333,7 @@ const FLAG_TAGS = [['task','⚑ tarea','#4a6fa5'],['importante','★ importante'
 let currentView = localStorage.getItem('org_view') || 'cards';
 let activeNotebook = localStorage.getItem('org_active_notebook') || '';
 let activeTagFilters = new Set();
+let tagFilterMode = localStorage.getItem('org_tag_filter_mode') || 'AND';
 let sortState = { col:'Fecha', dir:'desc' };
 let editingNoteId = null;
 let editingCornell = false;
@@ -629,6 +638,7 @@ function promptNewNotebook(){
 function randomColor(){ const c=['#8a5a3b','#3d7a4f','#4a6fa5','#b3432b','#7d5ba6','#c9a227']; return c[Math.floor(Math.random()*c.length)]; }
 
 function renderSidebar(){
+  renderTagFilterBar();
   const nbList = document.getElementById('notebookList');
   nbList.innerHTML = DATA.notebooks.map(nb=>{
     const cnt = DATA.notas.filter(n=>n.Notebook===nb.Nombre).length;
@@ -662,6 +672,21 @@ function renderSidebar(){
   tq.innerHTML = DATA.plantillas.slice(0,5).map(p=>`<div class="mini-btn" style="margin-bottom:4px" onclick="openFillModal('${p.ID}')">▶ ${escHtml(p.Nombre)}</div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas</p>';
 }
 function toggleTagFilter(t){ activeTagFilters.has(t) ? activeTagFilters.delete(t) : activeTagFilters.add(t); renderSidebar(); renderMain(); }
+function setTagFilterMode(mode){ tagFilterMode=mode; localStorage.setItem('org_tag_filter_mode',mode); renderSidebar(); renderMain(); }
+function clearTagFilters(){ activeTagFilters.clear(); renderSidebar(); renderMain(); }
+function renderTagFilterBar(){
+  const bar = document.getElementById('tagFilterBar'); if(!bar) return;
+  const n = activeTagFilters.size;
+  if(!n){ bar.innerHTML=''; return; }
+  bar.innerHTML = `<div class="tag-filter-bar">
+    <span class="count">${n} etiqueta${n>1?'s':''}</span>
+    ${n>1 ? `<div class="tag-filter-mode">
+      <button class="${tagFilterMode==='AND'?'active':''}" onclick="setTagFilterMode('AND')" title="Nota debe tener TODAS las etiquetas elegidas">Y (todas)</button>
+      <button class="${tagFilterMode==='OR'?'active':''}" onclick="setTagFilterMode('OR')" title="Nota con CUALQUIERA de las etiquetas elegidas">O (cualquiera)</button>
+    </div>` : ''}
+    <button class="tag-filter-clear" onclick="clearTagFilters()">quitar</button>
+  </div>`;
+}
 
 /* Banderas rápidas: si hay una nota abierta, marcan/quitan la etiqueta de
    esa nota; si no hay ninguna abierta, actúan como filtro rápido lateral. */
@@ -690,7 +715,9 @@ function getFilteredSortedNotes(){
     if(activeNotebook && n.Notebook!==activeNotebook) return false;
     if(activeTagFilters.size){
       const et = effectiveTags(n);
-      for(const t of activeTagFilters) if(!et.includes(t)) return false;
+      const arr = Array.from(activeTagFilters);
+      const match = tagFilterMode==='OR' ? arr.some(t=>et.includes(t)) : arr.every(t=>et.includes(t));
+      if(!match) return false;
     }
     if(q){
       const hay = (n.Titulo+' '+noteSnippetText(n)+' '+n.Tags).toLowerCase();

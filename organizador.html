@@ -346,7 +346,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Angkor Wat';
+const BUILD_VERSION = 'Cristo Redentor';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2069,16 +2069,33 @@ function bindPasteImages(ta){
       }
     }
     const html = e.clipboardData && e.clipboardData.getData('text/html');
-    if(html && /<table[\s>]/i.test(html)){
-      const rows = parsePastedTableRows(html);
-      if(rows && rows.length){ e.preventDefault(); pasteTableRows(rows); }
+    let rows = (html && /<table[\s>]/i.test(html)) ? parsePastedTableRows(html) : null;
+    if(!rows){
+      const text = e.clipboardData && e.clipboardData.getData('text/plain');
+      rows = parsePastedPlainTextRows(text);
     }
+    if(rows && rows.length){ e.preventDefault(); pasteTableRows(rows); }
   });
 }
 function parsePastedTableRows(html){
   const div = document.createElement('div'); div.innerHTML = html;
   const table = div.querySelector('table'); if(!table) return null;
   return Array.from(table.rows).map(row => Array.from(row.cells).map(cell => (cell.innerText||cell.textContent||'').trim()));
+}
+/* No todo lo que "se ve como tabla" trae una <table> real en el
+   portapapeles — copiar de un PDF, de texto plano, o de muchas apps solo
+   deja texto separado por tabulaciones (así es como Excel/Sheets/Numbers
+   TAMBIÉN guardan su copia de respaldo en texto plano, además de la
+   <table> HTML). Si no hay tabla HTML pero el texto trae tabulaciones, se
+   trata cada línea como una fila y cada tabulación como un salto de
+   columna — funciona igual de bien para pegar sobre una tabla Cornell
+   (columna 1 = pista, columna 2 = desarrollo) aunque el origen nunca fue
+   una tabla de verdad. */
+function parsePastedPlainTextRows(text){
+  if(!text || !text.includes('\t')) return null;
+  const lines = text.split(/\r\n|\r|\n/).filter(l=>l.trim()!=='');
+  if(!lines.length) return null;
+  return lines.map(line => line.split('\t').map(c=>c.trim()));
 }
 /* Si el cursor ya está dentro de una de nuestras tablas al pegar, la
    tabla copiada se escribe ENCIMA de esa (empezando en la celda donde

@@ -167,6 +167,7 @@ table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{backgrou
 .rich-editor h2{font-size:1.25em;font-weight:800;margin:.5em 0 .2em}
 .rich-editor h3{font-size:1.1em;font-weight:700;margin:.5em 0 .2em}
 .rich-editor blockquote{border-left:3px solid var(--accent);padding-left:10px;color:var(--text-dim);margin:.4em 0}
+.rich-editor p.cf-cue{font-weight:700;color:var(--accent);margin-bottom:0}
 .rich-editor code{background:var(--bg-soft);padding:1px 5px;border-radius:4px;font-family:ui-monospace,Consolas,monospace}
 .rich-editor img{max-width:100%;border-radius:8px;margin:.4em 0;display:block;border:1px solid var(--border);resize:both;overflow:auto;min-width:60px;min-height:40px}
 .rich-editor .rt-check{display:flex;align-items:flex-start;gap:6px;margin:2px 0}
@@ -583,10 +584,15 @@ function extractFieldPairs(note){
       return { cue: (cells[0]?cells[0].textContent:'').trim(), texto: cells[1]?cells[1].innerHTML:'' };
     });
   }
+  // "cf-cue" marca el párrafo como inicio de fila aunque el cue no sea un
+  // "#campo" (ej. filas Cornell con solo una palabra suelta como cue) —
+  // sin esta marca, una fila así se perdía dentro del valor de la fila
+  // anterior al apagar y volver a prender el modo Cornell.
   const pairs = []; let cur=null;
   Array.from(container.children).forEach(el=>{
     const t = (el.textContent||'').trim();
-    if(/^#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+$/.test(t)){
+    const isRowStart = el.classList.contains('cf-cue') || /^#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+$/.test(t);
+    if(isRowStart){
       if(cur) pairs.push(cur);
       cur = { cue:t, texto:'' };
     } else if(cur){
@@ -1007,14 +1013,13 @@ function toggleCornell(){
   const currentHTML = mainEl ? mainEl.innerHTML : (note.Contenido||'');
   const pairs = extractFieldPairs(note); // lee lo que ya haya, sea tabla o párrafos
   if(editingCornell){
-    // apagar: cada fila se vuelve "#campo" + valor en párrafos seguidos —
-    // así getNoteFields() los sigue leyendo igual en la vista normal.
-    note.Contenido = pairs.length ? pairs.map(p=>{
-      const isField = /^#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+$/.test(p.cue);
-      if(isField) return '<p>'+escHtml(p.cue)+'</p><p>'+(p.texto||'<br>')+'</p>';
-      if(p.cue) return '<p><b>'+escHtml(p.cue)+':</b> '+(p.texto||'')+'</p>';
-      return '<p>'+(p.texto||'<br>')+'</p>';
-    }).join('') : (currentHTML || '<p><br></p>');
+    // apagar: cada fila se vuelve dos párrafos seguidos — cue (marcado con
+    // la clase "cf-cue" para que se reconozca como inicio de fila aunque
+    // no sea un "#campo") y su valor. Así ninguna fila se pierde ni se
+    // mezcla con la de al lado al volver a prender el modo Cornell.
+    note.Contenido = pairs.length ? pairs.map(p=>
+      '<p class="cf-cue">'+(p.cue?escHtml(p.cue):'<br>')+'</p><p>'+(p.texto||'<br>')+'</p>'
+    ).join('') : (currentHTML || '<p><br></p>');
     note.Cornell='';
   } else {
     // encender: si ya había pares "#campo"/valor escritos seguidos, cada

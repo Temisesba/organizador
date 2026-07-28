@@ -379,7 +379,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Acrópolis';
+const BUILD_VERSION = 'Coliseo de Verona';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2239,7 +2239,12 @@ async function saveQuickDato(){
     const m = raw.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)\s*[,:]?\s*(.*)$/);
     const tag = m ? m[1] : '';
     const texto = m ? m[2] : raw;
-    const nb = await ensureDatosGeneralesNotebook();
+    // si la etiqueta coincide con el auto-ruteo de algún cuaderno (ej.
+    // "#momento" → Momentos felices), la nota se va directo ahí en vez de
+    // caer siempre en Datos generales — mismo mecanismo que ya usa el
+    // Inbox normal (autoRouteNotebook), aplicado aquí también.
+    const autoNb = tag ? DATA.notebooks.find(nb2 => nb2.TagAuto && String(nb2.TagAuto).replace(/^#/,'')===tag) : null;
+    const nb = autoNb || await ensureDatosGeneralesNotebook();
     // el # ya va en el título y en la etiqueta del campo Tags — repetirlo
     // también dentro del cuerpo era mostrarlo tres veces por nada.
     const note = {
@@ -2251,7 +2256,7 @@ async function saveQuickDato(){
     await saveEntity('NOTAS', note);
     if(tag) ensureTagsRegistered('#'+tag);
     renderAll();
-    showToast('✅ Guardado en Datos generales');
+    showToast(autoNb ? ('📥→📓 Guardado en "'+autoNb.Nombre+'"') : '✅ Guardado en Datos generales');
     inp.value='#'; inp.focus(); inp.setSelectionRange(1,1);
     renderQuickDatoList();
   });
@@ -3552,7 +3557,8 @@ function renderSettingsConnection(){
     <p><b>Sheet vinculado</b><br><span style="font-size:12px;color:var(--text-dim);word-break:break-all">${escHtml(SHEET_ID)}</span></p>
     <p><b>Web App</b><br><span style="font-size:12px;color:var(--text-dim);word-break:break-all">${escHtml(GAS_URL)}</span></p>
     <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();reopenSetup()">Cambiar Sheet vinculado</button>
-    <button class="btn secondary" onclick="checkDuplicateNoteIds()" title="Revisa si dos notas quedaron con el mismo ID — eso puede hacer que borrar una borre la otra sin querer" style="margin-left:8px">🔍 Revisar notas duplicadas</button>`;
+    <button class="btn secondary" onclick="checkDuplicateNoteIds()" title="Revisa si dos notas quedaron con el mismo ID — eso puede hacer que borrar una borre la otra sin querer" style="margin-left:8px">🔍 Revisar notas duplicadas</button>
+    <button class="btn secondary" onclick="seedLegacyTemplates()" title="Crea plantillas Cornell, un checklist y cuadernos con auto-ruteo basados en tu sistema anterior (hábitos, diario, metas, salud…) — no duplica si ya los tienes" style="margin-left:8px">🌱 Traer plantillas del sistema anterior</button>`;
 }
 /* Diagnóstico: si dos notas terminaron con el mismo ID (posible resabio
    de una versión vieja con la carrera de guardado en blur), borrar una
@@ -3567,6 +3573,81 @@ function checkDuplicateNoteIds(){
   alert('⚠️ Se encontraron '+dupes.length+' nota(s) con el mismo ID que otra — borrar una de estas puede borrar también a la otra:\n\n'
     + dupes.map(n=>'• '+(n.Titulo||'(sin título)')+' — '+fmtDate(n.Fecha)).join('\n')
     + '\n\nAvísame para ayudarte a separarlas con seguridad (ahora que borrar manda a la papelera, ya no se pierde nada mientras tanto).');
+}
+/* Mapa de "qué traer del sistema anterior" (36 hojas de Excel) hacia lo
+   que Organizador ya sabe hacer — Cornell para lo que es "varios campos
+   con nombre por entrada", checklist para lo que es sí/no diario,
+   cuadernos con TagAuto para captura rápida que se auto-enruta sola
+   (escribes "#momento, ..." en +Dato general y ya cae en el cuaderno
+   correcto sin tener que elegirlo a mano). Idempotente: no duplica nada
+   que ya exista por nombre, así que se puede correr más de una vez sin
+   miedo. Deliberadamente NO incluye el Chismógrafo (cuestionario largo,
+   muy personal, no encaja bien en ninguna de las estructuras de la app)
+   ni nombres de personas específicas del diario original (esos campos
+   los agrega el usuario mismo si los quiere, no es algo que deba
+   adivinar/hardcodear yo).  */
+async function seedLegacyTemplates(){
+  const ok = confirm('Esto crea varias plantillas de campos (Cornell), un checklist de hábito diario, y cuadernos con auto-ruteo, basados en tu sistema anterior. No borra ni cambia nada que ya tengas. ¿Continuar?');
+  if(!ok) return;
+  let created = 0;
+
+  const notebooksToCreate = [
+    { Nombre:'Momentos felices', TagAuto:'momento', Color:'#e8a33d' },
+    { Nombre:'Sueños', TagAuto:'sueño', Color:'#6a5acd' },
+    { Nombre:'Cumpleaños', TagAuto:'cumple', Color:'#d1477a' },
+  ];
+  for(const nb of notebooksToCreate){
+    if(!DATA.notebooks.find(n=>n.Nombre===nb.Nombre)){
+      await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:nb.Nombre, TagsHeredados:'', Color:nb.Color, TagAuto:nb.TagAuto });
+      created++;
+    }
+  }
+
+  const fieldTemplates = [
+    { Nombre:'Seguimiento diario', campos:['estado_de_animo','nivel_energia','gratitud','comida','notas'] },
+    { Nombre:'Diario', campos:['que_hice','sentimiento','gratitud','victorias','derrotas','cosas_buenas','cosas_malas'] },
+    { Nombre:'Revisión semanal', campos:['lecciones_aprendidas','que_me_hizo_feliz','que_no_me_hizo_feliz','esta_semana_gane','que_debo_mejorar','metas_siguiente_semana'] },
+    { Nombre:'Revisión mensual', campos:['lecciones','habitos_a_adoptar','victorias','cosas_que_funcionaron','cosas_a_corregir','calificacion_del_mes','aprendizajes'] },
+    { Nombre:'Meta', campos:['objetivo','motivacion','plan_de_accion','puntos_faciles','puntos_dificiles','recompensa'] },
+    { Nombre:'Plan de emergencia', campos:['riesgo_miedo','que_puedo_hacer_ahora','que_hago_si_pasa'] },
+    { Nombre:'Somatometría', campos:['peso','presion','glucosa','sintomas','medicamentos','notas'] },
+    { Nombre:'Reunión grupal', campos:['pendientes','compromisos','acuerdos','adicional'] },
+    { Nombre:'Nombre (investigación)', campos:['caracteristicas','de_donde'] },
+  ];
+  for(const t of fieldTemplates){
+    if(!DATA.plantillas_prop.find(p=>p.Nombre===t.Nombre)){
+      await saveEntity('PLANTILLAS_PROP', { ID:uid(), Nombre:t.Nombre, CamposJSON: JSON.stringify(t.campos) });
+      created++;
+    }
+  }
+
+  if(!DATA.plantillas.find(p=>p.Nombre==='Hábito diario')){
+    const items = parseTemplateText(`higiene:
+Dientes - mañana
+Dientes - tarde
+Dientes - noche
+Baño diario
+Lavado de cara - mañana
+Lavado de cara - noche
+
+comida:
+Vasos de agua
+Desayuno
+Comida
+Cena
+Colación 1
+Colación 2`);
+    await saveEntity('PLANTILLAS', { ID:uid(), Nombre:'Hábito diario', ItemsJSON: JSON.stringify(items), Tags:'' });
+    created++;
+  }
+
+  if(!DATA.bloque_tablas.find(b=>b.Nombre==='Seguimiento de peso')){
+    await saveEntity('BLOQUE_TABLAS', { ID:uid(), Nombre:'Seguimiento de peso', TagFiltro:'', CampoFiltro:'peso', ValorFiltro:'', Columnas:'peso,presion,notas' });
+    created++;
+  }
+
+  renderAll();
+  showToast(created ? ('✅ Listo — '+created+' cosa(s) nueva(s) creada(s)') : 'Ya tenías todo esto creado');
 }
 /* Apartado abierto para ir dejando ideas/sugerencias de la app conforme se
    te ocurran, aunque no me las digas de una vez — se guardan como notas

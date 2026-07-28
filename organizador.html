@@ -368,7 +368,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Torre Eiffel';
+const BUILD_VERSION = 'Big Ben';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -548,8 +548,14 @@ async function deleteEntity(table, id){
 }
 
 /* ============ Etiquetas / cuadernos ============ */
+/* Google Sheets regresa una celda que "parece número" (ej. una etiqueta
+   escrita como "2024") como el tipo number de JS, no como texto — si no
+   se convierte a String aquí, .split()/.localeCompare() truena a medio
+   render y deja cosas a medio pintar (ver bug-pattern-sheets-number-coercion
+   en memoria; esta es la misma familia de bug, en un campo de texto en
+   vez de un booleano). */
 function parseTagsText(str){
-  return (str||'').split(/[,\s]+/).map(s=>s.replace(/^#/,'').trim()).filter(Boolean);
+  return String(str||'').split(/[,\s]+/).map(s=>s.replace(/^#/,'').trim()).filter(Boolean);
 }
 function findNotebook(name){ return DATA.notebooks.find(n=>n.Nombre===name); }
 function notebookInherited(name){
@@ -2714,11 +2720,14 @@ function openHelpSheet(){
 
 /* ============ Panel de IA / traducción / feedback ============ */
 function openAIDrawer(){
+  // si tenías texto seleccionado (en la nota o donde sea) al darle a ✨, se
+  // pone solo aquí — así no hay que copiar/pegar a mano cada vez.
+  const selectedText = (window.getSelection().toString()||'').trim();
   const overlay = document.createElement('div'); overlay.className='drawer-overlay no-print';
   overlay.innerHTML = `<div class="drawer">
     <div class="drawer-head"><b>✨ Asistente</b><button class="icon-btn" onclick="this.closest('.drawer-overlay').remove()">✕</button></div>
     <div class="drawer-body">
-      <textarea id="aiInput" rows="6" placeholder="Pega o escribe el texto…"></textarea>
+      <textarea id="aiInput" rows="6" placeholder="Pega o escribe el texto…">${escHtml(selectedText)}</textarea>
       <button class="mini-btn" style="margin-top:6px" onclick="pullFromActiveNote()">↙ usar texto de la nota abierta</button>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">
         <button class="btn secondary" onclick="runAI('organizar')">Organizar párrafo</button>
@@ -2740,9 +2749,13 @@ function openAIDrawer(){
   document.body.appendChild(overlay);
   renderDicList(); renderFeedbackList();
 }
+/* #mainArea es un <div contenteditable>, no un <textarea> — no tiene
+   .value (eso siempre devolvía undefined y el cuadro de IA se llenaba
+   con el texto literal "undefined"). El texto real se saca igual que en
+   cualquier otro lado de la app: recorriendo el HTML con stripHtmlToText. */
 function pullFromActiveNote(){
   const ta = document.getElementById('mainArea');
-  document.getElementById('aiInput').value = ta ? ta.value : '';
+  document.getElementById('aiInput').value = ta ? stripHtmlToText(ta.innerHTML) : '';
 }
 async function runAI(mode){
   const text = document.getElementById('aiInput').value.trim();
@@ -2888,7 +2901,7 @@ function renderSettingsTags(){
       <button class="btn secondary" onclick="mergeDuplicateTagsUI()" title="Si por alguna razón quedaron dos etiquetas con el mismo nombre (ej. creadas casi al mismo tiempo desde dos notas), combínalas en una sola">🧹 Combinar duplicadas</button>
     </div>
     <div id="tagsRows" style="margin-top:10px"></div>`;
-  const sorted = DATA.tags.slice().sort((a,b)=>(a.Etiqueta||'').localeCompare(b.Etiqueta||'','es'));
+  const sorted = DATA.tags.slice().sort((a,b)=>String(a.Etiqueta||'').localeCompare(String(b.Etiqueta||''),'es'));
   document.getElementById('tagsRows').innerHTML = sorted.map(t=>`
     <div class="settings-row">
       <input type="color" value="${t.Color||'#8a5a3b'}" onchange="updateTagField('${t.ID}','Color',this.value)">

@@ -6,6 +6,7 @@
 <title>Organizador</title>
 <meta name="theme-color" content="#f5f2ea">
 <link rel="manifest" href="manifest.json">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 :root{
   --bg:#f5f2ea; --bg-elev:#ffffff; --bg-soft:#ece7db;
@@ -319,6 +320,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel">Sync</span></button>
     <button class="btn secondary no-print" onclick="openQuickDatoModal()" title="Anotar rápido: #etiqueta, lo que sea — se va a tu listado de Datos generales">+ Dato general</button>
     <button class="icon-btn no-print" onclick="openTimeLogModal()" title="Registro de tiempo — qué estás haciendo ahora">⏱</button>
+    <button class="icon-btn no-print" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
     <button class="btn no-print" onclick="openNoteEditor(null)">+ Nota</button>
   </header>
 
@@ -377,11 +379,207 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Petra II';
+const BUILD_VERSION = 'Fujiyama';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
 const MEJORAS_NOTEBOOK = 'Mejoras Organizador';
+
+/* ============ Google Calendar — conexión 100% del navegador, sin
+   backend propio, vía Google Identity Services (GIS). El Client ID NO es
+   secreto — las apps de navegador no usan client secret en OAuth; la
+   seguridad la da la lista de "orígenes autorizados" configurada en la
+   consola de Google, no que este valor esté oculto en el código. El
+   token de acceso vive SOLO en memoria (nunca en localStorage): dura
+   ~1h y no hay forma de refrescarlo en silencio sin un backend propio,
+   así que toca reconectar de vez en cuando — normal en integraciones
+   enteramente del lado del cliente como esta. */
+const GOOGLE_CLIENT_ID = '596591883908-8qo7c1i44e5lv5p9o4nan1fkn20qflq6.apps.googleusercontent.com';
+const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar';
+let googleAccessToken = null;
+let googleTokenClient = null;
+function initGoogleAuth(){
+  if(googleTokenClient || !window.google || !google.accounts || !google.accounts.oauth2) return;
+  googleTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: GOOGLE_CALENDAR_SCOPE,
+    callback: (resp)=>{
+      if(resp.error){ showToast('No se pudo conectar Google Calendar'); return; }
+      googleAccessToken = resp.access_token;
+      showToast('✅ Google Calendar conectado');
+      renderCalendarView();
+    }
+  });
+}
+function connectGoogleCalendar(){
+  if(!googleTokenClient) initGoogleAuth();
+  if(!googleTokenClient){ showToast('Google todavía está cargando, intenta de nuevo en un segundo'); return; }
+  googleTokenClient.requestAccessToken({ prompt: googleAccessToken ? '' : 'consent' });
+}
+window.addEventListener('load', initGoogleAuth);
+
+let _calViewDate = new Date();
+function openCalendarModal(){
+  _calViewDate = new Date();
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(600px,100%)">
+    <div class="modal-head"><b>📅 Calendario</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <div id="calAuthBar"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+        <button class="icon-btn" onclick="shiftCalDate(-1)">◀</button>
+        <b id="calDateLabel"></b>
+        <button class="icon-btn" onclick="shiftCalDate(1)">▶</button>
+      </div>
+      <div style="margin:10px 0"><button class="mini-btn" onclick="openNewEventForm()">+ Nuevo evento</button></div>
+      <div id="calEventsList"></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  renderCalendarView();
+}
+function shiftCalDate(delta){
+  _calViewDate = new Date(_calViewDate);
+  _calViewDate.setDate(_calViewDate.getDate()+delta);
+  renderCalendarView();
+}
+function renderCalendarView(){
+  const authBar = document.getElementById('calAuthBar'); if(!authBar) return; // modal ya cerrado
+  const label = document.getElementById('calDateLabel');
+  const isToday = _calViewDate.toDateString()===new Date().toDateString();
+  label.textContent = isToday ? 'Hoy' : _calViewDate.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
+  if(!googleAccessToken){
+    authBar.innerHTML = `<button class="btn" onclick="connectGoogleCalendar()">🔗 Conectar Google Calendar</button>`;
+    document.getElementById('calEventsList').innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:12px">Conecta tu calendario para ver tus eventos aquí.</p>';
+    return;
+  }
+  authBar.innerHTML = `<span style="color:var(--accent);font-size:12px">✅ Conectado</span>`;
+  fetchGoogleEvents(_calViewDate).then(renderCalEventsList).catch(err=>{
+    const el = document.getElementById('calEventsList'); if(el) el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">No se pudieron cargar los eventos'+(err&&err.message?(': '+escHtml(err.message)):'')+'</p>';
+  });
+}
+async function fetchGoogleEvents(dateObj){
+  const dayStart = new Date(dateObj); dayStart.setHours(0,0,0,0);
+  const dayEnd = new Date(dateObj); dayEnd.setHours(23,59,59,999);
+  const params = new URLSearchParams({ timeMin: dayStart.toISOString(), timeMax: dayEnd.toISOString(), singleEvents:'true', orderBy:'startTime' });
+  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?'+params.toString(), { headers:{ Authorization:'Bearer '+googleAccessToken } });
+  if(res.status===401){ googleAccessToken=null; throw new Error('Sesión expirada, vuelve a conectar'); }
+  if(!res.ok) throw new Error('Error '+res.status);
+  const data = await res.json();
+  return data.items||[];
+}
+function renderCalEventsList(events){
+  const el = document.getElementById('calEventsList'); if(!el) return;
+  el.innerHTML = events.map(ev=>{
+    const start = ev.start.dateTime ? new Date(ev.start.dateTime) : null;
+    const end = ev.end.dateTime ? new Date(ev.end.dateTime) : null;
+    const timeLabel = start ? (fmtHM(start)+(end?'–'+fmtHM(end):'')) : 'Todo el día';
+    const linkedNote = DATA.notas.find(n=>n.GCalEventId===ev.id && !n.Papelera);
+    return `<div class="settings-row" style="align-items:flex-start">
+      <span style="flex:1">
+        <b>${escHtml(timeLabel)}</b><br>
+        ${escHtml(ev.summary||'(sin título)')}
+        ${ev.location?`<br><span style="color:var(--text-dim);font-size:12px">📍 ${escHtml(ev.location)}</span>`:''}
+      </span>
+      <button class="icon-btn" onclick="openOrCreateNoteForEvent('${escAttr(ev.id)}','${escAttr(ev.summary||'')}','${escAttr(ev.start.dateTime||ev.start.date||'')}')" title="${linkedNote?'Ver nota vinculada':'Crear nota para este evento'}">${linkedNote?'📝':'📝+'}</button>
+      <button class="icon-btn" onclick='editGoogleEvent(${JSON.stringify(ev.id)})' title="Editar evento">✏️</button>
+    </div>`;
+  }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin eventos este día</p>';
+}
+/* Nota vinculada a un evento: se guarda el ID del evento de Google en la
+   nota (columna GCalEventId) para encontrarla de vuelta con exactitud,
+   sin depender de que el título no haya cambiado. Reusa el mismo truco
+   de asignar ID sincrónico que openNoteEditor(null), para no reabrir la
+   condición de carrera de notas duplicadas. */
+function openOrCreateNoteForEvent(eventId, summary, startIso){
+  const existing = DATA.notas.find(n=>n.GCalEventId===eventId && !n.Papelera);
+  document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#calEventsList')) o.remove(); });
+  if(existing){ openNoteEditor(existing.ID); return; }
+  if(editingNoteId) abandonEmptyDraftIfAny();
+  const note = newBlankNote();
+  note.ID = uid();
+  note.Titulo = summary || '';
+  note.GCalEventId = eventId;
+  if(startIso) note.Fecha = new Date(startIso).toISOString();
+  DATA.notas.push(note);
+  editingNoteId = note.ID;
+  if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = noteDetailHTML(note); }
+  else renderNoteModal(note);
+}
+function toDatetimeLocal(d){
+  const pad = n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+function openNewEventForm(){
+  if(!googleAccessToken){ showToast('Conecta Google Calendar primero'); return; }
+  openEventForm(null);
+}
+function editGoogleEvent(eventId){
+  fetchGoogleEvent(eventId).then(ev=>openEventForm(ev)).catch(()=>showToast('No se pudo cargar el evento'));
+}
+async function fetchGoogleEvent(eventId){
+  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+eventId, { headers:{ Authorization:'Bearer '+googleAccessToken } });
+  if(!res.ok) throw new Error('Error '+res.status);
+  return res.json();
+}
+function openEventForm(existingEvent){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  const isEdit = !!existingEvent;
+  const startVal = isEdit && existingEvent.start.dateTime ? toDatetimeLocal(new Date(existingEvent.start.dateTime)) : toDatetimeLocal(new Date());
+  const endVal = isEdit && existingEvent.end.dateTime ? toDatetimeLocal(new Date(existingEvent.end.dateTime)) : toDatetimeLocal(new Date(Date.now()+60*60*1000));
+  overlay.innerHTML = `<div class="modal" style="width:min(420px,100%)">
+    <div class="modal-head"><b>${isEdit?'✏️ Editar':'+ Nuevo'} evento</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <input type="text" id="evTitle" value="${isEdit?escAttr(existingEvent.summary||''):''}" placeholder="Título del evento">
+      <label style="font-size:12px;display:block;margin:10px 0 4px">Inicio</label>
+      <input type="datetime-local" id="evStart" value="${startVal}">
+      <label style="font-size:12px;display:block;margin:10px 0 4px">Fin</label>
+      <input type="datetime-local" id="evEnd" value="${endVal}">
+      <input type="text" id="evLocation" value="${isEdit?escAttr(existingEvent.location||''):''}" placeholder="Ubicación (opcional)" style="margin-top:10px">
+      <div style="margin-top:14px;display:flex;justify-content:space-between">
+        ${isEdit?`<button class="icon-btn" onclick='deleteGoogleEventUI(${JSON.stringify(existingEvent.id)})' title="Eliminar evento">🗑️</button>`:'<span></span>'}
+        <button class="btn" id="evSaveBtn" onclick='saveEventForm(${JSON.stringify(isEdit?existingEvent.id:"")}, this)'>Guardar</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('evTitle').focus();
+}
+async function saveEventForm(eventId, btn){
+  const title = document.getElementById('evTitle').value.trim();
+  const startVal = document.getElementById('evStart').value;
+  const endVal = document.getElementById('evEnd').value;
+  const location = document.getElementById('evLocation').value.trim();
+  if(!title || !startVal || !endVal){ showToast('Falta título u horario'); return; }
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const body = {
+    summary: title, location: location||undefined,
+    start: { dateTime: new Date(startVal).toISOString(), timeZone: tz },
+    end: { dateTime: new Date(endVal).toISOString(), timeZone: tz }
+  };
+  await withSavingFeedback(btn, async ()=>{
+    const url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'+(eventId?'/'+eventId:'');
+    const res = await fetch(url, {
+      method: eventId?'PATCH':'POST',
+      headers: { Authorization:'Bearer '+googleAccessToken, 'Content-Type':'application/json' },
+      body: JSON.stringify(body)
+    });
+    if(!res.ok){ showToast('Error al guardar el evento ('+res.status+')'); return; }
+    document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#evTitle')) o.remove(); });
+    showToast('✅ Evento guardado');
+    renderCalendarView();
+  });
+}
+function deleteGoogleEventUI(eventId){
+  if(!confirm('¿Eliminar este evento del calendario? Esto borra el evento de tu Google Calendar real y no se puede deshacer.')) return;
+  fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+eventId, { method:'DELETE', headers:{ Authorization:'Bearer '+googleAccessToken } })
+    .then(res=>{
+      if(!res.ok && res.status!==410 && res.status!==204){ showToast('No se pudo eliminar'); return; }
+      document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#evTitle')) o.remove(); });
+      showToast('Evento eliminado');
+      renderCalendarView();
+    });
+}
 let GAS_URL = localStorage.getItem('org_gas_url') || '';
 let SHEET_ID = localStorage.getItem('org_sheet_id') || '';
 let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[] };

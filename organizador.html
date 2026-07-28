@@ -329,6 +329,11 @@ let splitRatio = parseFloat(localStorage.getItem('org_split_ratio')||'38');
 let editorWidth = parseInt(localStorage.getItem('org_editor_width')||'760',10);
 
 function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(36).slice(2)); }
+/* Google Sheets regresa una celda que dice "1" como número 1, no como
+   texto "1", en cuanto el dato de verdad viene y va del Sheet (en vez de
+   quedarse solo en memoria como en las pruebas) — por eso nunca alcanzar
+   ===  '1' a secas; hay que aceptar los dos. */
+function isCornellNote(note){ return note && (note.Cornell==='1' || note.Cornell===1); }
 function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._toastT); window._toastT=setTimeout(()=>t.classList.remove('show'),2400); }
 
 /* ============ Setup inicial ============ */
@@ -557,7 +562,7 @@ function extractFieldPairs(note){
   const html = note.Contenido||'';
   if(!/^\s*<[a-z]/i.test(html)) return [];
   const container = document.createElement('div'); container.innerHTML = html;
-  if(note.Cornell==='1'){
+  if(isCornellNote(note)){
     return Array.from(container.querySelectorAll('table.cornell-table tr')).map(r=>{
       const cells = r.querySelectorAll('td');
       return { cue: (cells[0]?cells[0].textContent:'').trim(), texto: cells[1]?cells[1].innerHTML:'' };
@@ -879,7 +884,7 @@ function closeNoteEditor(){
   renderMain();
 }
 function editorInnerHTML(note, isModal){
-  editingCornell = note.Cornell==='1'||note.Cornell===1;
+  editingCornell = isCornellNote(note);
   ensureHtmlContent(note);
   const nbOptions = ['<option value="">— sin cuaderno —</option>'].concat(DATA.notebooks.map(nb=>`<option value="${escAttr(nb.Nombre)}" ${note.Notebook===nb.Nombre?'selected':''}>${escHtml(nb.Nombre)}</option>`)).join('');
   return `
@@ -1001,7 +1006,7 @@ function reopenEditorFor(note){
 function ensureHtmlContent(note){
   const c = note.Contenido||'';
   if(c && !/^\s*<[a-z][\s\S]*>/i.test(c)){
-    if(note.Cornell==='1'){
+    if(isCornellNote(note)){
       note.Contenido = '<table class="rt-table cornell-table"><tr><td class="cornell-cue-cell">'+escHtml(note.CornellCue||'')+'</td><td>'+mdToHtml(c)+'</td></tr></table>';
     } else {
       note.Contenido = mdToHtml(c);

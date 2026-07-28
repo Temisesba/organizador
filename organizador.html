@@ -357,7 +357,8 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
     <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel">Sync</span></button>
-    <button class="btn no-print" onclick="openCreateMenu()" title="Nueva nota, dato, plantilla o registro de tiempo">+</button>
+    <button class="btn secondary no-print" onclick="openNoteEditor(null)">+ Nota</button>
+    <button class="btn no-print" onclick="openCreateMenu()" title="Dato general, plantilla o registro de tiempo">+</button>
   </header>
 
   <div id="reminderBanner" class="no-print"></div>
@@ -416,7 +417,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Stonehenge';
+const BUILD_VERSION = 'Cristo Redentor';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1330,17 +1331,47 @@ function renderAll(){ renderSidebar(); renderMain(); updateSyncIndicator(); rend
    entrada de hoy. Se puede quitar por hoy con "✕" (vuelve a aparecer
    mañana si sigue sin llenarse). */
 function todayStr(){ return new Date().toDateString(); }
+/* "Recordatorio" ya no es solo sí/no diario — cada plantilla elige su
+   propia frecuencia (diario/semanal/mensual) y el aviso se calcula
+   contra la fecha real del último llenado, no contra "hoy" a secas. */
+const RECORDATORIO_LABELS = { diario:'Cada día', semanal:'Cada semana', mensual:'Cada mes' };
+const RECORDATORIO_DAYS = { diario:0, semanal:7, mensual:30 };
+function recordatorioSelectHTML(id, current){
+  return `<select id="${id}">
+    <option value="" ${!current?'selected':''}>No, nunca</option>
+    <option value="diario" ${current==='diario'?'selected':''}>Cada día</option>
+    <option value="semanal" ${current==='semanal'?'selected':''}>Cada semana</option>
+    <option value="mensual" ${current==='mensual'?'selected':''}>Cada mes</option>
+  </select>`;
+}
+function lastFilledChecklist(templateId){
+  const hist = DATA.historial.filter(h=>h.PlantillaID===templateId);
+  if(!hist.length) return null;
+  return new Date(Math.max(...hist.map(h=>+new Date(h.Fecha))));
+}
+function lastFilledFieldTemplate(templateId){
+  const notes = DATA.notas.filter(n=>n.PlantillaPropID===templateId && !n.Papelera);
+  if(!notes.length) return null;
+  return new Date(Math.max(...notes.map(n=>+new Date(n.Fecha))));
+}
+function lastFilledLabel(date){ return date ? ('Última vez: '+fmtDate(date.toISOString())) : 'Nunca se ha llenado'; }
+function isReminderDue(lastDate, recordatorio){
+  if(!recordatorio || !RECORDATORIO_DAYS.hasOwnProperty(recordatorio)) return false;
+  if(!lastDate) return true;
+  const days = RECORDATORIO_DAYS[recordatorio];
+  if(days===0) return lastDate.toDateString()!==todayStr(); // diario: due si no se llenó hoy
+  const diffDays = Math.floor((Date.now()-lastDate.getTime())/86400000);
+  return diffDays >= days;
+}
 function pendingRemindersToday(){
   const pending = [];
   DATA.plantillas_prop.forEach(pt=>{
-    if(pt.Recordatorio!=='diario') return;
-    const has = DATA.notas.some(n=>n.PlantillaPropID===pt.ID && !n.Papelera && new Date(n.Fecha).toDateString()===todayStr());
-    if(!has) pending.push({ type:'plantilla_prop', id:pt.ID, nombre:pt.Nombre });
+    const last = lastFilledFieldTemplate(pt.ID);
+    if(isReminderDue(last, pt.Recordatorio)) pending.push({ type:'plantilla_prop', id:pt.ID, nombre:pt.Nombre });
   });
   DATA.plantillas.forEach(p=>{
-    if(p.Recordatorio!=='diario') return;
-    const has = DATA.historial.some(h=>h.PlantillaID===p.ID && new Date(h.Fecha).toDateString()===todayStr());
-    if(!has) pending.push({ type:'plantilla', id:p.ID, nombre:p.Nombre });
+    const last = lastFilledChecklist(p.ID);
+    if(isReminderDue(last, p.Recordatorio)) pending.push({ type:'plantilla', id:p.ID, nombre:p.Nombre });
   });
   return pending;
 }
@@ -2401,7 +2432,6 @@ function openCreateMenu(){
   overlay.innerHTML = `<div class="modal" style="width:min(320px,100%)">
     <div class="modal-head"><b>+ Nuevo</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body" style="display:flex;flex-direction:column;gap:8px">
-      <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openNoteEditor(null)">📝 Nota normal</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openQuickDatoModal()">⚡ Dato general</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openFieldTemplatePicker()">🏷️ Plantilla</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openTimeLogModal()">⏱ Registro de tiempo</button>
@@ -2503,16 +2533,34 @@ function renderQuickDatoList(){
    el siguiente (nunca se guarda un "fin" explícito, se calcula al vuelo).
    Un bloque sospechosamente largo (>2h) se marca para ofrecer dividirlo,
    en vez de forzar a llenar horas vacías que no pasó nada en ellas. */
-const TIEMPO_NOTEBOOK = 'Registro de tiempo';
-async function ensureTiempoNotebook(){
-  let nb = DATA.notebooks.find(n=>n.Nombre===TIEMPO_NOTEBOOK);
-  if(!nb) nb = await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:TIEMPO_NOTEBOOK, TagsHeredados:'', Color:'#3d7a4f', TagAuto:'' });
-  return nb;
-}
+/* El Registro de tiempo ya no tiene cuaderno propio — vive dentro de
+   "Registro Personal" junto con lo demás (Diario, Somatometría…), para
+   no acumular cuadernos sueltos. Como ese cuaderno ya tiene otras
+   notas mezcladas, un bloque de tiempo se distingue por un marcador
+   en PlantillaPropID (no por el cuaderno) — el mismo truco que ya
+   usan las plantillas de campos para saber "de dónde salió esta nota". */
+const TIMELOG_MARKER = '__timelog__';
 function timeLogEntriesForDate(dateObj){
   const dayStr = dateObj.toDateString();
-  return activeNotes().filter(n=>n.Notebook===TIEMPO_NOTEBOOK && new Date(n.Fecha).toDateString()===dayStr)
+  return activeNotes().filter(n=>n.PlantillaPropID===TIMELOG_MARKER && new Date(n.Fecha).toDateString()===dayStr)
     .sort((a,b)=>String(a.Fecha).localeCompare(String(b.Fecha)));
+}
+/* Migración de una sola vez: si de una sesión anterior queda un
+   cuaderno "Registro de tiempo" con notas propias, se mueven a
+   Registro Personal (con el marcador puesto) y se borra el cuaderno
+   vacío que queda — idempotente, la próxima vez ya no encuentra nada
+   que migrar y no hace nada. */
+async function migrateTimeLogToRegistroPersonal(){
+  const oldNb = DATA.notebooks.find(n=>n.Nombre==='Registro de tiempo');
+  if(!oldNb) return;
+  const nb = await ensureRegistroPersonalNotebook();
+  const toMigrate = DATA.notas.filter(n=>n.Notebook==='Registro de tiempo');
+  for(const n of toMigrate){
+    n.Notebook = nb.Nombre;
+    n.PlantillaPropID = TIMELOG_MARKER;
+    await saveEntity('NOTAS', n);
+  }
+  await deleteEntity('NOTEBOOKS', oldNb.ID);
 }
 function fmtHM(d){ return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }
 function fmtDuration(ms){
@@ -2561,12 +2609,12 @@ async function saveTimeLogEntry(){
     const m = raw.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)\s*[,:]?\s*(.*)$/);
     const tag = m ? m[1] : '';
     const texto = m ? m[2] : raw;
-    const nb = await ensureTiempoNotebook();
+    const nb = await ensureRegistroPersonalNotebook();
     const note = {
       ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(),
       Titulo: texto || (tag?('#'+tag):raw.slice(0,40)),
       Contenido: '<p>'+escHtml(texto||raw)+'</p>',
-      Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:''
+      Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'', PlantillaPropID:TIMELOG_MARKER
     };
     await saveEntity('NOTAS', note);
     if(tag) ensureTagsRegistered('#'+tag);
@@ -2625,11 +2673,11 @@ function splitTimeLogEntry(beforeId, afterId){
   const m = texto.trim().match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)\s*[,:]?\s*(.*)$/);
   const tag = m ? m[1] : '';
   const rest = m ? m[2] : texto.trim();
-  ensureTiempoNotebook().then(nb=>saveEntity('NOTAS', {
+  ensureRegistroPersonalNotebook().then(nb=>saveEntity('NOTAS', {
     ID:'', Fecha:splitTime.toISOString(), FechaEdicion:new Date().toISOString(),
     Titulo: rest || (tag?('#'+tag):texto.trim()),
     Contenido:'<p>'+escHtml(rest||texto.trim())+'</p>',
-    Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:''
+    Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'', PlantillaPropID:TIMELOG_MARKER
   })).then(()=>{ if(tag) ensureTagsRegistered('#'+tag); renderTimeLogView(); renderSidebar(); });
 }
 function deleteTimeLogEntryUI(id){
@@ -2972,7 +3020,7 @@ function renderChecklistBody(){
     const hist = DATA.historial.filter(h=>h.PlantillaID===p.ID).sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha)));
     return `<div class="tpl-card">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <b>${escHtml(p.Nombre)}</b>
+        <span><b>${escHtml(p.Nombre)}</b> ${p.Recordatorio?`<span class="tag-badge" title="${escAttr(RECORDATORIO_LABELS[p.Recordatorio]||'')}">⏰</span>`:''}<br><span style="color:var(--text-dim);font-size:11px">${lastFilledLabel(hist[0]?new Date(hist[0].Fecha):null)}</span></span>
         <span><button class="icon-btn" onclick="openFillModal('${p.ID}')">▶ Llenar</button><button class="icon-btn" onclick="openChecklistStatsModal('${p.ID}')" title="Ver estadísticas (rachas y cumplimiento)">📊</button><button class="icon-btn" onclick="openTemplateModal('${p.ID}')" title="Editar plantilla">✏️</button><button class="icon-btn" onclick="deleteTemplateUI('${p.ID}')">🗑️</button></span>
       </div>
       <div>${hist.map((h,idx)=>histEntryHTML(h, idx===0)).join('') || '<p class="hint" style="color:var(--text-dim)">Sin historial aún</p>'}</div>
@@ -3261,9 +3309,8 @@ protector solar | comprar al llegar">${existing?escHtml(templateItemsToText(item
         <button class="mini-btn" onclick="addTplEditRow('')">+ elemento suelto</button>
         <button class="mini-btn" onclick="addTplEditSection()">+ nueva categoría</button>
       </div>
-      <label style="display:flex;align-items:center;gap:6px;margin-top:12px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="tplRecordatorio" ${existing&&existing.Recordatorio==='diario'?'checked':''}> Avísame si no la he llenado hoy
-      </label>
+      <label style="font-size:12px;font-weight:600;display:block;margin-top:12px">Avísame si no la he llenado</label>
+      ${recordatorioSelectHTML('tplRecordatorio', existing?existing.Recordatorio:'')}
       <div style="margin-top:14px"><button class="btn" onclick="saveTemplateModal(this,'${existingId||''}')">Guardar plantilla</button></div>
     </div>
   </div>`;
@@ -3319,7 +3366,7 @@ function saveTemplateModal(btn, existingId){
   const items = _tplEditView==='list'
     ? window._tplEditItems.filter(it=>it.text && it.text.trim())
     : parseTemplateText(document.getElementById('tplItemsInput').value);
-  const recordatorio = document.getElementById('tplRecordatorio').checked ? 'diario' : '';
+  const recordatorio = document.getElementById('tplRecordatorio').value;
   const row = { ID: existingId||uid(), Nombre:nombre, ItemsJSON: JSON.stringify(items), Tags:'', Recordatorio:recordatorio };
   saveEntity('PLANTILLAS', row).then(()=>{
     btn.closest('.modal-overlay').remove();
@@ -3548,7 +3595,7 @@ function renderFieldTablesBody(){
   renderFieldTablesList();
   document.getElementById('fieldTemplatesList').innerHTML = DATA.plantillas_prop.map(pt=>`
     <div class="settings-row">
-      <span style="flex:1">${escHtml(pt.Nombre)} ${pt.UsaPersona?'<span class="tag-badge" title="Por persona">👤</span>':''}${pt.Recordatorio?'<span class="tag-badge" title="Recordatorio diario">⏰</span>':''}<br><span style="color:var(--text-dim);font-size:12px">${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')}</span></span>
+      <span style="flex:1">${escHtml(pt.Nombre)} ${pt.UsaPersona?'<span class="tag-badge" title="Por persona">👤</span>':''}${pt.Recordatorio?`<span class="tag-badge" title="${escAttr(RECORDATORIO_LABELS[pt.Recordatorio]||'')}">⏰</span>`:''}<br><span style="color:var(--text-dim);font-size:12px">${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')} — ${lastFilledLabel(lastFilledFieldTemplate(pt.ID))}</span></span>
       <button class="icon-btn" onclick="openFieldTemplateModal('${pt.ID}')" title="Editar plantilla">✏️</button>
       <button class="icon-btn" onclick="deleteFieldTemplateUI('${pt.ID}')">🗑️</button>
     </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas — créalas aquí y luego insértalas desde 🏷️ en el editor de la nota, o con "+ Plantilla" en el encabezado.</p>';
@@ -3744,9 +3791,8 @@ dx">${existing?escHtml(campos.join('\n')):''}</textarea>
       <label style="display:flex;align-items:center;gap:6px;margin-top:12px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="ftplUsaPersona" ${existing&&existing.UsaPersona?'checked':''}> Es por persona (varios familiares/pacientes, cada quien su historial — ej. Somatometría)
       </label>
-      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:13px;cursor:pointer">
-        <input type="checkbox" id="ftplRecordatorio" ${existing&&existing.Recordatorio==='diario'?'checked':''}> Avísame si no la he llenado hoy
-      </label>
+      <label style="font-size:12px;font-weight:600;display:block;margin-top:12px">Avísame si no la he llenado</label>
+      ${recordatorioSelectHTML('ftplRecordatorio', existing?existing.Recordatorio:'')}
       <div style="margin-top:14px"><button class="btn" onclick="saveFieldTemplate(this,'${existingId||''}')">Guardar</button></div>
     </div>
   </div>`;
@@ -3757,7 +3803,7 @@ function saveFieldTemplate(btn, existingId){
   const nombre = document.getElementById('ftplNombre').value.trim();
   const campos = document.getElementById('ftplCampos').value.split('\n').map(s=>s.trim().toLowerCase().replace(/\s+/g,'_')).filter(Boolean);
   const usaPersona = document.getElementById('ftplUsaPersona').checked ? '1' : '';
-  const recordatorio = document.getElementById('ftplRecordatorio').checked ? 'diario' : '';
+  const recordatorio = document.getElementById('ftplRecordatorio').value;
   if(!nombre || !campos.length){ showToast('Ponle nombre y al menos un campo'); return; }
   saveEntity('PLANTILLAS_PROP', { ID: existingId||uid(), Nombre:nombre, CamposJSON: JSON.stringify(campos), UsaPersona:usaPersona, Recordatorio:recordatorio }).then(()=>{
     btn.closest('.modal-overlay').remove(); renderFieldTablesBody(); renderReminderBanner();
@@ -3771,7 +3817,7 @@ function openFieldTemplatePicker(){
     <div class="modal-head"><b>🏷️ Plantillas de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">${DATA.plantillas_prop.map(pt=>`
       <div class="settings-row" style="align-items:flex-start">
-        <span style="flex:1;font-size:13px">${escHtml(pt.Nombre)}<br><span style="color:var(--text-dim);font-size:12px">${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')}</span></span>
+        <span style="flex:1;font-size:13px">${escHtml(pt.Nombre)} ${pt.Recordatorio?`<span class="tag-badge" title="${escAttr(RECORDATORIO_LABELS[pt.Recordatorio]||'')}">⏰</span>`:''}<br><span style="color:var(--text-dim);font-size:12px">${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')}</span><br><span style="color:var(--text-dim);font-size:11px">${lastFilledLabel(lastFilledFieldTemplate(pt.ID))}</span></span>
         <button class="btn" style="padding:4px 10px;font-size:12px;flex:none" onclick="this.closest('.modal-overlay').remove();openQuickFieldFill('${pt.ID}')" title="Formulario rápido — llena cada campo y guarda, sin tocar tablas">⚡ Llenar</button>
         <button class="icon-btn" onclick="this.closest('.modal-overlay').remove();openFieldStatsModal('${pt.ID}')" title="Ver estadísticas (gráfica en el tiempo)">📊</button>
         ${editorOpen ? `<button class="icon-btn" onclick="insertFieldTemplate('${pt.ID}');this.closest('.modal-overlay').remove()" title="Insertar como texto en la nota abierta">📄</button>
@@ -4199,13 +4245,13 @@ function renderSettingsPlantillas(){
   const body = document.getElementById('settingsBody'); if(!body) return;
   const checklistRows = DATA.plantillas.map(p=>`
     <div class="settings-row">
-      <span style="flex:1">☑️ ${escHtml(p.Nombre)} ${p.Recordatorio?'<span class="tag-badge" title="Recordatorio diario">⏰</span>':''}</span>
+      <span style="flex:1">☑️ ${escHtml(p.Nombre)} ${p.Recordatorio?`<span class="tag-badge" title="${escAttr(RECORDATORIO_LABELS[p.Recordatorio]||'')}">⏰</span>`:''}<br><span style="color:var(--text-dim);font-size:12px">${lastFilledLabel(lastFilledChecklist(p.ID))}</span></span>
       <button class="icon-btn" onclick="openTemplateModal('${p.ID}')" title="Editar">✏️</button>
       <button class="icon-btn" onclick="deleteTemplateUI('${p.ID}')" title="Eliminar">🗑️</button>
     </div>`).join('');
   const fieldRows = DATA.plantillas_prop.map(pt=>`
     <div class="settings-row">
-      <span style="flex:1">🏷️ ${escHtml(pt.Nombre)} ${pt.UsaPersona?'<span class="tag-badge" title="Por persona">👤</span>':''}${pt.Recordatorio?'<span class="tag-badge" title="Recordatorio diario">⏰</span>':''}</span>
+      <span style="flex:1">🏷️ ${escHtml(pt.Nombre)} ${pt.UsaPersona?'<span class="tag-badge" title="Por persona">👤</span>':''}${pt.Recordatorio?`<span class="tag-badge" title="${escAttr(RECORDATORIO_LABELS[pt.Recordatorio]||'')}">⏰</span>`:''}<br><span style="color:var(--text-dim);font-size:12px">${lastFilledLabel(lastFilledFieldTemplate(pt.ID))}</span></span>
       <button class="icon-btn" onclick="openFieldTemplateModal('${pt.ID}')" title="Editar">✏️</button>
       <button class="icon-btn" onclick="deleteFieldTemplateUI('${pt.ID}')" title="Eliminar">🗑️</button>
     </div>`).join('');
@@ -4612,7 +4658,7 @@ function boot(){
   syncSortUI();
   applySbCollapsedState();
   renderAll();
-  syncNow(false).then(migrateLocalFlagsAndSearchesOnce).then(autoPurgeOldTrash);
+  syncNow(false).then(migrateLocalFlagsAndSearchesOnce).then(autoPurgeOldTrash).then(migrateTimeLogToRegistroPersonal).then(renderAll);
   initSplitResizerOnce();
   initEditorResizerOnce();
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }

@@ -134,6 +134,8 @@ table.org-table td.title-cell{cursor:pointer;font-weight:600}
 .editor-toolbar{display:flex;gap:4px;padding:6px 10px;border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
 .editor-toolbar .sep{width:1px;background:var(--border);align-self:stretch;margin:0 4px}
 .swatch-row{display:flex;gap:4px;padding:4px 8px}
+#routeHints{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:4px 12px;font-size:12px}
+#routeHints .tag-badge{border-color:var(--success)}
 .swatch{width:20px;height:20px;border-radius:50%;border:1px solid var(--border);cursor:pointer}
 .editor-body{flex:1;display:flex;min-height:0;padding:12px;gap:10px;overflow:hidden}
 .rich-editor{width:100%;height:100%;border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow-y:auto;outline:none;font-size:14.5px;line-height:1.6}
@@ -625,8 +627,11 @@ function renderSidebar(){
   const tc = document.getElementById('tagCloud');
   tc.innerHTML = allTagsWithCounts().filter(([t])=>!FLAG_TAGS.some(f=>f[0]===t)).map(([t,c])=>{
     const on = activeTagFilters.has(t);
-    return `<div class="tag-chip-row" style="${on?'background:var(--bg-soft);font-weight:700':''}" onclick="toggleTagFilter('${escAttr(t)}')">
-      <span class="nb-dot" style="background:${tagColor(t)}"></span>#${escHtml(t)}<span class="cnt">${c}</span>
+    return `<div class="tag-chip-row" style="${on?'background:var(--bg-soft);font-weight:700':''}">
+      <span onclick="toggleTagFilter('${escAttr(t)}')" style="display:flex;align-items:center;gap:6px;flex:1;min-width:0">
+        <span class="nb-dot" style="background:${tagColor(t)}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">#${escHtml(t)}</span><span class="cnt">${c}</span>
+      </span>
+      <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();openTagCompendium('${escAttr(t)}')" title="Ver todo lo etiquetado con #${escAttr(t)}">👁</button>
     </div>`;
   }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin etiquetas todavía</p>';
 
@@ -892,12 +897,14 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V, o insertar OCR)">🖼️</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openFieldTemplatePicker()" title="Insertar plantilla de campos (#campo + valor)">🏷️</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="sendSelectionToDic()" title="Mandar palabra/frase seleccionada al diccionario">📖</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertTimestamp()" title="Insertar fecha y hora (para notas de captura rápida)">🕐</button>
     <span class="sep"></span>
     <button class="icon-btn" id="btnMark" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark')" title="Resaltar (toca de nuevo el mismo color para quitarlo)">🖍️</button>
     <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
     <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">
   </div>
   <div id="swatchBar" class="swatch-row hidden"></div>
+  <div id="routeHints" class="hidden"></div>
   <div class="editor-body" id="editorBody">
     <div id="mainArea" class="rich-editor" contenteditable="true" data-placeholder="Escribe aquí…">${note.Contenido||''}</div>
   </div>
@@ -999,7 +1006,7 @@ async function persistCurrentNote(note){
   autoRouteNotebook(note);
   const saved = await saveEntity('NOTAS', note);
   editingNoteId = saved.ID;
-  ensureTagsRegistered(saved.Tags);
+  ensureTagsRegistered(effectiveTags(saved).join(' '));
   renderSidebar();
   if(currentView!=='table'){ /* keep list roughly fresh without losing focus */ }
   return saved;
@@ -1018,7 +1025,7 @@ function bindEditorEvents(note){
   });
   const mainEl = document.getElementById('mainArea');
   if(mainEl){
-    mainEl.addEventListener('input', scheduleSave);
+    mainEl.addEventListener('input', ()=>{ scheduleSave(); scheduleRouteHints(); });
     mainEl.addEventListener('blur', doSaveNow);
     mainEl.addEventListener('keydown', handleRichKeydown);
     mainEl.addEventListener('change', (e)=>{
@@ -1032,7 +1039,51 @@ function bindEditorEvents(note){
     bindPasteImages(mainEl);
   }
   const tagsEl = document.getElementById('noteTags');
-  if(tagsEl){ tagsEl.addEventListener('input', showTagSuggest); tagsEl.addEventListener('blur', ()=>setTimeout(hideTagSuggest,150)); }
+  if(tagsEl){
+    tagsEl.addEventListener('input', showTagSuggest);
+    tagsEl.addEventListener('blur', ()=>setTimeout(hideTagSuggest,150));
+    tagsEl.addEventListener('input', scheduleRouteHints);
+  }
+  const nbEl = document.getElementById('noteNotebook');
+  if(nbEl) nbEl.addEventListener('change', scheduleRouteHints);
+  renderRouteHints();
+}
+/* Panel "rutas detectadas": mientras escribes, si una línea lleva una
+   etiqueta que coincide con el auto-ruteo de algún cuaderno, se muestra
+   aquí con ✅ — la nota se queda tal cual donde está, es solo un aviso de
+   "esto ya tiene a dónde ir" para cuando anotas varias cosas sueltas
+   seguidas (ej. #cancion, #cita, #tesis) en una sola nota de captura rápida. */
+let _routeHintsDebounce=null;
+function scheduleRouteHints(){ clearTimeout(_routeHintsDebounce); _routeHintsDebounce=setTimeout(renderRouteHints,200); }
+function renderRouteHints(){
+  const wrap = document.getElementById('routeHints'); const mainEl = document.getElementById('mainArea');
+  if(!wrap || !mainEl) return;
+  const autoNotebooks = DATA.notebooks.filter(nb=>nb.TagAuto);
+  if(!autoNotebooks.length){ wrap.classList.add('hidden'); wrap.innerHTML=''; return; }
+  const tagsEl = document.getElementById('noteTags');
+  const inherited = Array.from(new Set([...parseTagsText(tagsEl?tagsEl.value:''), ...notebookInherited(document.getElementById('noteNotebook')?document.getElementById('noteNotebook').value:'')]));
+  const container = document.createElement('div'); container.innerHTML = mainEl.innerHTML;
+  let blocks = Array.from(container.children); if(!blocks.length) blocks=[container];
+  const hints = [];
+  blocks.forEach(el=>{
+    const text = (el.textContent||'').trim(); if(!text) return;
+    const own = (text.match(/#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ:-]+)/g)||[]).map(t=>t.slice(1));
+    const all = new Set([...own, ...inherited]);
+    autoNotebooks.forEach(nb=>{
+      if(all.has(String(nb.TagAuto).replace(/^#/,''))) hints.push({ text: text.slice(0,50), notebook: nb.Nombre });
+    });
+  });
+  if(!hints.length){ wrap.classList.add('hidden'); wrap.innerHTML=''; return; }
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = '<span style="color:var(--text-dim)">📍 detectado:</span>' + hints.map(h=>
+    `<span class="tag-badge">✅ "${escHtml(h.text)}" → ${escHtml(h.notebook)}</span>`).join('');
+}
+function insertTimestamp(){
+  focusMainEditor();
+  const now = new Date();
+  const txt = now.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+  document.execCommand('insertHTML', false, '<span style="color:var(--text-dim);font-size:.85em">🕐 '+txt+'</span>&nbsp;');
+  scheduleSave();
 }
 function showTagSuggest(){
   const el = document.getElementById('noteTags'); const box = document.getElementById('tagSuggest');
@@ -1843,6 +1894,17 @@ function saveBlockTable(){
   const tag = document.getElementById('btTag').value.trim().replace(/^#/,'');
   if(!nombre || !tag){ showToast('Ponle nombre y etiqueta'); return; }
   saveEntity('BLOQUE_TABLAS', { ID:uid(), Nombre:nombre, TagFiltro:tag }).then(renderBlockTablesBody);
+}
+/* Compendio rápido: todo lo escrito con esta etiqueta, en cualquier nota,
+   para poder seguir anotando encima ("ya lo vi", "no me gustó"…) sin tener
+   que ir a buscarlo nota por nota. */
+function openTagCompendium(tag){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(760px,100%)">
+    <div class="modal-head"><b>👁 #${escHtml(tag)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">${blockTableRenderHTML(tag)}</div>
+  </div>`;
+  document.body.appendChild(overlay);
 }
 function blockTableRenderHTML(tagFiltro){
   const blocks = allBlocks().filter(b=>b.effectiveTags.includes(tagFiltro));

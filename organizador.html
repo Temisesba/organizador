@@ -346,7 +346,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Sagrada Familia';
+const BUILD_VERSION = 'Angkor Wat';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1181,7 +1181,7 @@ function editorInnerHTML(note, isModal){
   </div>
   <div id="swatchBar" class="swatch-row hidden"></div>
   <div id="routeHints" class="hidden"></div>
-  ${editingCornell ? '<div class="cornell-bar">📐 Modo Cornell — cada fila es cue + desarrollo <button class="mini-btn" style="width:auto" onclick="addCornellRowDirect()">+ agregar fila</button></div>' : ''}
+  ${editingCornell ? '<div class="cornell-bar">📐 Modo Cornell — cada fila: columna izq. = pista/palabra clave, columna der. = desarrollo <button class="mini-btn" style="width:auto" onclick="addCornellRowDirect()">+ agregar fila</button></div>' : ''}
   <div class="editor-body" id="editorBody">
     <div id="mainArea" class="rich-editor" contenteditable="true" data-placeholder="Escribe aquí…">${note.Contenido||''}</div>
   </div>

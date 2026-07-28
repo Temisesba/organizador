@@ -142,25 +142,45 @@ function getAllData(sheetId) {
   return { ok: true, data: out };
 }
 
+// "Comprobar si ya existe la fila" y "agregarla/actualizarla" NO son un
+// solo paso atómico — si dos peticiones de guardar la MISMA nota nueva se
+// procesan casi al mismo tiempo (dos guardados casi simultáneos desde el
+// navegador, ej. un blur y un autoguardado que caen juntos), las dos
+// pueden ver "todavía no existe" y las dos hacer appendRow, dejando DOS
+// filas con el mismo ID — justo el bug reportado ("se veía doble, borré
+// una y se borró la otra"). LockService serializa esta sección para que
+// solo una ejecución esté adentro a la vez.
 function saveRow(sheetId, table, row) {
-  const ss = getSS(sheetId);
-  const headers = TABLE_DEFS[table];
-  if (!headers) throw new Error('Tabla desconocida: ' + table);
-  const sh = getTable(ss, table);
-  if (!row.ID) row.ID = Utilities.getUuid();
-  const rowIdx = findRowIndexById(sh, row.ID);
-  const values = headers.map(h => (row[h] !== undefined && row[h] !== null) ? row[h] : '');
-  if (rowIdx > 0) sh.getRange(rowIdx, 1, 1, headers.length).setValues([values]);
-  else sh.appendRow(values);
-  return { ok: true, row: row };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const ss = getSS(sheetId);
+    const headers = TABLE_DEFS[table];
+    if (!headers) throw new Error('Tabla desconocida: ' + table);
+    const sh = getTable(ss, table);
+    if (!row.ID) row.ID = Utilities.getUuid();
+    const rowIdx = findRowIndexById(sh, row.ID);
+    const values = headers.map(h => (row[h] !== undefined && row[h] !== null) ? row[h] : '');
+    if (rowIdx > 0) sh.getRange(rowIdx, 1, 1, headers.length).setValues([values]);
+    else sh.appendRow(values);
+    return { ok: true, row: row };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function deleteRow(sheetId, table, id) {
-  const ss = getSS(sheetId);
-  const sh = getTable(ss, table);
-  const rowIdx = findRowIndexById(sh, id);
-  if (rowIdx > 0) sh.deleteRow(rowIdx);
-  return { ok: true };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const ss = getSS(sheetId);
+    const sh = getTable(ss, table);
+    const rowIdx = findRowIndexById(sh, id);
+    if (rowIdx > 0) sh.deleteRow(rowIdx);
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ── Checklists: llenar plantilla = nueva fila de historial fechada ──

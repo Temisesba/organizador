@@ -146,7 +146,7 @@ table.org-table td.title-cell{cursor:pointer;font-weight:600}
 .rich-editor h3{font-size:1.1em;font-weight:700;margin:.5em 0 .2em}
 .rich-editor blockquote{border-left:3px solid var(--accent);padding-left:10px;color:var(--text-dim);margin:.4em 0}
 .rich-editor code{background:var(--bg-soft);padding:1px 5px;border-radius:4px;font-family:ui-monospace,Consolas,monospace}
-.rich-editor img{max-width:100%;border-radius:8px;margin:.4em 0;display:block;border:1px solid var(--border)}
+.rich-editor img{max-width:100%;border-radius:8px;margin:.4em 0;display:block;border:1px solid var(--border);resize:both;overflow:auto;min-width:60px;min-height:40px}
 .rich-editor .rt-check{display:flex;align-items:flex-start;gap:6px;margin:2px 0}
 .rich-editor .rt-check input{margin-top:4px}
 .editor-bottom{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-dim)}
@@ -156,6 +156,8 @@ table.rt-table{border-collapse:collapse;margin:.5em 0;width:100%}
 table.rt-table td,table.rt-table th{border:1px solid var(--border);padding:6px 9px;min-width:40px;vertical-align:top}
 table.rt-table tr:nth-child(even) td{background:var(--bg-soft)}
 table.rt-table td.cornell-cue-cell{font-weight:700;color:var(--accent);background:var(--accent-soft, var(--bg-soft));width:26%}
+table.cornell-table{border:2px solid var(--accent)}
+.cornell-bar{display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:12px;color:var(--accent);font-weight:600}
 
 @media (max-width:640px){
   .editor-body{flex-direction:column}
@@ -263,9 +265,6 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
       <button id="vwSplit" onclick="setView('split')" title="Dividido">⚌</button>
     </div>
     <div class="spacer"></div>
-    <button class="icon-btn no-print" onclick="quickFlag('task')" title="Marcar/quitar #task" style="color:#4a6fa5">⚑</button>
-    <button class="icon-btn no-print" onclick="quickFlag('importante')" title="Marcar/quitar #importante" style="color:#b3432b">★</button>
-    <button class="icon-btn no-print" onclick="quickFlag('noolvidar')" title="Marcar/quitar #noolvidar" style="color:#7d5ba6">⚠</button>
     <button class="icon-btn no-print" onclick="openHelpSheet()" title="Comandos y etiquetas (/ayuda)">❔</button>
     <button class="icon-btn no-print" onclick="openBlockTables()" title="Tablas por bloque">🧩</button>
     <button class="icon-btn no-print" onclick="cycleTheme()" title="Cambiar tema" id="btnTheme">🌓</button>
@@ -576,7 +575,10 @@ function getNoteFields(note){
   return fields;
 }
 function allEntities(){
-  return DATA.notas.map(n=>({ note:n, entity: n.Titulo||'(sin título)', fields: getNoteFields(n) })).filter(e=>Object.keys(e.fields).length);
+  return DATA.notas.map(n=>{
+    const origin = Array.from(new Set([...parseTagsText(n.Tags), ...notebookInherited(n.Notebook)]));
+    return { note:n, entity: n.Titulo||'(sin título)', origin, fields: getNoteFields(n) };
+  }).filter(e=>Object.keys(e.fields).length);
 }
 function allFieldNames(){
   const set = new Set(); allEntities().forEach(e=>Object.keys(e.fields).forEach(k=>set.add(k))); return Array.from(set);
@@ -625,7 +627,7 @@ function renderSidebar(){
   }).join('');
 
   const tc = document.getElementById('tagCloud');
-  tc.innerHTML = allTagsWithCounts().filter(([t])=>!FLAG_TAGS.some(f=>f[0]===t)).map(([t,c])=>{
+  tc.innerHTML = allTagsWithCounts().filter(([t])=>!FLAG_TAGS.some(f=>f[0]===t)).sort((a,b)=>a[0].localeCompare(b[0],'es')).map(([t,c])=>{
     const on = activeTagFilters.has(t);
     return `<div class="tag-chip-row" style="${on?'background:var(--bg-soft);font-weight:700':''}">
       <span onclick="toggleTagFilter('${escAttr(t)}')" style="display:flex;align-items:center;gap:6px;flex:1;min-width:0">
@@ -877,34 +879,46 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('italic')" title="Cursiva"><i>I</i></button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('underline')" title="Subrayado"><u>S</u></button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('strikeThrough')" title="Tachado"><s>S</s></button>
-    <select class="icon-btn" style="padding:6px 4px" onmousedown="event.preventDefault()" onchange="setFontSize(this.value)" title="Tamaño de letra">
+    <select id="fontSizeSelect" style="width:auto;padding:6px 4px" onchange="setFontSize(this.value)" title="Tamaño de letra">
       <option value="">Tamaño</option>
       <option value="2">Chico</option>
       <option value="3">Normal</option>
       <option value="5">Grande</option>
       <option value="7">Enorme</option>
     </select>
+    <span class="sep"></span>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','H1')" title="Título">H1</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','H2')" title="Subtítulo">H2</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','BLOCKQUOTE')" title="Cita">❝</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('insertUnorderedList')" title="Viñeta">•</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertChecklistItem()" title="Casilla">☑</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertRichTable()" title="Tabla — agrega/quita filas y columnas con los botones ⊞">▦</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableAddRow()" title="+ fila (con el cursor dentro de una tabla)">⊞▤</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableAddCol()" title="+ columna">⊞▥</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableDelRow()" title="− fila">⊟▤</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableDelCol()" title="− columna">⊟▥</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V, o insertar OCR)">🖼️</button>
+    <span class="sep"></span>
+    <span style="position:relative;display:inline-flex">
+      <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertRichTable()" title="Insertar tabla">▦</button>
+      <button class="icon-btn" onmousedown="event.preventDefault()" onclick="toggleTableMenu()" title="Filas y columnas de la tabla" style="padding:7px 3px">▾</button>
+      <div id="tableMenu" class="swatch-row hidden" style="position:absolute;top:100%;left:0;flex-direction:column;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);z-index:30;padding:4px;gap:2px">
+        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableAddRow)" style="justify-content:flex-start">⊞▤ + fila</button>
+        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableAddCol)" style="justify-content:flex-start">⊞▥ + columna</button>
+        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableDelRow)" style="justify-content:flex-start">⊟▤ − fila</button>
+        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableDelCol)" style="justify-content:flex-start">⊟▥ − columna</button>
+      </div>
+    </span>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V, o insertar OCR) — se puede agrandar/achicar jalando la esquina">🖼️</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openFieldTemplatePicker()" title="Insertar plantilla de campos (#campo + valor)">🏷️</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="sendSelectionToDic()" title="Mandar palabra/frase seleccionada al diccionario">📖</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertTimestamp()" title="Insertar fecha y hora (para notas de captura rápida)">🕐</button>
     <span class="sep"></span>
     <button class="icon-btn" id="btnMark" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark')" title="Resaltar (toca de nuevo el mismo color para quitarlo)">🖍️</button>
     <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
+    <span class="sep"></span>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('task')" title="Marcar/quitar #task en esta nota" style="color:#4a6fa5">⚑</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('importante')" title="Marcar/quitar #importante en esta nota" style="color:#b3432b">★</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('noolvidar')" title="Marcar/quitar #noolvidar en esta nota" style="color:#7d5ba6">⚠</button>
     <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">
   </div>
   <div id="swatchBar" class="swatch-row hidden"></div>
   <div id="routeHints" class="hidden"></div>
+  ${editingCornell ? '<div class="cornell-bar">📐 Modo Cornell — cada fila es cue + desarrollo <button class="mini-btn" style="width:auto" onclick="addCornellRowDirect()">+ agregar fila</button></div>' : ''}
   <div class="editor-body" id="editorBody">
     <div id="mainArea" class="rich-editor" contenteditable="true" data-placeholder="Escribe aquí…">${note.Contenido||''}</div>
   </div>
@@ -1203,6 +1217,18 @@ function tableAddRow(){
   }
   scheduleSave();
 }
+/* Botón siempre visible de la barra "Modo Cornell" — no depende de tener
+   el cursor dentro de la tabla (a diferencia de tableAddRow), así siempre
+   se ve y siempre funciona. */
+function addCornellRowDirect(){
+  const mainEl = document.getElementById('mainArea'); if(!mainEl) return;
+  const table = mainEl.querySelector('table.cornell-table'); if(!table) return;
+  const cols = table.rows[0] ? table.rows[0].cells.length : 2;
+  const row = table.insertRow(-1);
+  for(let i=0;i<cols;i++){ const c=row.insertCell(-1); c.innerHTML='<br>'; if(i===0) c.className='cornell-cue-cell'; }
+  placeCaretAtStart(row.cells[0]);
+  scheduleSave(); scheduleRouteHints();
+}
 function tableAddCol(){
   const t = currentTableFromSelection(); if(!t){ showToast('Pon el cursor dentro de una tabla'); return; }
   Array.from(t.rows).forEach(row=>{ const c=row.insertCell(-1); c.innerHTML='<br>'; });
@@ -1232,6 +1258,8 @@ function currentHiliteHex(){
   try{ return rgbToHex(document.queryCommandValue('hiliteColor')) || rgbToHex(document.queryCommandValue('backColor')); }
   catch(e){ return null; }
 }
+function toggleTableMenu(){ document.getElementById('tableMenu').classList.toggle('hidden'); }
+function runTableAction(fn){ fn(); document.getElementById('tableMenu').classList.add('hidden'); }
 function toggleSwatches(kind){
   const bar = document.getElementById('swatchBar');
   if(bar.dataset.kind===kind && !bar.classList.contains('hidden')){ bar.classList.add('hidden'); return; }
@@ -1814,8 +1842,11 @@ function fieldTableRenderHTML(bt){
   else if(valor) rows = rows.filter(e=>Object.values(e.fields).some(v=>(v||'').toLowerCase().includes(valor)));
   if(!rows.length) return '<p style="color:var(--text-dim);font-size:13px;margin-top:8px">Sin resultados todavía.</p>';
   const head = '<th>'+(campo?escHtml(campo):'Nota')+'</th>' + cols.map(c=>'<th>'+escHtml(c)+'</th>').join('');
-  const body = rows.map(e=>'<tr><td class="title-cell" onclick="openNoteEditor(\''+e.note.ID+'\')">'+escHtml(e.entity)+'</td>'
-    + cols.map(c=>'<td>'+escHtml(e.fields[c]||'')+'</td>').join('') + '</tr>').join('');
+  const body = rows.map(e=>{
+    const originTxt = e.origin.length ? ' <span style="color:var(--text-dim);font-weight:400">('+e.origin.map(t=>'#'+escHtml(t)).join(' ')+')</span>' : '';
+    return '<tr><td class="title-cell" onclick="openNoteEditor(\''+e.note.ID+'\')">'+escHtml(e.entity)+originTxt+'</td>'
+      + cols.map(c=>'<td>'+escHtml(e.fields[c]||'')+'</td>').join('') + '</tr>';
+  }).join('');
   return '<div style="overflow:auto;margin-top:8px"><table class="org-table"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 function exportFieldTablePDF(id){

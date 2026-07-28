@@ -234,6 +234,9 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 /* dropzone for file link */
 .file-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:4px 8px;font-size:12px;background:var(--bg-soft)}
 
+@media (min-width:821px){
+  aside.desktop-hidden{display:none}
+}
 @media (max-width:820px){
   aside{position:fixed;left:0;top:49px;bottom:0;z-index:150;transform:translateX(-105%);transition:transform var(--transition)}
   aside.open{transform:translateX(0)}
@@ -324,9 +327,15 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 
 <div id="printArea"></div>
 <div id="toast"></div>
+<div id="inlineTagSuggest" class="tag-suggest hidden" style="position:fixed"></div>
 
 <script>
 /* ============ Estado y almacenamiento ============ */
+// Cámbiale el nombre cada vez que se suba un lote de cambios — así en
+// Configuración → Conexión se puede confirmar que estás viendo la versión
+// más reciente y no una copia vieja en caché (mismo truco que en Gastos,
+// pero aquí con lugares turísticos del mundo en vez de nombres).
+const BUILD_VERSION = 'Machu Picchu';
 let GAS_URL = localStorage.getItem('org_gas_url') || '';
 let SHEET_ID = localStorage.getItem('org_sheet_id') || '';
 let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[] };
@@ -631,7 +640,11 @@ function autoRouteNotebook(note){
 }
 
 /* ============ Sidebar ============ */
-function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); }
+function toggleSidebar(){
+  const el = document.getElementById('sidebar');
+  el.classList.toggle('open'); // comportamiento en celular (desliza)
+  el.classList.toggle('desktop-hidden'); // en escritorio: lo oculta del todo, para recuperar espacio
+}
 function setActiveNotebook(name){
   activeNotebook = name; localStorage.setItem('org_active_notebook', name);
   renderSidebar(); renderMain();
@@ -715,8 +728,8 @@ function escAttr(s){ return escHtml(s).replace(/`/g,'&#96;'); }
 /* ============ Vistas: filtrado / orden ============ */
 function setView(v){ currentView=v; localStorage.setItem('org_view', v); document.querySelectorAll('.view-switch button').forEach(b=>b.classList.remove('active')); document.getElementById('vw'+v[0].toUpperCase()+v.slice(1)).classList.add('active'); renderMain(); }
 
-function getFilteredSortedNotes(){
-  const q = (document.getElementById('searchInput').value||'').toLowerCase().trim();
+function getFilteredSortedNotes(query){
+  const q = (query!==undefined ? query : (document.getElementById('searchInput').value||'')).toLowerCase().trim();
   let notes = DATA.notas.filter(n=>{
     if(activeNotebook && n.Notebook!==activeNotebook) return false;
     if(activeTagFilters.size){
@@ -748,20 +761,35 @@ function renderAll(){ renderSidebar(); renderMain(); updateSyncIndicator(); }
 
 function renderMain(){
   const main = document.getElementById('viewArea');
-  const notes = getFilteredSortedNotes();
-  if(currentView==='cards') main.innerHTML = cardsHTML(notes);
-  else if(currentView==='table') main.innerHTML = tableHTML(notes);
-  else main.innerHTML = splitHTML(notes);
+  if(currentView==='cards') main.innerHTML = cardsHTML(getFilteredSortedNotes());
+  else if(currentView==='table') main.innerHTML = tableHTML(getFilteredSortedNotes());
+  else main.innerHTML = splitHTML();
   document.querySelectorAll('.view-switch button').forEach(b=>b.classList.remove('active'));
   const el = document.getElementById('vw'+currentView[0].toUpperCase()+currentView.slice(1)); if(el) el.classList.add('active');
 }
 
-function cardsHTML(notes){
+function cardsHTML(notes, query){
   if(!notes.length) return '<p style="color:var(--text-dim)">Sin notas aquí todavía — crea la primera con "+ Nota".</p>';
-  return '<div class="cards-grid">' + notes.map(n=>{
+  const q = (query!==undefined ? query : (document.getElementById('searchInput').value||'')).toLowerCase().trim();
+  const cards = notes.map(n=>{
     const pairs = extractFieldPairs(n);
-    return pairs.length ? chapterGroupHTML(n, pairs) : noteCardHTML(n);
-  }).join('') + '</div>';
+    if(!pairs.length) return noteCardHTML(n);
+    // con búsqueda activa, solo se muestran los campos que empatan (no la
+    // nota completa) — así no hay que abrir la nota para ver justo lo que
+    // buscabas; la vista dividida sigue siendo la forma de ver todo junto.
+    if(!q) return chapterGroupHTML(n, pairs);
+    const shown = pairs.filter(p => p.cue.toLowerCase().includes(q) || stripHtmlToText(p.texto).toLowerCase().includes(q));
+    if(shown.length) return chapterGroupHTML(n, shown);
+    // el término no matchea ningún campo individual, pero la nota entró al
+    // listado porque matcheó por título/etiqueta/cuaderno (p.ej. buscar
+    // "dengue" cuando ningún campo interno dice "dengue") — en ese caso se
+    // muestra el capítulo completo en vez de ocultarlo por completo.
+    const noteLevelHay = (n.Titulo+' '+effectiveTags(n).join(' ')+' '+(n.Notebook||'')).toLowerCase();
+    if(noteLevelHay.includes(q)) return chapterGroupHTML(n, pairs);
+    return '';
+  }).filter(Boolean);
+  if(!cards.length) return '<p style="color:var(--text-dim)">Nada coincide con tu búsqueda.</p>';
+  return '<div class="cards-grid">' + cards.join('') + '</div>';
 }
 function noteCardHTML(n){
   const tags = effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)}">#${escHtml(t)}</span>`).join('');
@@ -791,11 +819,12 @@ function chapterGroupHTML(n, pairs){
   </div>`;
 }
 function fmtDate(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return String(iso).slice(0,10); return d.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'2-digit'}); }
+function fmtTime(d){ return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }
 
 function sortArrow(col){ return sortState.col===col ? (sortState.dir==='asc'?' ▲':' ▼') : ''; }
 function tableHTML(notes){
   const dynKeys = allDynamicKeys();
-  const cols = [['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas']].concat(dynKeys.map(k=>['kv:'+k,k]));
+  const cols = [['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas'],['Contenido','Contenido']].concat(dynKeys.map(k=>['kv:'+k,k]));
   let head = cols.map(([key,label])=>`<th onclick="sortBy('${key}')">${escHtml(label)}${sortArrow(key)}</th>`).join('') + '<th></th>';
   let rows = notes.map(n=>{
     const kv = keyValueTags(n);
@@ -804,6 +833,7 @@ function tableHTML(notes){
       if(key==='Fecha') return `<td>${fmtDate(n.Fecha)}</td>`;
       if(key==='Notebook') return `<td>${escHtml(n.Notebook||'')}</td>`;
       if(key==='Tags') return `<td>${effectiveTags(n).map(t=>'#'+escHtml(t)).join(' ')}</td>`;
+      if(key==='Contenido') return `<td style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="openNoteEditor('${n.ID}')" title="${escAttr(noteSnippetText(n).slice(0,300))}">${escHtml(noteSnippetText(n).split('\n')[0].slice(0,90))}</td>`;
       if(key.startsWith('kv:')) return `<td>${escHtml(kv[key.slice(3)]||'')}</td>`;
       return '<td></td>';
     }).join('');
@@ -823,12 +853,25 @@ function syncSortUI(){
   const btn = document.getElementById('sortDirBtn'); if(btn) btn.textContent = sortState.dir==='asc' ? '▲' : '▼';
 }
 
-function splitHTML(notes){
+/* La vista dividida tiene su PROPIA búsqueda para la lista de la
+   izquierda, separada de la del header — así puedes tener algo escrito
+   arriba para otra cosa sin que te mueva la lista que ya tienes abierta. */
+let splitSearchQuery = localStorage.getItem('org_split_search') || '';
+function splitHTML(){
+  const notes = getFilteredSortedNotes(splitSearchQuery);
   return `<div class="split-wrap" id="splitWrap">
-    <div class="split-left" id="splitLeft" style="flex:0 0 ${splitRatio}%">${cardsHTML(notes)}</div>
+    <div class="split-left" id="splitLeft" style="flex:0 0 ${splitRatio}%">
+      <input type="search" id="splitSearchInput" placeholder="Buscar en esta lista…" value="${escAttr(splitSearchQuery)}" oninput="onSplitSearchInput(this.value)" style="margin-bottom:10px">
+      <div id="splitCardsArea">${cardsHTML(notes, splitSearchQuery)}</div>
+    </div>
     <div class="split-handle" id="splitHandle"></div>
     <div class="split-right" id="splitDetail">${editingNoteId ? noteDetailHTML(getNote(editingNoteId)) : '<p style="color:var(--text-dim)">Selecciona una nota para editarla aquí.</p>'}</div>
   </div>`;
+}
+function onSplitSearchInput(val){
+  splitSearchQuery = val; localStorage.setItem('org_split_search', val);
+  const area = document.getElementById('splitCardsArea'); if(!area) return;
+  area.innerHTML = cardsHTML(getFilteredSortedNotes(splitSearchQuery), splitSearchQuery);
 }
 function getNote(id){ return DATA.notas.find(n=>n.ID===id); }
 
@@ -997,7 +1040,7 @@ function editorInnerHTML(note, isModal){
     <div id="mainArea" class="rich-editor" contenteditable="true" data-placeholder="Escribe aquí…">${note.Contenido||''}</div>
   </div>
   <div class="editor-bottom">
-    <span id="saveStatus">Guardado</span>
+    <span><span id="saveStatus">Guardado ${fmtTime(new Date())}</span> <button class="icon-btn" style="padding:2px 6px" onmousedown="event.preventDefault()" onclick="doSaveNow()" title="Guardar ahora (por si no se guardó solo)">💾</button></span>
     <span>${fmtDate(note.Fecha)}${note.FechaEdicion?(' · editado '+fmtDate(note.FechaEdicion)):''}</span>
   </div>`;
 }
@@ -1053,6 +1096,27 @@ function ensureHtmlContent(note){
   }
   return note;
 }
+/* Al escribir en una nota nueva, el navegador deja la primera línea como
+   texto suelto (sin <p>/<div>) y solo envuelve las líneas siguientes al
+   presionar Enter — eso rompe la detección de campos "#campo" (que exige
+   que el HTML empiece con una etiqueta) y pega la primera línea con la
+   siguiente al convertir a texto plano (p.ej. "#definicion"+"es..." =
+   "definiciones"). Se normaliza envolviendo ese texto suelto inicial en su
+   propio <div>, igual que las líneas de abajo. */
+function normalizeContentHTML(html){
+  if(!html) return html;
+  const BLOCK = new Set(['P','DIV','H1','H2','H3','LI','TR','BLOCKQUOTE','TD','TH','UL','OL','TABLE']);
+  const src = document.createElement('div'); src.innerHTML = html;
+  const out = document.createElement('div');
+  let buf = null;
+  const flush = ()=>{ if(buf){ out.appendChild(buf); buf=null; } };
+  Array.from(src.childNodes).forEach(node=>{
+    if(node.nodeType===1 && BLOCK.has(node.tagName)){ flush(); out.appendChild(node); }
+    else { if(!buf) buf = document.createElement('div'); buf.appendChild(node); }
+  });
+  flush();
+  return out.innerHTML;
+}
 function collectNoteFromForm(){
   const base = editingNoteId ? Object.assign({}, getNote(editingNoteId)) : newBlankNote();
   const titleEl = document.getElementById('noteTitle');
@@ -1064,7 +1128,7 @@ function collectNoteFromForm(){
   const colorEl = document.getElementById('noteColor');
   if(colorEl) base.Color = colorEl.value;
   const mainEl = document.getElementById('mainArea');
-  if(mainEl) base.Contenido = mainEl.innerHTML;
+  if(mainEl) base.Contenido = normalizeContentHTML(mainEl.innerHTML);
   return base;
 }
 let _saveDebounce=null;
@@ -1079,7 +1143,7 @@ async function doSaveNow(){
   const note = collectNoteFromForm();
   note.FechaEdicion = new Date().toISOString();
   await persistCurrentNote(note);
-  const st2 = document.getElementById('saveStatus'); if(st2) st2.textContent='Guardado';
+  const st2 = document.getElementById('saveStatus'); if(st2) st2.textContent='Guardado '+fmtTime(new Date());
 }
 /* Guarda YA (sin esperar el debounce de 500ms) cuando la pestaña se oculta,
    se cierra, o el navegador la suspende — si no, hasta medio segundo de
@@ -1112,8 +1176,8 @@ function bindEditorEvents(note){
   });
   const mainEl = document.getElementById('mainArea');
   if(mainEl){
-    mainEl.addEventListener('input', ()=>{ scheduleSave(); scheduleRouteHints(); });
-    mainEl.addEventListener('blur', doSaveNow);
+    mainEl.addEventListener('input', ()=>{ scheduleSave(); scheduleRouteHints(); showInlineTagSuggest(); });
+    mainEl.addEventListener('blur', ()=>{ doSaveNow(); hideInlineTagSuggest(); });
     mainEl.addEventListener('keydown', handleRichKeydown);
     mainEl.addEventListener('change', (e)=>{
       // los checkbox dentro del editor no reflejan su "checked" en el HTML
@@ -1186,6 +1250,62 @@ function pickTagSuggest(tag){
   const el = document.getElementById('noteTags');
   el.value = el.value.replace(/#?[\w-]*$/, '#'+tag+' ');
   hideTagSuggest(); el.focus(); scheduleSave();
+}
+
+/* Autocompletado de #etiqueta AL ESCRIBIR en el cuerpo de la nota — a
+   propósito NUNCA inserta nada solo. Solo muestra una lista flotante
+   discreta cerca del cursor; la única forma de que se meta texto es que
+   el usuario le dé clic a una sugerencia. Así no pasa lo de "escribo
+   #hola y se adelanta poniendo #hombre" — mientras no le des clic, sigue
+   siendo exactamente lo que tú tecleaste. */
+function getCaretRect(){
+  const sel = window.getSelection();
+  if(!sel.rangeCount) return null;
+  const range = sel.getRangeAt(0).cloneRange();
+  range.collapse(true);
+  let rect = range.getClientRects()[0] || range.getBoundingClientRect();
+  return (rect && (rect.width || rect.height || rect.top)) ? rect : null;
+}
+function showInlineTagSuggest(){
+  const box = document.getElementById('inlineTagSuggest'); if(!box) return;
+  const sel = window.getSelection();
+  if(!sel.rangeCount || !sel.isCollapsed){ box.classList.add('hidden'); return; }
+  const anchor = sel.anchorNode;
+  if(!anchor || anchor.nodeType!==3){ box.classList.add('hidden'); return; }
+  const textBefore = anchor.textContent.slice(0, sel.anchorOffset);
+  const m = textBefore.match(/#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ:-]+)$/);
+  if(!m){ box.classList.add('hidden'); return; }
+  const partial = m[1].toLowerCase();
+  const options = Array.from(new Set(DATA.tags.map(t=>t.Etiqueta)))
+    .filter(name => name.toLowerCase().startsWith(partial) && name.toLowerCase()!==partial)
+    .slice(0,5);
+  if(!options.length){ box.classList.add('hidden'); return; }
+  box.innerHTML = options.map(o=>`<div onmousedown="event.preventDefault();pickInlineTagSuggest('${escAttr(o)}')">#${escHtml(o)}</div>`).join('');
+  const rect = getCaretRect();
+  if(rect){ box.style.left = Math.round(rect.left)+'px'; box.style.top = Math.round(rect.bottom+4)+'px'; box.style.right='auto'; }
+  box.classList.remove('hidden');
+}
+function hideInlineTagSuggest(){
+  setTimeout(()=>{ const box=document.getElementById('inlineTagSuggest'); if(box) box.classList.add('hidden'); }, 150);
+}
+function pickInlineTagSuggest(fullName){
+  const box = document.getElementById('inlineTagSuggest'); if(box) box.classList.add('hidden');
+  const sel = window.getSelection(); if(!sel.rangeCount) return;
+  const anchor = sel.anchorNode; if(!anchor || anchor.nodeType!==3) return;
+  const offset = sel.anchorOffset;
+  const textBefore = anchor.textContent.slice(0, offset);
+  const m = textBefore.match(/#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ:-]+)$/);
+  if(!m) return;
+  const range = document.createRange();
+  range.setStart(anchor, offset - m[0].length);
+  range.setEnd(anchor, offset);
+  range.deleteContents();
+  const newText = document.createTextNode('#'+fullName+' ');
+  range.insertNode(newText);
+  range.setStartAfter(newText); range.setEndAfter(newText);
+  sel.removeAllRanges(); sel.addRange(range);
+  focusMainEditor();
+  scheduleSave();
 }
 
 /* ============ Editor WYSIWYG: comandos de formato reales, tablas
@@ -1942,11 +2062,12 @@ function renderFieldTablesBody(){
       Cada nota se puede leer como una fila; aquí filtras por un campo (opcional) y eliges qué columnas mostrar.
       ${known.length?('Campos detectados: '+known.map(k=>'#'+escHtml(k)).join(' ')):''}
     </p>
+    <datalist id="fieldNamesDatalist">${known.map(k=>'<option value="'+escAttr(k)+'">').join('')}</datalist>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
       <input type="text" id="ftNombre" placeholder="Nombre de la tabla (ej. Por morfología)" style="flex:1;min-width:140px">
-      <input type="text" id="ftCampo" placeholder="campo (opcional, ej. morfo)" style="flex:1;min-width:120px">
+      <input type="text" id="ftCampo" list="fieldNamesDatalist" placeholder="campo (opcional, ej. morfo)" style="flex:1;min-width:120px">
       <input type="text" id="ftValor" placeholder="que contenga (ej. virus)" style="flex:1;min-width:120px">
-      <input type="text" id="ftCols" placeholder="columnas (ej. definicion, tx)" style="flex:1.4;min-width:160px">
+      <input type="text" id="ftCols" list="fieldNamesDatalist" placeholder="columnas (ej. definicion, tx)" style="flex:1.4;min-width:160px">
       <button class="btn" onclick="saveFieldTable()">+ Crear</button>
     </div>
     <div id="fieldTablesList"></div>
@@ -2250,6 +2371,7 @@ function openSettings(){
       <button onclick="settingsTab(this,'notebooks')">Cuadernos</button>
       <button onclick="settingsTab(this,'appearance')">Apariencia</button>
       <button onclick="settingsTab(this,'connection')">Conexión</button>
+      <button onclick="settingsTab(this,'mejoras')">💡 Mejoras</button>
     </div>
     <div class="modal-body" id="settingsBody"></div>
   </div>`;
@@ -2263,6 +2385,7 @@ function settingsTab(btn, tab){
   if(tab==='notebooks') renderSettingsNotebooks();
   if(tab==='appearance') renderSettingsAppearance();
   if(tab==='connection') renderSettingsConnection();
+  if(tab==='mejoras') renderSettingsMejoras();
 }
 function renderSettingsTags(){
   const body = document.getElementById('settingsBody');
@@ -2272,11 +2395,58 @@ function renderSettingsTags(){
       <input type="color" value="${t.Color||'#8a5a3b'}" onchange="updateTagField('${t.ID}','Color',this.value)">
       <input type="text" value="${escAttr(t.Etiqueta)}" onchange="updateTagField('${t.ID}','Etiqueta',this.value)">
       <label style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" ${t.EsComando?'checked':''} onchange="updateTagField('${t.ID}','EsComando',this.checked?'1':'')"> comando</label>
-      <button class="icon-btn" onclick="deleteEntity('TAGS','${t.ID}').then(()=>{renderSettingsTags();renderSidebar();})">🗑️</button>
+      <button class="icon-btn" onclick="deleteTagUI('${t.ID}')">🗑️</button>
     </div>`).join('') || '<p style="color:var(--text-dim)">Sin etiquetas todavía</p>';
 }
 function promptNewTag(){ const n=prompt('Nombre de la etiqueta (sin #):'); if(!n) return; saveEntity('TAGS',{ID:uid(),Etiqueta:n.trim(),Color:randomColor(),EsComando:'',Descripcion:''}).then(()=>{renderSettingsTags();renderSidebar();}); }
-function updateTagField(id, field, val){ const t=DATA.tags.find(x=>x.ID===id); if(!t) return; t[field]=val; saveEntity('TAGS', t).then(()=>renderSidebar()); }
+/* Una etiqueta vive en dos lugares por nota: el campo Etiquetas y como
+   "#palabra" suelta dentro del texto — renombrar/eliminar tiene que tocar
+   los dos, si no la etiqueta "vieja" reaparece sola la próxima vez que se
+   guarde esa nota (ensureTagsRegistered la vuelve a detectar). */
+function notesUsingTag(name){
+  return DATA.notas.filter(n => parseTagsText(n.Tags).includes(name) || inlineTagsFromContent(n).includes(name));
+}
+function tagRegex(name){
+  return new RegExp('#'+name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-])','g');
+}
+async function renameTagEverywhere(oldName, newName){
+  if(!newName || oldName===newName) return;
+  const affected = notesUsingTag(oldName);
+  for(const n of affected){
+    n.Tags = parseTagsText(n.Tags).map(t=>t===oldName?newName:t).join(' ');
+    n.Contenido = (n.Contenido||'').replace(tagRegex(oldName), '#'+newName);
+    n.FechaEdicion = new Date().toISOString();
+    await saveEntity('NOTAS', n);
+  }
+  if(affected.length) showToast('Renombrada en '+affected.length+' nota'+(affected.length>1?'s':''));
+}
+async function removeTagEverywhere(name){
+  const affected = notesUsingTag(name);
+  for(const n of affected){
+    n.Tags = parseTagsText(n.Tags).filter(t=>t!==name).join(' ');
+    n.Contenido = (n.Contenido||'').replace(tagRegex(name), '');
+    n.FechaEdicion = new Date().toISOString();
+    await saveEntity('NOTAS', n);
+  }
+}
+async function deleteTagUI(id){
+  const t = DATA.tags.find(x=>x.ID===id); if(!t) return;
+  const ok = confirm('¿Eliminar la etiqueta #'+t.Etiqueta+'?\n\nSe quita la etiqueta de todas tus notas, pero las notas NO se borran — solo dejan de tener esa etiqueta.');
+  if(!ok) return;
+  await removeTagEverywhere(t.Etiqueta);
+  await deleteEntity('TAGS', id);
+  renderSettingsTags(); renderAll();
+}
+function updateTagField(id, field, val){
+  const t=DATA.tags.find(x=>x.ID===id); if(!t) return;
+  if(field==='Etiqueta'){
+    const oldName = t.Etiqueta;
+    const newName = val.trim().replace(/^#/,'');
+    if(newName && newName!==oldName) renameTagEverywhere(oldName, newName).then(()=>{ t.Etiqueta=newName; saveEntity('TAGS', t).then(()=>renderAll()); });
+    return;
+  }
+  t[field]=val; saveEntity('TAGS', t).then(()=>renderSidebar());
+}
 function renderSettingsNotebooks(){
   const body = document.getElementById('settingsBody');
   body.innerHTML = `<button class="btn secondary" onclick="promptNewNotebook()">+ nuevo cuaderno</button><div id="nbRows" style="margin-top:10px"></div>`;
@@ -2304,9 +2474,54 @@ function renderSettingsAppearance(){
 }
 function renderSettingsConnection(){
   const body = document.getElementById('settingsBody');
-  body.innerHTML = `<p><b>Sheet vinculado</b><br><span style="font-size:12px;color:var(--text-dim);word-break:break-all">${escHtml(SHEET_ID)}</span></p>
+  body.innerHTML = `<p><b>Versión</b><br><span style="font-size:13px">🗺️ ${escHtml(BUILD_VERSION)}</span> <span style="color:var(--text-dim);font-size:12px">— dime qué lugar ves aquí para saber si estamos viendo lo mismo</span></p>
+    <p><b>Sheet vinculado</b><br><span style="font-size:12px;color:var(--text-dim);word-break:break-all">${escHtml(SHEET_ID)}</span></p>
     <p><b>Web App</b><br><span style="font-size:12px;color:var(--text-dim);word-break:break-all">${escHtml(GAS_URL)}</span></p>
     <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();reopenSetup()">Cambiar Sheet vinculado</button>`;
+}
+/* Apartado abierto para ir dejando ideas/sugerencias de la app conforme se
+   te ocurran, aunque no me las digas de una vez — se guardan como notas
+   normales en un cuaderno reservado, así que también son buscables,
+   editables y exportables como cualquier otra nota. */
+async function renderSettingsMejoras(){
+  const body = document.getElementById('settingsBody');
+  body.innerHTML = `<p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">
+      Ideas, quejas, cosas que se te ocurran para mejorar la app — anótalas aquí cuando quieras, se van guardando solas. Luego me las compartes (o las uso yo directo la próxima vez que trabajemos en esto).
+    </p>
+    <div style="display:flex;gap:6px">
+      <input type="text" id="mejoraInput" placeholder="ej. que el botón X esté más grande…">
+      <button class="btn" onclick="addMejora()">Agregar</button>
+    </div>
+    <div id="mejorasList" style="margin-top:12px;max-height:320px;overflow-y:auto"></div>`;
+  const inp = document.getElementById('mejoraInput');
+  inp.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addMejora(); } });
+  renderMejorasList();
+}
+async function ensureMejorasNotebook(){
+  let nb = DATA.notebooks.find(n=>n.Nombre==='Mejoras Organizador');
+  if(!nb) nb = await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:'Mejoras Organizador', TagsHeredados:'', Color:'#c9a227', TagAuto:'' });
+  return nb;
+}
+async function addMejora(){
+  const inp = document.getElementById('mejoraInput');
+  const texto = (inp.value||'').trim(); if(!texto) return;
+  const nb = await ensureMejorasNotebook();
+  await saveEntity('NOTAS', {
+    ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(),
+    Titulo: texto.slice(0,50), Contenido:'<p>'+escHtml(texto)+'</p>',
+    Tags:'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:''
+  });
+  inp.value=''; inp.focus();
+  renderMejorasList(); renderSidebar();
+}
+function renderMejorasList(){
+  const wrap = document.getElementById('mejorasList'); if(!wrap) return;
+  const items = DATA.notas.filter(n=>n.Notebook==='Mejoras Organizador').sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha)));
+  wrap.innerHTML = items.map(n=>`<div class="settings-row">
+      <span style="flex:1;font-size:13px;cursor:pointer" onclick="openNoteEditor('${n.ID}')">${escHtml(noteSnippetText(n).slice(0,90))}</span>
+      <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
+      <button class="icon-btn" onclick="deleteEntity('NOTAS','${n.ID}').then(()=>{renderMejorasList();renderAll();})">🗑️</button>
+    </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada todavía — el primero que agregues aparece aquí.</p>';
 }
 
 /* ============ Tema ============ */

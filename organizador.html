@@ -379,7 +379,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Fujiyama';
+const BUILD_VERSION = 'Acrópolis';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1007,8 +1007,11 @@ function renderSidebar(){
   const nbList = document.getElementById('notebookList');
   nbList.innerHTML = DATA.notebooks.filter(nb=>nb.Nombre!==MEJORAS_NOTEBOOK).map(nb=>{
     const cnt = activeNotes().filter(n=>n.Notebook===nb.Nombre).length;
-    return `<div class="nb-item ${activeNotebook===nb.Nombre?'active':''}" onclick="setActiveNotebook('${escAttr(nb.Nombre)}')">
-      <span class="nb-dot" style="background:${nb.Color||'#8a5a3b'}"></span>${escHtml(nb.Nombre)}${nb.TagAuto?' <small title="se auto-enruta desde el Inbox con #'+escAttr(nb.TagAuto)+'">🔀</small>':''}<span class="cnt">${cnt}</span>
+    return `<div class="nb-item tag-chip-row ${activeNotebook===nb.Nombre?'active':''}">
+      <span onclick="setActiveNotebook('${escAttr(nb.Nombre)}')" style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;cursor:pointer">
+        <span class="nb-dot" style="background:${nb.Color||'#8a5a3b'}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(nb.Nombre)}</span>${nb.TagAuto?' <small title="se auto-enruta desde el Inbox con #'+escAttr(nb.TagAuto)+'">🔀</small>':''}<span class="cnt">${cnt}</span>
+      </span>
+      <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();openNotebookFolder('${escAttr(nb.ID)}','${escAttr(nb.Nombre)}')" title="Vincular/abrir carpeta de este cuaderno">📁</button>
     </div>`;
   }).join('');
   document.getElementById('nbNone').classList.toggle('active', activeNotebook==='');
@@ -2511,7 +2514,30 @@ function setFileTags(key, tags){
   let all={}; try{ all=JSON.parse(localStorage.getItem('org_filetags')||'{}'); }catch(e){}
   all[key]=tags; localStorage.setItem('org_filetags', JSON.stringify(all));
 }
-async function openExplorer(folderHandle, label){
+async function openNotebookFolder(notebookId, notebookName){
+  const key = 'nbfolder-'+notebookId;
+  let handle = await idbGet(key).catch(()=>null);
+  if(handle){
+    if((await handle.queryPermission({mode:'read'}))!=='granted' && (await handle.requestPermission({mode:'read'}))!=='granted'){
+      showToast('Se vinculó desde otro dispositivo/navegador — vincúlala de nuevo aquí, o falta dar permiso'); return;
+    }
+    openExplorer(handle, notebookName, notebookName);
+    return;
+  }
+  if(!window.showDirectoryPicker){ showToast('Tu navegador no permite vincular carpetas (usa Chrome/Edge de escritorio)'); return; }
+  try{
+    handle = await window.showDirectoryPicker();
+    await idbSet(key, handle);
+    showToast('Carpeta vinculada a "'+notebookName+'"');
+    openExplorer(handle, notebookName, notebookName);
+  }catch(e){ /* usuario canceló */ }
+}
+/* Explorador de una carpeta vinculada — navega, busca, etiqueta cada
+   archivo (guardado localmente, por dispositivo, como los propios
+   permisos del navegador sobre esa carpeta). notebookName es opcional:
+   si la carpeta se abrió desde un cuaderno, "📝 nota" crea la nota
+   DENTRO de ese cuaderno; si se abrió desde una nota suelta, no aplica. */
+async function openExplorer(folderHandle, label, notebookName){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(720px,100%)">
     <div class="modal-head"><b>📁 ${escHtml(label)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
@@ -2522,11 +2548,18 @@ async function openExplorer(folderHandle, label){
   </div>`;
   document.body.appendChild(overlay);
   window._explorerFolderKey = label;
+  window._explorerNotebook = notebookName || '';
   window._explorerEntries = [];
   try{
     for await (const [name, handle] of folderHandle.entries()) window._explorerEntries.push({name, handle, kind: handle.kind});
   }catch(e){ showToast('No se pudo leer la carpeta'); }
   renderExplorerList();
+}
+/* Notas que ya mencionan un archivo por nombre (mismo criterio que ya
+   usan los chips de "archivo vinculado" en el editor — por nombre, no
+   ruta completa, porque eso es lo único que se guarda ahí). */
+function notesForFileName(name){
+  return DATA.notas.filter(n=>!n.Papelera && getNoteLinks(n).some(l=>l.name===name));
 }
 function renderExplorerList(){
   const list = document.getElementById('explorerList'); if(!list) return;
@@ -2535,18 +2568,43 @@ function renderExplorerList(){
   list.innerHTML = entries.map((e,i)=>{
     const key = window._explorerFolderKey+'/'+e.name;
     const tags = getFileTags(key);
+    const related = notesForFileName(e.name);
+    const relLabel = related.length ? `<button class="mini-btn" style="padding:2px 6px;font-size:11px" onclick="event.stopPropagation();openNoteEditor('${related[0].ID}')" title="${related.length>1?related.length+' notas relacionadas':'Ver nota relacionada'}">🔗 ${related.length}</button>` : '';
     return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
       <span>${e.kind==='directory'?'📁':'📄'}</span>
       <span style="flex:1">${escHtml(e.name)}</span>
-      <input type="text" value="${escAttr(tags.join(' '))}" placeholder="#etiquetas" style="width:140px;font-size:12px"
+      ${relLabel}
+      <input type="text" value="${escAttr(tags.join(' '))}" placeholder="#etiquetas" style="width:120px;font-size:12px"
         onchange="setFileTags('${escAttr(key)}', this.value.split(/\\s+/).filter(Boolean))">
-      <button class="icon-btn" onclick="openExplorerEntry(${i})">${e.kind==='directory'?'Abrir':'Ver'}</button>
+      ${e.kind==='file'?`<button class="icon-btn" onclick="createNoteForFile(${i})" title="Crear/abrir nota sobre este archivo">📝</button>`:''}
+      <button class="icon-btn" onclick="openExplorerEntry(${i})" title="${e.kind==='directory'?'Abrir carpeta':'Ver archivo'}">${e.kind==='directory'?'📂':'👁'}</button>
     </div>`;
   }).join('') || '<p style="color:var(--text-dim)">Vacío</p>';
 }
+/* Crea una nota nueva "sobre" este archivo (o reabre la que ya exista) —
+   mismo mecanismo de vínculo que "📎 archivo" en el editor (Archivo como
+   JSON de {name,kind} + el handle real guardado aparte en IndexedDB), así
+   que el chip de archivo ya sale listo al abrir la nota. */
+async function createNoteForFile(i){
+  const entry = window._explorerEntries[i]; if(!entry || entry.kind!=='file') return;
+  const existing = notesForFileName(entry.name);
+  document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#explorerList')) o.remove(); });
+  if(existing.length){ openNoteEditor(existing[0].ID); return; }
+  if(editingNoteId) abandonEmptyDraftIfAny();
+  const note = newBlankNote();
+  note.ID = uid();
+  note.Titulo = entry.name;
+  if(window._explorerNotebook) note.Notebook = window._explorerNotebook;
+  note.Archivo = JSON.stringify([{ name: entry.name, kind:'file' }]);
+  DATA.notas.push(note);
+  await idbSet('link-'+note.ID+'-0', entry.handle);
+  editingNoteId = note.ID;
+  if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = noteDetailHTML(note); }
+  else renderNoteModal(note);
+}
 async function openExplorerEntry(i){
   const entry = window._explorerEntries[i]; if(!entry) return;
-  if(entry.kind==='directory'){ openExplorer(entry.handle, window._explorerFolderKey+'/'+entry.name); return; }
+  if(entry.kind==='directory'){ openExplorer(entry.handle, window._explorerFolderKey+'/'+entry.name, window._explorerNotebook); return; }
   try{
     if((await entry.handle.queryPermission({mode:'read'}))!=='granted'){
       if((await entry.handle.requestPermission({mode:'read'}))!=='granted') return;

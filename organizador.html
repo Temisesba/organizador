@@ -96,6 +96,7 @@ aside h3:first-child{margin-top:2px}
 .nb-item .cnt,.tag-chip-row .cnt{margin-left:auto;color:var(--text-dim);font-size:11px}
 .nb-item.active .cnt{color:var(--accent-text);opacity:.8}
 main{flex:1;overflow-y:auto;padding:14px;min-width:0}
+main:fullscreen{background:var(--bg);padding:20px}
 .mini-btn{font-size:12px;background:none;border:1px dashed var(--border);border-radius:6px;padding:4px 8px;color:var(--text-dim);width:100%;text-align:left}
 .mini-btn:hover{color:var(--text);border-color:var(--text-dim)}
 
@@ -107,6 +108,7 @@ main{flex:1;overflow-y:auto;padding:14px;min-width:0}
 .note-card .nc-snip{font-size:12.5px;color:var(--text-dim);flex:1;white-space:pre-wrap;overflow:hidden;max-height:60px}
 .nc-tags{display:flex;flex-wrap:wrap;gap:4px}
 .tag-badge{font-size:11px;padding:2px 7px;border-radius:20px;border:1px solid var(--border);background:var(--bg-soft)}
+.tag-badge.hit{background:var(--accent);border-color:var(--accent);color:var(--accent-text);font-weight:700}
 [data-theme="eink"] .tag-badge{border:1.5px solid #000}
 .nc-foot{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-dim)}
 
@@ -152,7 +154,7 @@ table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{backgrou
 #tagsInputWrap{position:relative;flex:1;min-width:160px}
 .tag-suggest{position:absolute;top:100%;left:0;right:0;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);z-index:20;max-height:160px;overflow-y:auto}
 .tag-suggest div{padding:6px 10px;font-size:13px;cursor:pointer}
-.tag-suggest div:hover{background:var(--bg-soft)}
+.tag-suggest div:hover, .tag-suggest div.active{background:var(--bg-soft)}
 .editor-toolbar{display:flex;gap:4px;padding:6px 10px;border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
 .editor-toolbar .sep{width:1px;background:var(--border);align-self:stretch;margin:0 4px}
 .swatch-row{display:flex;gap:4px;padding:4px 8px}
@@ -207,6 +209,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .drawer-body{flex:1;overflow-y:auto;padding:12px}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px}
 .modal{background:var(--bg-elev);border-radius:var(--radius);box-shadow:var(--shadow);width:min(640px,100%);max-height:90vh;display:flex;flex-direction:column}
+.modal.fullscreen{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0}
 .modal-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)}
 .modal-body{padding:14px 16px;overflow-y:auto}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);padding:0 12px}
@@ -278,7 +281,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
   <header>
     <span class="brand">🗂️ Organizador</span>
     <button class="icon-btn no-print" id="btnMenu" onclick="toggleSidebar()" title="Cuadernos y etiquetas">☰</button>
-    <div class="search-wrap"><input type="search" id="searchInput" placeholder="Buscar notas, #etiquetas…" oninput="renderMain()"></div>
+    <div class="search-wrap"><input type="search" id="searchInput" placeholder="Buscar notas, #etiquetas…" oninput="renderMain();updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()"></div>
     <select id="sortSelect" class="no-print" style="width:auto" onchange="sortBy(this.value)" title="Ordenar">
       <option value="Fecha">Fecha</option>
       <option value="Titulo">Título</option>
@@ -290,6 +293,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
       <button id="vwTable" onclick="setView('table')" title="Tabla">📊</button>
       <button id="vwSplit" onclick="setView('split')" title="Dividido">⚌</button>
     </div>
+    <button class="icon-btn no-print" onclick="toggleViewFullscreen()" title="Ver esta vista a pantalla completa">⛶</button>
     <div class="spacer"></div>
     <button class="icon-btn no-print" onclick="openHelpSheet()" title="Comandos y etiquetas (/ayuda)">❔</button>
     <button class="icon-btn no-print" onclick="openBlockTables()" title="Tablas por bloque">🧩</button>
@@ -316,6 +320,10 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
       <div id="tagFilterBar"></div>
       <div id="tagCloud"></div>
 
+      <h3>Búsquedas guardadas</h3>
+      <div id="savedSearchList"></div>
+      <button class="mini-btn" onclick="promptSaveSearch()">+ guardar búsqueda actual</button>
+
       <h3>Checklists</h3>
       <div id="tplQuickList"></div>
       <button class="mini-btn" onclick="openChecklists()">Ver todos →</button>
@@ -327,7 +335,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 
 <div id="printArea"></div>
 <div id="toast"></div>
-<div id="inlineTagSuggest" class="tag-suggest hidden" style="position:fixed"></div>
+<div id="inlineTagSuggest" class="tag-suggest hidden" style="position:fixed;z-index:400"></div>
 
 <script>
 /* ============ Estado y almacenamiento ============ */
@@ -336,10 +344,22 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
 const BUILD_VERSION = 'Machu Picchu';
+// El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
+// aparecer en el panel lateral ni como opción al archivar una nota normal,
+// para no confundirlo con un cuaderno de verdad.
+const MEJORAS_NOTEBOOK = 'Mejoras Organizador';
 let GAS_URL = localStorage.getItem('org_gas_url') || '';
 let SHEET_ID = localStorage.getItem('org_sheet_id') || '';
 let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[] };
-const FLAG_TAGS = [['task','⚑ tarea','#4a6fa5'],['importante','★ importante','#b3432b'],['noolvidar','⚠ no olvidar','#7d5ba6']];
+// Banderas rápidas de fábrica (no se pueden borrar) — las que agrega el
+// usuario desde Configuración se guardan en localStorage (son una
+// preferencia de este dispositivo, no viven en el Sheet) y se concatenan
+// a estas mismas al vuelo vía allFlags(). Formato: [nombre, emoji, texto, color].
+const FLAG_TAGS_BASE = [['task','⚑','tarea','#4a6fa5'],['importante','★','importante','#b3432b'],['noolvidar','⚠','no olvidar','#7d5ba6']];
+let customFlags = [];
+try{ customFlags = JSON.parse(localStorage.getItem('org_custom_flags')||'[]'); }catch(e){ customFlags = []; }
+function saveCustomFlags(){ localStorage.setItem('org_custom_flags', JSON.stringify(customFlags)); }
+function allFlags(){ return FLAG_TAGS_BASE.concat(customFlags.map(f=>[f.name, f.emoji, f.name, f.color])); }
 let currentView = localStorage.getItem('org_view') || 'cards';
 let activeNotebook = localStorage.getItem('org_active_notebook') || '';
 let activeTagFilters = new Set();
@@ -517,8 +537,8 @@ function effectiveTags(note){
   return Array.from(new Set([...own, ...inh, ...inline]));
 }
 function tagColor(name){
-  const flag = FLAG_TAGS.find(f=>f[0]===name);
-  if(flag) return flag[2];
+  const flag = allFlags().find(f=>f[0]===name);
+  if(flag) return flag[3];
   const t = DATA.tags.find(x=>x.Etiqueta===name);
   return (t && t.Color) || '#8a5a3b';
 }
@@ -659,7 +679,7 @@ function randomColor(){ const c=['#8a5a3b','#3d7a4f','#4a6fa5','#b3432b','#7d5ba
 function renderSidebar(){
   renderTagFilterBar();
   const nbList = document.getElementById('notebookList');
-  nbList.innerHTML = DATA.notebooks.map(nb=>{
+  nbList.innerHTML = DATA.notebooks.filter(nb=>nb.Nombre!==MEJORAS_NOTEBOOK).map(nb=>{
     const cnt = DATA.notas.filter(n=>n.Notebook===nb.Nombre).length;
     return `<div class="nb-item ${activeNotebook===nb.Nombre?'active':''}" onclick="setActiveNotebook('${escAttr(nb.Nombre)}')">
       <span class="nb-dot" style="background:${nb.Color||'#8a5a3b'}"></span>${escHtml(nb.Nombre)}${nb.TagAuto?' <small title="se auto-enruta desde el Inbox con #'+escAttr(nb.TagAuto)+'">🔀</small>':''}<span class="cnt">${cnt}</span>
@@ -669,15 +689,15 @@ function renderSidebar(){
   document.getElementById('inboxCount').textContent = DATA.notas.filter(n=>!n.Notebook).length;
 
   const fc = document.getElementById('flagCloud');
-  fc.innerHTML = FLAG_TAGS.map(([t,label,color])=>{
+  fc.innerHTML = allFlags().map(([t,emoji,label,color])=>{
     const on = activeTagFilters.has(t);
     return `<div class="tag-chip-row" style="${on?'background:var(--bg-soft);font-weight:700':''}" onclick="toggleTagFilter('${t}')">
-      <span class="nb-dot" style="background:${color}"></span>${label}<span class="cnt">${allTagsWithCounts().find(([tg])=>tg===t)?.[1]||0}</span>
+      <span class="nb-dot" style="background:${color}"></span>${emoji} ${escHtml(label)}<span class="cnt">${allTagsWithCounts().find(([tg])=>tg===t)?.[1]||0}</span>
     </div>`;
   }).join('');
 
   const tc = document.getElementById('tagCloud');
-  tc.innerHTML = allTagsWithCounts().filter(([t])=>!FLAG_TAGS.some(f=>f[0]===t)).sort((a,b)=>a[0].localeCompare(b[0],'es')).map(([t,c])=>{
+  tc.innerHTML = allTagsWithCounts().filter(([t])=>!allFlags().some(f=>f[0]===t)).sort((a,b)=>a[0].localeCompare(b[0],'es')).map(([t,c])=>{
     const on = activeTagFilters.has(t);
     return `<div class="tag-chip-row" style="${on?'background:var(--bg-soft);font-weight:700':''}">
       <span onclick="toggleTagFilter('${escAttr(t)}')" style="display:flex;align-items:center;gap:6px;flex:1;min-width:0">
@@ -689,6 +709,45 @@ function renderSidebar(){
 
   const tq = document.getElementById('tplQuickList');
   tq.innerHTML = DATA.plantillas.slice(0,5).map(p=>`<div class="mini-btn" style="margin-bottom:4px" onclick="openFillModal('${p.ID}')">▶ ${escHtml(p.Nombre)}</div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas</p>';
+
+  renderSavedSearches();
+}
+/* Búsquedas guardadas: combinan el texto del buscador + las etiquetas
+   activas (con su modo Y/O) bajo un nombre, para no tener que reescribir
+   ni volver a elegir las mismas etiquetas cada vez — viven en este mismo
+   dispositivo (localStorage), como las banderas personalizadas. */
+let savedSearches = [];
+try{ savedSearches = JSON.parse(localStorage.getItem('org_saved_searches')||'[]'); }catch(e){ savedSearches = []; }
+function persistSavedSearches(){ localStorage.setItem('org_saved_searches', JSON.stringify(savedSearches)); }
+function promptSaveSearch(){
+  const q = (document.getElementById('searchInput').value||'').trim();
+  const tags = Array.from(activeTagFilters);
+  if(!q && !tags.length){ showToast('Escribe algo o elige etiquetas primero'); return; }
+  const suggested = (tags.length ? tags.map(t=>'#'+t).join(' ') : '') + (q ? (tags.length?' ':'')+q : '');
+  const name = prompt('Nombre para esta búsqueda:', suggested.slice(0,40));
+  if(!name || !name.trim()) return;
+  savedSearches.push({ id:uid(), name:name.trim(), query:q, tags, mode:tagFilterMode });
+  persistSavedSearches(); renderSavedSearches();
+  showToast('Búsqueda "'+name.trim()+'" guardada');
+}
+function applySavedSearch(id){
+  const s = savedSearches.find(x=>x.id===id); if(!s) return;
+  activeTagFilters = new Set(s.tags||[]);
+  tagFilterMode = s.mode||'AND'; localStorage.setItem('org_tag_filter_mode', tagFilterMode);
+  const el = document.getElementById('searchInput'); if(el) el.value = s.query||'';
+  const splitEl = document.getElementById('splitSearchInput'); if(splitEl){ splitEl.value = s.query||''; splitSearchQuery = s.query||''; localStorage.setItem('org_split_search', splitSearchQuery); }
+  renderSidebar(); renderMain();
+}
+function deleteSavedSearch(id){
+  savedSearches = savedSearches.filter(s=>s.id!==id);
+  persistSavedSearches(); renderSavedSearches();
+}
+function renderSavedSearches(){
+  const el = document.getElementById('savedSearchList'); if(!el) return;
+  el.innerHTML = savedSearches.map(s=>`<div class="tag-chip-row">
+      <span onclick="applySavedSearch('${s.id}')" title="${escAttr((s.tags||[]).map(t=>'#'+t).join(' ')+' '+(s.query||''))}" style="flex:1;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🔖 ${escHtml(s.name)}</span>
+      <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();deleteSavedSearch('${s.id}')" title="Borrar búsqueda guardada">✕</button>
+    </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin búsquedas guardadas</p>';
 }
 function toggleTagFilter(t){ activeTagFilters.has(t) ? activeTagFilters.delete(t) : activeTagFilters.add(t); renderSidebar(); renderMain(); }
 function setTagFilterMode(mode){ tagFilterMode=mode; localStorage.setItem('org_tag_filter_mode',mode); renderSidebar(); renderMain(); }
@@ -697,13 +756,16 @@ function renderTagFilterBar(){
   const bar = document.getElementById('tagFilterBar'); if(!bar) return;
   const n = activeTagFilters.size;
   if(!n){ bar.innerHTML=''; return; }
+  const chips = Array.from(activeTagFilters).map(t=>
+    `<span class="tag-badge hit" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" onclick="toggleTagFilter('${escAttr(t)}')" title="Quitar #${escAttr(t)} del filtro">#${escHtml(t)} ✕</span>`
+  ).join('');
   bar.innerHTML = `<div class="tag-filter-bar">
-    <span class="count">${n} etiqueta${n>1?'s':''}</span>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;flex:1">${chips}</div>
     ${n>1 ? `<div class="tag-filter-mode">
       <button class="${tagFilterMode==='AND'?'active':''}" onclick="setTagFilterMode('AND')" title="Nota debe tener TODAS las etiquetas elegidas">Y (todas)</button>
       <button class="${tagFilterMode==='OR'?'active':''}" onclick="setTagFilterMode('OR')" title="Nota con CUALQUIERA de las etiquetas elegidas">O (cualquiera)</button>
     </div>` : ''}
-    <button class="tag-filter-clear" onclick="clearTagFilters()">quitar</button>
+    <button class="tag-filter-clear" onclick="clearTagFilters()">quitar todo</button>
   </div>`;
 }
 
@@ -727,6 +789,20 @@ function escAttr(s){ return escHtml(s).replace(/`/g,'&#96;'); }
 
 /* ============ Vistas: filtrado / orden ============ */
 function setView(v){ currentView=v; localStorage.setItem('org_view', v); document.querySelectorAll('.view-switch button').forEach(b=>b.classList.remove('active')); document.getElementById('vw'+v[0].toUpperCase()+v.slice(1)).classList.add('active'); renderMain(); }
+/* Pantalla completa para ver/editar tablas más grandes — usa la API
+   nativa del navegador sobre el panel principal (tabla, tarjetas o
+   dividido, según la vista activa), no un truco solo de CSS. */
+function toggleViewFullscreen(){
+  const el = document.getElementById('viewArea'); if(!el) return;
+  if(!document.fullscreenElement) el.requestFullscreen().catch(()=>showToast('Tu navegador no permite pantalla completa aquí'));
+  else document.exitFullscreen();
+}
+function toggleModalFullscreen(btn){
+  const modal = btn.closest('.modal'); if(!modal) return;
+  const on = modal.classList.toggle('fullscreen');
+  btn.textContent = on ? '🗗' : '⛶';
+  btn.title = on ? 'Salir de pantalla completa' : 'Pantalla completa';
+}
 
 function getFilteredSortedNotes(query){
   const q = (query!==undefined ? query : (document.getElementById('searchInput').value||'')).toLowerCase().trim();
@@ -771,22 +847,27 @@ function renderMain(){
 function cardsHTML(notes, query){
   if(!notes.length) return '<p style="color:var(--text-dim)">Sin notas aquí todavía — crea la primera con "+ Nota".</p>';
   const q = (query!==undefined ? query : (document.getElementById('searchInput').value||'')).toLowerCase().trim();
+  // las banderas rápidas / etiquetas del panel lateral también acotan qué
+  // tarjetas se muestran dentro de un capítulo, igual que la búsqueda de
+  // texto — y esos mismos nombres son los que se resaltan en los
+  // circulitos de cada tarjetita que sí calificó.
+  const activeTags = Array.from(activeTagFilters).map(t=>t.toLowerCase());
+  const highlight = q ? activeTags.concat([q]) : activeTags;
   const cards = notes.map(n=>{
     const pairs = extractFieldPairs(n);
     if(!pairs.length) return noteCardHTML(n);
-    // con búsqueda activa, solo se muestran los campos que empatan (no la
-    // nota completa) — así no hay que abrir la nota para ver justo lo que
-    // buscabas; la vista dividida sigue siendo la forma de ver todo junto.
-    if(!q) return chapterGroupHTML(n, pairs);
-    const shown = pairs.filter(p => p.cue.toLowerCase().includes(q) || stripHtmlToText(p.texto).toLowerCase().includes(q));
-    if(shown.length) return chapterGroupHTML(n, shown);
-    // el término no matchea ningún campo individual, pero la nota entró al
-    // listado porque matcheó por título/etiqueta/cuaderno (p.ej. buscar
-    // "dengue" cuando ningún campo interno dice "dengue") — en ese caso se
-    // muestra el capítulo completo en vez de ocultarlo por completo.
-    const noteLevelHay = (n.Titulo+' '+effectiveTags(n).join(' ')+' '+(n.Notebook||'')).toLowerCase();
-    if(noteLevelHay.includes(q)) return chapterGroupHTML(n, pairs);
-    return '';
+    // con búsqueda o etiqueta activa, solo se muestran los campos que
+    // empatan (no la nota completa ni todo el capítulo) — si ninguno de
+    // sus campos contiene el término/etiqueta, el capítulo entero se
+    // oculta, aunque el título de la nota sí lo contenga.
+    if(!q && !activeTags.length) return chapterGroupHTML(n, pairs, highlight);
+    const shown = pairs.filter(p=>{
+      const cueL = p.cue.toLowerCase(), textoL = stripHtmlToText(p.texto).toLowerCase();
+      if(q && (cueL.includes(q) || textoL.includes(q))) return true;
+      return activeTags.some(t => cueL.includes('#'+t) || textoL.includes('#'+t));
+    });
+    if(!shown.length) return '';
+    return chapterGroupHTML(n, shown, highlight);
   }).filter(Boolean);
   if(!cards.length) return '<p style="color:var(--text-dim)">Nada coincide con tu búsqueda.</p>';
   return '<div class="cards-grid">' + cards.join('') + '</div>';
@@ -801,20 +882,37 @@ function noteCardHTML(n){
     <div class="nc-foot"><span>${n.Notebook?escHtml(n.Notebook):''}</span><span>${fmtDate(n.Fecha)}</span></div>
   </div>`;
 }
+/* Etiquetas "#sueltas" encontradas DENTRO del texto de un campo/fila —
+   distinto de effectiveTags(nota), que mezcla cuaderno + campo Etiquetas +
+   TODO el cuerpo y termina mostrando cosas de otros campos que no vienen
+   al caso en esta tarjetita puntual. */
+function tagsInText(html){
+  return Array.from(new Set((stripHtmlToText(html||'').match(/#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ:-]+)/g)||[]).map(t=>t.slice(1))));
+}
 /* Nota tipo Cornell / con campos "#campo": el título hace de "capítulo" y
    cada fila/campo es su propia tarjetita chica adentro — así se ve la
-   granularidad de bloque sin dejar de saber a qué nota/cuaderno pertenece. */
-function chapterGroupHTML(n, pairs){
-  const tags = effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)}">#${escHtml(t)}</span>`).join('');
+   granularidad de bloque sin dejar de saber a qué nota/cuaderno pertenece.
+   Arriba solo van las etiquetas HEREDADAS DEL CUADERNO (mostrar también
+   las del campo Etiquetas y las de todo el cuerpo ahí arriba confundía —
+   parecía que la nota entera tenía todas esas etiquetas). Las etiquetas
+   que sí están escritas dentro de cada campo se muestran como sus propios
+   "circulitos" pegados a esa tarjetita nada más. */
+function chapterGroupHTML(n, pairs, highlight){
+  highlight = highlight || [];
+  const nbTags = notebookInherited(n.Notebook).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)}">#${escHtml(t)}</span>`).join('');
   const miniCards = pairs.map(p=>{
     const isField = /^#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+$/.test(p.cue);
     const label = isField ? p.cue : (p.cue || '—');
     const text = stripHtmlToText(p.texto).slice(0,90);
-    return `<div class="field-card"><div class="field-card-tag">${escHtml(label)}</div><div class="field-card-text">${escHtml(text)}</div></div>`;
+    const innerTags = tagsInText(p.texto).map(t=>{
+      const hit = highlight.includes(t.toLowerCase());
+      return `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(t)}">#${escHtml(t)}</span>`;
+    }).join('');
+    return `<div class="field-card"><div class="field-card-tag">${escHtml(label)}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
   }).join('');
   return `<div class="chapter-group" onclick="openNoteEditor('${n.ID}')" style="${n.Color?('border-left:4px solid '+n.Color):''}">
     <div class="chapter-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}<span class="chapter-meta">${n.Notebook?(escHtml(n.Notebook)+' · '):''}${fmtDate(n.Fecha)}</span></div>
-    <div class="nc-tags">${tags}</div>
+    ${nbTags?`<div class="nc-tags">${nbTags}</div>`:''}
     <div class="field-cards-row">${miniCards}</div>
   </div>`;
 }
@@ -861,7 +959,7 @@ function splitHTML(){
   const notes = getFilteredSortedNotes(splitSearchQuery);
   return `<div class="split-wrap" id="splitWrap">
     <div class="split-left" id="splitLeft" style="flex:0 0 ${splitRatio}%">
-      <input type="search" id="splitSearchInput" placeholder="Buscar en esta lista…" value="${escAttr(splitSearchQuery)}" oninput="onSplitSearchInput(this.value)" style="margin-bottom:10px">
+      <input type="search" id="splitSearchInput" placeholder="Buscar en esta lista…" value="${escAttr(splitSearchQuery)}" oninput="onSplitSearchInput(this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
       <div id="splitCardsArea">${cardsHTML(notes, splitSearchQuery)}</div>
     </div>
     <div class="split-handle" id="splitHandle"></div>
@@ -968,7 +1066,9 @@ function closeNoteEditor(){
 function editorInnerHTML(note, isModal){
   editingCornell = isCornellNote(note);
   ensureHtmlContent(note);
-  const nbOptions = ['<option value="">— sin cuaderno —</option>'].concat(DATA.notebooks.map(nb=>`<option value="${escAttr(nb.Nombre)}" ${note.Notebook===nb.Nombre?'selected':''}>${escHtml(nb.Nombre)}</option>`)).join('');
+  const nbOptions = ['<option value="">— sin cuaderno —</option>'].concat(DATA.notebooks
+    .filter(nb=>nb.Nombre!==MEJORAS_NOTEBOOK || note.Notebook===MEJORAS_NOTEBOOK)
+    .map(nb=>`<option value="${escAttr(nb.Nombre)}" ${note.Notebook===nb.Nombre?'selected':''}>${escHtml(nb.Nombre)}</option>`)).join('');
   return `
   <div class="editor-top">
     <input id="noteTitle" value="${escAttr(note.Titulo)}" placeholder="Título de la nota">
@@ -984,7 +1084,6 @@ function editorInnerHTML(note, isModal){
     <select id="noteNotebook">${nbOptions}</select>
     <div id="tagsInputWrap">
       <input type="text" id="noteTags" value="${escAttr(note.Tags)}" placeholder="#etiquetas separadas por espacio">
-      <div id="tagSuggest" class="tag-suggest hidden"></div>
     </div>
     <input type="color" id="noteColor" value="${note.Color||'#8a5a3b'}" title="Color de la nota">
     <button class="icon-btn" onclick="pickFilesForNote()" title="Vincular archivo(s)">📎</button>
@@ -1028,9 +1127,7 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" id="btnMark" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark')" title="Resaltar (toca de nuevo el mismo color para quitarlo)">🖍️</button>
     <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
     <span class="sep"></span>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('task')" title="Insertar #task aquí donde está el cursor" style="color:#4a6fa5">⚑</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('importante')" title="Insertar #importante aquí donde está el cursor" style="color:#b3432b">★</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('noolvidar')" title="Insertar #noolvidar aquí donde está el cursor" style="color:#7d5ba6">⚠</button>
+    ${allFlags().map(([t,emoji,label,color])=>`<button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('${t}')" title="Insertar #${escAttr(t)} (${escAttr(label)}) aquí donde está el cursor" style="color:${color}">${emoji}</button>`).join('')}
     <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">
   </div>
   <div id="swatchBar" class="swatch-row hidden"></div>
@@ -1162,9 +1259,13 @@ async function persistCurrentNote(note){
   if(currentView!=='table'){ /* keep list roughly fresh without losing focus */ }
   return saved;
 }
+function findTagByName(name){
+  const key = (name||'').trim().toLowerCase();
+  return key ? DATA.tags.find(x=>(x.Etiqueta||'').trim().toLowerCase()===key) : null;
+}
 function ensureTagsRegistered(tagsStr){
   parseTagsText(tagsStr).forEach(t=>{
-    if(!DATA.tags.find(x=>x.Etiqueta===t)) saveEntity('TAGS', { ID:uid(), Etiqueta:t, Color:randomColor(), EsComando:'', Descripcion:'' });
+    if(!findTagByName(t)) saveEntity('TAGS', { ID:uid(), Etiqueta:t, Color:randomColor(), EsComando:'', Descripcion:'' });
   });
 }
 function bindEditorEvents(note){
@@ -1176,8 +1277,8 @@ function bindEditorEvents(note){
   });
   const mainEl = document.getElementById('mainArea');
   if(mainEl){
-    mainEl.addEventListener('input', ()=>{ scheduleSave(); scheduleRouteHints(); showInlineTagSuggest(); });
-    mainEl.addEventListener('blur', ()=>{ doSaveNow(); hideInlineTagSuggest(); });
+    mainEl.addEventListener('input', ()=>{ scheduleSave(); scheduleRouteHints(); updateTagSuggestFromEditable(); });
+    mainEl.addEventListener('blur', ()=>{ doSaveNow(); scheduleHideGlobalTagSuggest(); });
     mainEl.addEventListener('keydown', handleRichKeydown);
     mainEl.addEventListener('change', (e)=>{
       // los checkbox dentro del editor no reflejan su "checked" en el HTML
@@ -1191,8 +1292,9 @@ function bindEditorEvents(note){
   }
   const tagsEl = document.getElementById('noteTags');
   if(tagsEl){
-    tagsEl.addEventListener('input', showTagSuggest);
-    tagsEl.addEventListener('blur', ()=>setTimeout(hideTagSuggest,150));
+    tagsEl.addEventListener('input', ()=>updateTagSuggestFromInput(tagsEl));
+    tagsEl.addEventListener('keydown', e=>{ handleTagSuggestKeydown(e); });
+    tagsEl.addEventListener('blur', ()=>scheduleHideGlobalTagSuggest());
     tagsEl.addEventListener('input', scheduleRouteHints);
   }
   const nbEl = document.getElementById('noteNotebook');
@@ -1236,28 +1338,21 @@ function insertTimestamp(){
   document.execCommand('insertHTML', false, '<span style="color:var(--text-dim);font-size:.85em">🕐 '+txt+'</span>&nbsp;');
   scheduleSave();
 }
-function showTagSuggest(){
-  const el = document.getElementById('noteTags'); const box = document.getElementById('tagSuggest');
-  const val = el.value; const m = val.match(/#?([\w-]*)$/);
-  const partial = m ? m[1].toLowerCase() : '';
-  const options = DATA.tags.map(t=>t.Etiqueta).filter(t=>t.toLowerCase().includes(partial)).slice(0,8);
-  if(!options.length){ box.classList.add('hidden'); return; }
-  box.innerHTML = options.map(o=>`<div onmousedown="pickTagSuggest('${escAttr(o)}')">#${escHtml(o)}</div>`).join('');
-  box.classList.remove('hidden');
+/* ============ Autocompletado de #etiqueta — UN SOLO popup flotante
+   reusado por cualquier campo de texto (cuerpo de la nota, campo
+   Etiquetas, buscadores, +Dato general…). A propósito NUNCA inserta nada
+   solo mientras escribes — solo aparece una lista flotante discreta; la
+   única forma de que se meta texto es clic en una sugerencia O flecha
+   abajo/arriba para resaltar una opción + Enter para confirmarla. Así no
+   pasa lo de "escribo #hola y se adelanta poniendo #hombre": mientras no
+   confirmes (clic o Enter sobre una opción resaltada), sigue siendo
+   exactamente lo que tecleaste. */
+let _tagSuggestCtx = null; // {type:'input'|'editable', el|node, start, end, options, activeIndex, x, y}
+function tagSuggestOptionsFor(partial){
+  return Array.from(new Set(DATA.tags.map(t=>t.Etiqueta)))
+    .filter(name => name.toLowerCase().startsWith(partial) && name.toLowerCase()!==partial)
+    .slice(0,6);
 }
-function hideTagSuggest(){ const box=document.getElementById('tagSuggest'); if(box) box.classList.add('hidden'); }
-function pickTagSuggest(tag){
-  const el = document.getElementById('noteTags');
-  el.value = el.value.replace(/#?[\w-]*$/, '#'+tag+' ');
-  hideTagSuggest(); el.focus(); scheduleSave();
-}
-
-/* Autocompletado de #etiqueta AL ESCRIBIR en el cuerpo de la nota — a
-   propósito NUNCA inserta nada solo. Solo muestra una lista flotante
-   discreta cerca del cursor; la única forma de que se meta texto es que
-   el usuario le dé clic a una sugerencia. Así no pasa lo de "escribo
-   #hola y se adelanta poniendo #hombre" — mientras no le des clic, sigue
-   siendo exactamente lo que tú tecleaste. */
 function getCaretRect(){
   const sel = window.getSelection();
   if(!sel.rangeCount) return null;
@@ -1266,46 +1361,104 @@ function getCaretRect(){
   let rect = range.getClientRects()[0] || range.getBoundingClientRect();
   return (rect && (rect.width || rect.height || rect.top)) ? rect : null;
 }
-function showInlineTagSuggest(){
-  const box = document.getElementById('inlineTagSuggest'); if(!box) return;
-  const sel = window.getSelection();
-  if(!sel.rangeCount || !sel.isCollapsed){ box.classList.add('hidden'); return; }
-  const anchor = sel.anchorNode;
-  if(!anchor || anchor.nodeType!==3){ box.classList.add('hidden'); return; }
-  const textBefore = anchor.textContent.slice(0, sel.anchorOffset);
-  const m = textBefore.match(/#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ:-]+)$/);
-  if(!m){ box.classList.add('hidden'); return; }
-  const partial = m[1].toLowerCase();
-  const options = Array.from(new Set(DATA.tags.map(t=>t.Etiqueta)))
-    .filter(name => name.toLowerCase().startsWith(partial) && name.toLowerCase()!==partial)
-    .slice(0,5);
-  if(!options.length){ box.classList.add('hidden'); return; }
-  box.innerHTML = options.map(o=>`<div onmousedown="event.preventDefault();pickInlineTagSuggest('${escAttr(o)}')">#${escHtml(o)}</div>`).join('');
-  const rect = getCaretRect();
-  if(rect){ box.style.left = Math.round(rect.left)+'px'; box.style.top = Math.round(rect.bottom+4)+'px'; box.style.right='auto'; }
+let _tagSuggestGen = 0;
+function renderGlobalTagSuggest(){
+  _tagSuggestGen++;
+  const box = document.getElementById('inlineTagSuggest'); if(!box || !_tagSuggestCtx) return;
+  const ctx = _tagSuggestCtx;
+  box.innerHTML = ctx.options.map((o,i)=>
+    `<div class="${i===ctx.activeIndex?'active':''}" onmousedown="event.preventDefault();confirmTagSuggest(${i})">#${escHtml(o)}</div>`).join('');
+  box.style.left = Math.round(ctx.x)+'px'; box.style.top = Math.round(ctx.y)+'px'; box.style.right='auto';
   box.classList.remove('hidden');
 }
-function hideInlineTagSuggest(){
-  setTimeout(()=>{ const box=document.getElementById('inlineTagSuggest'); if(box) box.classList.add('hidden'); }, 150);
-}
-function pickInlineTagSuggest(fullName){
+function hideGlobalTagSuggest(){
+  _tagSuggestGen++;
   const box = document.getElementById('inlineTagSuggest'); if(box) box.classList.add('hidden');
-  const sel = window.getSelection(); if(!sel.rangeCount) return;
-  const anchor = sel.anchorNode; if(!anchor || anchor.nodeType!==3) return;
-  const offset = sel.anchorOffset;
-  const textBefore = anchor.textContent.slice(0, offset);
-  const m = textBefore.match(/#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ:-]+)$/);
-  if(!m) return;
-  const range = document.createRange();
-  range.setStart(anchor, offset - m[0].length);
-  range.setEnd(anchor, offset);
-  range.deleteContents();
-  const newText = document.createTextNode('#'+fullName+' ');
-  range.insertNode(newText);
-  range.setStartAfter(newText); range.setEndAfter(newText);
-  sel.removeAllRanges(); sel.addRange(range);
-  focusMainEditor();
-  scheduleSave();
+  _tagSuggestCtx = null;
+}
+/* El popup es UNO SOLO compartido por varios campos — si el cuerpo pierde
+   el foco (blur) hacia el campo Etiquetas y éste abre sus propias
+   sugerencias casi al mismo tiempo, el "ocultar con retraso" del blur
+   anterior podía dispararse DESPUÉS y tapar las sugerencias nuevas que sí
+   se querían ver. Se guarda un número de generación: si para cuando se
+   cumple el retraso ya hubo un show/hide más reciente, este hide viejo no
+   hace nada. */
+function scheduleHideGlobalTagSuggest(){
+  const gen = _tagSuggestGen;
+  setTimeout(()=>{ if(gen===_tagSuggestGen) hideGlobalTagSuggest(); }, 150);
+}
+/* Para campos <input> normales (buscadores, Etiquetas, +Dato general): se
+   guía por selectionStart/value, no por Selection/Range del DOM. */
+function updateTagSuggestFromInput(el){
+  const pos = el.selectionStart;
+  const before = el.value.slice(0, pos);
+  const m = before.match(/#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ:-]*)$/);
+  if(!m){ hideGlobalTagSuggest(); return; }
+  const options = tagSuggestOptionsFor(m[1].toLowerCase());
+  if(!options.length){ hideGlobalTagSuggest(); return; }
+  const rect = el.getBoundingClientRect();
+  _tagSuggestCtx = { type:'input', el, start: pos-m[0].length, end: pos, options, activeIndex:0, x:rect.left, y:rect.bottom+4 };
+  renderGlobalTagSuggest();
+}
+/* Para el cuerpo (contenteditable): se guía por window.getSelection(). */
+function updateTagSuggestFromEditable(){
+  const sel = window.getSelection();
+  if(!sel.rangeCount || !sel.isCollapsed){ hideGlobalTagSuggest(); return; }
+  const anchor = sel.anchorNode;
+  if(!anchor || anchor.nodeType!==3){ hideGlobalTagSuggest(); return; }
+  const before = anchor.textContent.slice(0, sel.anchorOffset);
+  const m = before.match(/#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ:-]*)$/);
+  if(!m){ hideGlobalTagSuggest(); return; }
+  const options = tagSuggestOptionsFor(m[1].toLowerCase());
+  if(!options.length){ hideGlobalTagSuggest(); return; }
+  const rect = getCaretRect(); if(!rect){ hideGlobalTagSuggest(); return; }
+  _tagSuggestCtx = { type:'editable', node:anchor, start: sel.anchorOffset-m[0].length, end: sel.anchorOffset, options, activeIndex:0, x:rect.left, y:rect.bottom+4 };
+  renderGlobalTagSuggest();
+}
+function moveTagSuggest(delta){
+  if(!_tagSuggestCtx) return false;
+  const n = _tagSuggestCtx.options.length;
+  _tagSuggestCtx.activeIndex = (_tagSuggestCtx.activeIndex + delta + n) % n;
+  renderGlobalTagSuggest();
+  return true;
+}
+function confirmTagSuggest(index){
+  if(!_tagSuggestCtx) return;
+  const ctx = _tagSuggestCtx;
+  const name = ctx.options[index!==undefined?index:ctx.activeIndex]; if(!name) return;
+  if(ctx.type==='input'){
+    const el = ctx.el;
+    const newVal = el.value.slice(0,ctx.start) + '#'+name+' ' + el.value.slice(ctx.end);
+    el.value = newVal;
+    const newPos = ctx.start + name.length + 2;
+    el.setSelectionRange(newPos,newPos);
+    el.focus();
+    el.dispatchEvent(new Event('input', {bubbles:true}));
+  } else {
+    const range = document.createRange();
+    range.setStart(ctx.node, ctx.start); range.setEnd(ctx.node, ctx.end);
+    range.deleteContents();
+    const newText = document.createTextNode('#'+name+' ');
+    range.insertNode(newText);
+    range.setStartAfter(newText); range.setEndAfter(newText);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    focusMainEditor();
+    scheduleSave();
+  }
+  hideGlobalTagSuggest();
+}
+/* Llamar al inicio de cualquier keydown handler de un campo con
+   autocompletado — si hay sugerencias visibles y la tecla es de
+   navegación/confirmación, la consume (return true) y el resto del
+   handler debe cortar ahí (ej. no disparar el Enter normal del campo). */
+function handleTagSuggestKeydown(e){
+  const box = document.getElementById('inlineTagSuggest');
+  if(!_tagSuggestCtx || !box || box.classList.contains('hidden')) return false;
+  if(e.key==='ArrowDown'){ e.preventDefault(); moveTagSuggest(1); return true; }
+  if(e.key==='ArrowUp'){ e.preventDefault(); moveTagSuggest(-1); return true; }
+  if(e.key==='Enter' || e.key==='Tab'){ e.preventDefault(); confirmTagSuggest(); return true; }
+  if(e.key==='Escape'){ hideGlobalTagSuggest(); return true; }
+  return false;
 }
 
 /* ============ Editor WYSIWYG: comandos de formato reales, tablas
@@ -1324,6 +1477,7 @@ function runCmd(cmd, val){
    desaparece y se convierte al formato real de una vez; no es una vista de
    código aparte, es solo una forma rápida de dar formato al vuelo. */
 function handleRichKeydown(e){
+  if(handleTagSuggestKeydown(e)) return;
   if(e.key===' '){
     const sel = window.getSelection(); if(!sel.rangeCount) return;
     const anchor = sel.anchorNode; if(!anchor) return;
@@ -1604,7 +1758,7 @@ function deleteNoteUI(id){
 function openQuickDatoModal(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
-    <div class="modal-head"><b>⚡ Dato general</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-head"><b>⚡ Dato general</b><button class="icon-btn" onclick="hideGlobalTagSuggest();this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
       <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">
         "#etiqueta, lo que quieras" — se guarda solo en tu listado de Datos generales, ordenado por fecha. Ábrela después para agregarle más.
@@ -1620,7 +1774,9 @@ function openQuickDatoModal(){
   document.body.appendChild(overlay);
   const inp = document.getElementById('quickDatoInput');
   inp.focus();
-  inp.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); saveQuickDato(); } });
+  inp.addEventListener('input', ()=>updateTagSuggestFromInput(inp));
+  inp.addEventListener('keydown', e=>{ if(handleTagSuggestKeydown(e)) return; if(e.key==='Enter'){ e.preventDefault(); saveQuickDato(); } });
+  inp.addEventListener('blur', ()=>scheduleHideGlobalTagSuggest());
   renderQuickDatoList();
 }
 async function ensureDatosGeneralesNotebook(){
@@ -2036,7 +2192,7 @@ function histAddItem(id){
 function openBlockTables(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(1200px,96vw)">
-    <div class="modal-head"><b>🧩 Tablas</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-head"><b>🧩 Tablas</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="tabs">
       <button class="active" onclick="blockTablesTab(this,'campos')">Por campos de nota</button>
       <button onclick="blockTablesTab(this,'bloque')">Por etiqueta de bloque</button>
@@ -2227,7 +2383,7 @@ function saveBlockTable(){
 function openTagCompendium(tag){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(760px,100%)">
-    <div class="modal-head"><b>👁 #${escHtml(tag)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-head"><b>👁 #${escHtml(tag)}</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="modal-body">${blockTableRenderHTML(tag)}</div>
   </div>`;
   document.body.appendChild(overlay);
@@ -2258,7 +2414,7 @@ function openHelpSheet(){
     <div class="modal-body">
       <details open>
         <summary style="font-weight:700;cursor:pointer;margin-bottom:6px">🚩 Banderas rápidas</summary>
-        ${FLAG_TAGS.map(([t,label,color])=>`<div class="settings-row"><span class="nb-dot" style="background:${color}"></span> #${t} — ${escHtml(label)}</div>`).join('')}
+        ${allFlags().map(([t,emoji,label,color])=>`<div class="settings-row"><span class="nb-dot" style="background:${color}"></span> ${emoji} #${t} — ${escHtml(label)}</div>`).join('')}
       </details>
       <details open style="margin-top:10px">
         <summary style="font-weight:700;cursor:pointer;margin-bottom:6px">/ Comandos (${comandos.length})</summary>
@@ -2387,18 +2543,98 @@ function settingsTab(btn, tab){
   if(tab==='connection') renderSettingsConnection();
   if(tab==='mejoras') renderSettingsMejoras();
 }
+/* Las banderas rápidas (⚑★⚠ + las que agregues) se guardan en este mismo
+   dispositivo (localStorage), no en el Sheet — son un atajo de la
+   interfaz, no un dato de tus notas; las notas que crean solo llevan la
+   etiqueta normal "#nombre", igual que si la hubieras escrito a mano. */
+function renderFlagsSection(){
+  const custom = customFlags;
+  return `<p style="font-weight:700;margin:0 0 6px">🚩 Banderas rápidas</p>
+    <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Aparecen en el panel lateral y como botones en el editor de texto para insertar su etiqueta con un clic.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+      ${FLAG_TAGS_BASE.map(([t,emoji,label,color])=>`<span class="tag-badge" style="border-color:${color}">${emoji} ${escHtml(label)}</span>`).join('')}
+      ${custom.map(f=>`<span class="tag-badge" style="border-color:${f.color};display:inline-flex;align-items:center;gap:4px">${f.emoji} ${escHtml(f.name)} <button class="icon-btn" style="padding:0 3px" onclick="deleteCustomFlag('${escAttr(f.id)}')" title="Quitar bandera">✕</button></span>`).join('')}
+    </div>
+    <button class="btn secondary" onclick="openAddFlagModal()">+ agregar bandera</button>`;
+}
+function deleteCustomFlag(id){
+  customFlags = customFlags.filter(f=>f.id!==id);
+  saveCustomFlags(); renderSettingsTags(); renderSidebar();
+}
+const FLAG_EMOJI_CHOICES = ['⚑','🚩','📌','⭐','★','❤️','🔥','⚠️','❗','✅','🔔','💡','📎','🎯','🕐','🔒','🎓','💊','🧪','📞','🛒','✈️','🎂','💰'];
+function openAddFlagModal(){
+  let picked = FLAG_EMOJI_CHOICES[0];
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(360px,100%)">
+    <div class="modal-head"><b>+ Nueva bandera rápida</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <input type="text" id="flagName" placeholder="nombre (sin #), ej. revisar">
+      <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px" id="flagEmojiGrid">
+        ${FLAG_EMOJI_CHOICES.map((e,i)=>`<button type="button" class="icon-btn${i===0?' active':''}" style="font-size:18px" onclick="pickFlagEmoji(this,'${e}')">${e}</button>`).join('')}
+      </div>
+      <input type="color" id="flagColor" value="${randomColor()}" style="margin-top:10px">
+      <div style="margin-top:12px;display:flex;justify-content:flex-end">
+        <button class="btn" onclick="saveNewFlag()">Agregar</button>
+      </div>
+    </div>
+  </div>`;
+  overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  window._pickedFlagEmoji = picked;
+  document.getElementById('flagName').focus();
+}
+function pickFlagEmoji(btn, emoji){
+  window._pickedFlagEmoji = emoji;
+  document.getElementById('flagEmojiGrid').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+}
+function saveNewFlag(){
+  const name = (document.getElementById('flagName').value||'').trim().replace(/^#/,'');
+  if(!name){ showToast('Ponle un nombre a la bandera'); return; }
+  const color = document.getElementById('flagColor').value;
+  const emoji = window._pickedFlagEmoji || FLAG_EMOJI_CHOICES[0];
+  customFlags.push({ id: uid(), name, emoji, color });
+  saveCustomFlags();
+  document.getElementById('flagName').closest('.modal-overlay').remove();
+  renderSettingsTags(); renderSidebar();
+  showToast('Bandera '+emoji+' #'+name+' agregada');
+}
 function renderSettingsTags(){
   const body = document.getElementById('settingsBody');
-  body.innerHTML = `<button class="btn secondary" onclick="promptNewTag()">+ nueva etiqueta / comando</button><div id="tagsRows" style="margin-top:10px"></div>`;
-  document.getElementById('tagsRows').innerHTML = DATA.tags.map(t=>`
+  body.innerHTML = renderFlagsSection() + `<hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn secondary" onclick="promptNewTag()">+ nueva etiqueta / comando</button>
+      <button class="btn secondary" onclick="mergeDuplicateTagsUI()" title="Si por alguna razón quedaron dos etiquetas con el mismo nombre (ej. creadas casi al mismo tiempo desde dos notas), combínalas en una sola">🧹 Combinar duplicadas</button>
+    </div>
+    <div id="tagsRows" style="margin-top:10px"></div>`;
+  const sorted = DATA.tags.slice().sort((a,b)=>(a.Etiqueta||'').localeCompare(b.Etiqueta||'','es'));
+  document.getElementById('tagsRows').innerHTML = sorted.map(t=>`
     <div class="settings-row">
       <input type="color" value="${t.Color||'#8a5a3b'}" onchange="updateTagField('${t.ID}','Color',this.value)">
       <input type="text" value="${escAttr(t.Etiqueta)}" onchange="updateTagField('${t.ID}','Etiqueta',this.value)">
-      <label style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" ${t.EsComando?'checked':''} onchange="updateTagField('${t.ID}','EsComando',this.checked?'1':'')"> comando</label>
+      <label style="font-size:12px;display:flex;gap:4px;align-items:center" title="Solo cambia en qué sección aparece dentro de ❔ Comandos y etiquetas (arriba en 'Comandos', si no en 'Etiquetas') — no cambia cómo se comporta la etiqueta en tus notas."><input type="checkbox" ${t.EsComando?'checked':''} onchange="updateTagField('${t.ID}','EsComando',this.checked?'1':'')"> comando</label>
       <button class="icon-btn" onclick="deleteTagUI('${t.ID}')">🗑️</button>
     </div>`).join('') || '<p style="color:var(--text-dim)">Sin etiquetas todavía</p>';
 }
-function promptNewTag(){ const n=prompt('Nombre de la etiqueta (sin #):'); if(!n) return; saveEntity('TAGS',{ID:uid(),Etiqueta:n.trim(),Color:randomColor(),EsComando:'',Descripcion:''}).then(()=>{renderSettingsTags();renderSidebar();}); }
+function promptNewTag(){
+  const n=prompt('Nombre de la etiqueta (sin #):'); if(!n) return;
+  const name = n.trim().replace(/^#/,''); if(!name) return;
+  if(findTagByName(name)){ showToast('Ya existe la etiqueta #'+name); return; }
+  saveEntity('TAGS',{ID:uid(),Etiqueta:name,Color:randomColor(),EsComando:'',Descripcion:''}).then(()=>{renderSettingsTags();renderSidebar();});
+}
+async function mergeDuplicateTagsUI(){
+  const seen = new Map(); const dupIds = [];
+  DATA.tags.forEach(t=>{
+    const key = (t.Etiqueta||'').trim().toLowerCase(); if(!key) return;
+    if(seen.has(key)) dupIds.push(t.ID); else seen.set(key, t);
+  });
+  if(!dupIds.length){ showToast('No hay etiquetas duplicadas'); return; }
+  const ok = confirm('Hay '+dupIds.length+' etiqueta(s) repetida(s) con el mismo nombre (por ejemplo, creadas por el navegador al mismo tiempo desde dos notas distintas) — se combinan en una sola. Tus notas no cambian, solo se limpia la lista de etiquetas.');
+  if(!ok) return;
+  for(const id of dupIds) await deleteEntity('TAGS', id);
+  renderSettingsTags(); renderSidebar();
+  showToast('Combinadas '+dupIds.length+' etiqueta(s) repetida(s)');
+}
 /* Una etiqueta vive en dos lugares por nota: el campo Etiquetas y como
    "#palabra" suelta dentro del texto — renombrar/eliminar tiene que tocar
    los dos, si no la etiqueta "vieja" reaparece sola la próxima vez que se
@@ -2450,7 +2686,7 @@ function updateTagField(id, field, val){
 function renderSettingsNotebooks(){
   const body = document.getElementById('settingsBody');
   body.innerHTML = `<button class="btn secondary" onclick="promptNewNotebook()">+ nuevo cuaderno</button><div id="nbRows" style="margin-top:10px"></div>`;
-  document.getElementById('nbRows').innerHTML = DATA.notebooks.map(nb=>`
+  document.getElementById('nbRows').innerHTML = DATA.notebooks.filter(nb=>nb.Nombre!==MEJORAS_NOTEBOOK).map(nb=>`
     <div class="settings-row">
       <input type="color" value="${nb.Color||'#8a5a3b'}" onchange="updateNbField('${nb.ID}','Color',this.value)">
       <input type="text" value="${escAttr(nb.Nombre)}" onchange="updateNbField('${nb.ID}','Nombre',this.value)">

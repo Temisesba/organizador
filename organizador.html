@@ -1537,8 +1537,13 @@ function insertChecklistItem(){
   scheduleSave();
 }
 function insertRichTable(){
+  const rowsStr = prompt('¿Cuántas filas?', '2'); if(rowsStr===null) return;
+  const colsStr = prompt('¿Cuántas columnas?', '2'); if(colsStr===null) return;
+  const rows = Math.max(1, parseInt(rowsStr,10)||2);
+  const cols = Math.max(1, parseInt(colsStr,10)||2);
   focusMainEditor();
-  document.execCommand('insertHTML', false, '<table class="rt-table"><tr><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td></tr></table><p><br></p>');
+  const trs = Array.from({length:rows}).map(()=>'<tr>'+Array.from({length:cols}).map(()=>'<td><br></td>').join('')+'</tr>').join('');
+  document.execCommand('insertHTML', false, '<table class="rt-table">'+trs+'</table><p><br></p>');
   scheduleSave();
 }
 function currentTableFromSelection(){
@@ -1972,16 +1977,62 @@ function handleImageFile(e){
 function bindPasteImages(ta){
   if(!ta) return;
   ta.addEventListener('paste', (e)=>{
-    const items = e.clipboardData && e.clipboardData.items; if(!items) return;
-    for(const item of items){
-      if(item.type && item.type.indexOf('image/')===0){
-        e.preventDefault();
-        const file = item.getAsFile();
-        if(file) insertImage(file);
-        return;
+    const items = e.clipboardData && e.clipboardData.items;
+    if(items){
+      for(const item of items){
+        if(item.type && item.type.indexOf('image/')===0){
+          e.preventDefault();
+          const file = item.getAsFile();
+          if(file) insertImage(file);
+          return;
+        }
       }
     }
+    const html = e.clipboardData && e.clipboardData.getData('text/html');
+    if(html && /<table[\s>]/i.test(html)){
+      const rows = parsePastedTableRows(html);
+      if(rows && rows.length){ e.preventDefault(); pasteTableRows(rows); }
+    }
   });
+}
+function parsePastedTableRows(html){
+  const div = document.createElement('div'); div.innerHTML = html;
+  const table = div.querySelector('table'); if(!table) return null;
+  return Array.from(table.rows).map(row => Array.from(row.cells).map(cell => (cell.innerText||cell.textContent||'').trim()));
+}
+/* Si el cursor ya está dentro de una de nuestras tablas al pegar, la
+   tabla copiada se escribe ENCIMA de esa (empezando en la celda donde
+   estabas), agrandando filas/columnas si hace falta, en vez de meter una
+   tabla anidada dentro de otra. Si no, se crea una tabla nueva pero con
+   nuestro propio estilo (clase rt-table) — se ignora el formato que traía
+   la tabla de origen (Excel, Word, otra nota…) para que los bordes se
+   vean iguales al resto de tablas de la app. */
+function pasteTableRows(rows){
+  const existing = currentTableFromSelection();
+  const startCell = currentCellFromSelection();
+  if(existing && startCell && startCell.closest('table')===existing){
+    const startRowIdx = Array.from(existing.rows).indexOf(startCell.closest('tr'));
+    const startColIdx = Array.from(startCell.parentNode.children).indexOf(startCell);
+    rows.forEach((rowVals, r)=>{
+      const targetRowIdx = startRowIdx + r;
+      while(existing.rows.length <= targetRowIdx){
+        const newRow = existing.insertRow(-1);
+        const cols = existing.rows[0].cells.length;
+        for(let i=0;i<cols;i++) newRow.insertCell(-1).innerHTML = '<br>';
+      }
+      const targetRow = existing.rows[targetRowIdx];
+      rowVals.forEach((val, c)=>{
+        const targetColIdx = startColIdx + c;
+        while(targetRow.cells.length <= targetColIdx) targetRow.insertCell(-1).innerHTML = '<br>';
+        targetRow.cells[targetColIdx].textContent = val;
+      });
+    });
+  } else {
+    const trs = rows.map(r=>'<tr>'+r.map(v=>'<td>'+escHtml(v)+'</td>').join('')+'</tr>').join('');
+    focusMainEditor();
+    document.execCommand('insertHTML', false, '<table class="rt-table">'+trs+'</table><p><br></p>');
+  }
+  scheduleSave();
 }
 async function insertImage(file){
   if(!navigator.onLine){ showToast('Insertar imágenes necesita conexión (se suben a tu Drive)'); return; }

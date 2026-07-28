@@ -710,13 +710,13 @@ function renderTagFilterBar(){
 /* Banderas rápidas: si hay una nota abierta, marcan/quitan la etiqueta de
    esa nota; si no hay ninguna abierta, actúan como filtro rápido lateral. */
 function quickFlag(tag){
-  const tagsEl = document.getElementById('noteTags');
-  if(tagsEl){
-    const cur = parseTagsText(tagsEl.value);
-    const has = cur.includes(tag);
-    tagsEl.value = has ? cur.filter(t=>t!==tag).join(' ') : (tagsEl.value.trim()+' #'+tag).trim();
-    scheduleSave(); showToast((has?'Quitada #':'Agregada #')+tag);
+  const mainEl = document.getElementById('mainArea');
+  if(mainEl){
+    focusMainEditor();
+    document.execCommand('insertHTML', false, '#'+tag+'&nbsp;');
+    scheduleSave();
     ensureTagsRegistered('#'+tag);
+    showToast('Agregada #'+tag);
     return;
   }
   toggleTagFilter(tag);
@@ -1028,9 +1028,9 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" id="btnMark" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark')" title="Resaltar (toca de nuevo el mismo color para quitarlo)">🖍️</button>
     <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
     <span class="sep"></span>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('task')" title="Marcar/quitar #task en esta nota" style="color:#4a6fa5">⚑</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('importante')" title="Marcar/quitar #importante en esta nota" style="color:#b3432b">★</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('noolvidar')" title="Marcar/quitar #noolvidar en esta nota" style="color:#7d5ba6">⚠</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('task')" title="Insertar #task aquí donde está el cursor" style="color:#4a6fa5">⚑</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('importante')" title="Insertar #importante aquí donde está el cursor" style="color:#b3432b">★</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('noolvidar')" title="Insertar #noolvidar aquí donde está el cursor" style="color:#7d5ba6">⚠</button>
     <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">
   </div>
   <div id="swatchBar" class="swatch-row hidden"></div>

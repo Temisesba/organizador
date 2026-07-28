@@ -343,6 +343,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
     <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel">Sync</span></button>
     <button class="btn secondary no-print" onclick="openQuickDatoModal()" title="Anotar rápido: #etiqueta, lo que sea — se va a tu listado de Datos generales">+ Dato general</button>
+    <button class="btn secondary no-print" onclick="openFieldTemplatePicker()" title="Llenar una plantilla de campos (Diario, Metas, Somatometría…) con un formulario directo, sin abrir una nota primero">+ Plantilla</button>
     <button class="icon-btn no-print" onclick="openTimeLogModal()" title="Registro de tiempo — qué estás haciendo ahora">⏱</button>
     <button class="icon-btn no-print" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
     <button class="btn no-print" onclick="openNoteEditor(null)">+ Nota</button>
@@ -403,7 +404,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Sagrada Familia';
+const BUILD_VERSION = 'Muralla China';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3432,14 +3433,16 @@ function saveFieldTemplate(btn){
 }
 function openFieldTemplatePicker(){
   if(!DATA.plantillas_prop.length){ showToast('Crea una plantilla de campos primero, en 🧩 Tablas'); return; }
+  const editorOpen = !!document.getElementById('mainArea');
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(460px,100%)">
-    <div class="modal-head"><b>🏷️ Insertar plantilla de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-head"><b>🏷️ Plantillas de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">${DATA.plantillas_prop.map(pt=>`
       <div class="settings-row" style="align-items:flex-start">
         <span style="flex:1;font-size:13px">${escHtml(pt.Nombre)}<br><span style="color:var(--text-dim);font-size:12px">${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')}</span></span>
-        <button class="icon-btn" onclick="insertFieldTemplate('${pt.ID}');this.closest('.modal-overlay').remove()" title="Insertar como texto (#campo, uno debajo del otro)">📄</button>
-        <button class="icon-btn" onclick="insertFieldTemplateAsCornell('${pt.ID}');this.closest('.modal-overlay').remove()" title="Insertar como columna izquierda de una tabla Cornell">📐</button>
+        <button class="btn" style="padding:4px 10px;font-size:12px;flex:none" onclick="this.closest('.modal-overlay').remove();openQuickFieldFill('${pt.ID}')" title="Formulario rápido — llena cada campo y guarda, sin tocar tablas">⚡ Llenar</button>
+        ${editorOpen ? `<button class="icon-btn" onclick="insertFieldTemplate('${pt.ID}');this.closest('.modal-overlay').remove()" title="Insertar como texto en la nota abierta">📄</button>
+        <button class="icon-btn" onclick="insertFieldTemplateAsCornell('${pt.ID}');this.closest('.modal-overlay').remove()" title="Insertar como tabla Cornell en la nota abierta">📐</button>` : ''}
       </div>`).join('')}</div>
   </div>`;
   document.body.appendChild(overlay);
@@ -3479,6 +3482,54 @@ function insertFieldTemplateAsCornell(id){
     persistCurrentNote(note);
     reopenEditorFor(note);
   }
+}
+function prettyFieldLabel(c){ const s = String(c||'').replace(/_/g,' '); return s.charAt(0).toUpperCase()+s.slice(1); }
+/* Llenado rápido de una plantilla de campos: un formulario de verdad (un
+   <textarea> por campo, con su etiqueta) en vez de obligar a abrir una
+   nota en blanco y luego tocar celda por celda dentro de una tabla
+   Cornell — eso último es lento y frustrante en el celular (el teclado
+   tapa la tabla, cuesta acertarle a la celda exacta). Guarda directo
+   como nota nueva ya en formato Cornell (misma estructura de siempre,
+   para que 🧩 Tablas la siga viendo igual), sin pasar por el editor. */
+function openQuickFieldFill(id){
+  const pt = DATA.plantillas_prop.find(x=>x.ID===id); if(!pt) return;
+  let campos=[]; try{ campos = JSON.parse(pt.CamposJSON||'[]'); }catch(e){}
+  if(!campos.length) return;
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-head"><b>⚡ ${escHtml(pt.Nombre)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Título de esta nota</label>
+      <input type="text" id="qffTitle" value="${escAttr(pt.Nombre+' — '+fmtDate(new Date().toISOString()))}">
+      ${campos.map((c,i)=>`
+        <label style="font-size:12px;font-weight:600;display:block;margin:12px 0 4px">${escHtml(prettyFieldLabel(c))}</label>
+        <textarea id="qffField${i}" rows="2" style="width:100%;resize:vertical"></textarea>`).join('')}
+      <div style="margin-top:14px"><button class="btn" id="qffSaveBtn">Guardar</button></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('qffTitle').focus();
+  document.getElementById('qffTitle').select();
+  document.getElementById('qffSaveBtn').addEventListener('click', ()=> saveQuickFieldFill(campos, overlay));
+}
+async function saveQuickFieldFill(campos, overlay){
+  const btn = overlay.querySelector('#qffSaveBtn');
+  await withSavingFeedback(btn, async ()=>{
+    const titulo = (document.getElementById('qffTitle').value||'').trim() || 'Sin título';
+    const trs = campos.map((c,i)=>{
+      const val = (document.getElementById('qffField'+i).value||'').trim();
+      return '<tr><td class="cornell-cue-cell">#'+escHtml(c)+'</td><td>'+(val?'<p>'+escHtml(val).replace(/\n/g,'</p><p>')+'</p>':'<br>')+'</td></tr>';
+    }).join('');
+    const note = newBlankNote();
+    note.ID = uid();
+    note.Titulo = titulo;
+    note.Contenido = '<table class="rt-table cornell-table">'+trs+'</table>';
+    note.Cornell = '1';
+    await saveEntity('NOTAS', note);
+    overlay.remove();
+    renderAll();
+    showToast('✅ Guardado');
+  });
 }
 
 /* ---- Tablas por etiqueta de bloque (párrafo con #tag inline) — modo

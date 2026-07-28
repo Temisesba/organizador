@@ -527,20 +527,41 @@ function blockKeyValueTags(block){
 /* ============ Campos por nota: "#campo" solo en su línea + el texto que
    sigue es el valor — cada nota se puede leer como una fila de una base
    de datos (columnas = campos), sin duplicar nada: se calcula del HTML. */
-function getNoteFields(note){
+/* Un campo (#morfo → valor) se puede escribir de dos formas equivalentes:
+   como fila de una tabla Cornell (cue=campo, texto=valor — práctico para ir
+   agregando campo tras campo con el "+ agregar fila"), o como dos párrafos
+   seguidos en la vista normal ("#morfo" y luego el valor). Esta función lee
+   cualquiera de las dos y regresa la misma lista de {cue, texto}, para que
+   toggleCornell() y getNoteFields() coincidan siempre en los mismos datos.  */
+function extractFieldPairs(note){
   const html = note.Contenido||'';
-  const fields = {};
-  if(!/^\s*<[a-z]/i.test(html)) return fields;
+  if(!/^\s*<[a-z]/i.test(html)) return [];
   const container = document.createElement('div'); container.innerHTML = html;
-  let curField = null; let curVal = [];
-  const flush = ()=>{ if(curField) fields[curField] = curVal.join(' ').trim(); curField=null; curVal=[]; };
+  if(note.Cornell==='1'){
+    return Array.from(container.querySelectorAll('table.cornell-table tr')).map(r=>{
+      const cells = r.querySelectorAll('td');
+      return { cue: (cells[0]?cells[0].textContent:'').trim(), texto: cells[1]?cells[1].innerHTML:'' };
+    });
+  }
+  const pairs = []; let cur=null;
   Array.from(container.children).forEach(el=>{
     const t = (el.textContent||'').trim();
-    const m = t.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)$/);
-    if(m){ flush(); curField = m[1].toLowerCase(); }
-    else if(curField && t){ curVal.push(t); }
+    if(/^#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+$/.test(t)){
+      if(cur) pairs.push(cur);
+      cur = { cue:t, texto:'' };
+    } else if(cur){
+      cur.texto += (cur.texto?' ':'') + el.innerHTML;
+    }
   });
-  flush();
+  if(cur) pairs.push(cur);
+  return pairs;
+}
+function getNoteFields(note){
+  const fields = {};
+  extractFieldPairs(note).forEach(p=>{
+    const m = p.cue.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)$/);
+    if(m) fields[m[1].toLowerCase()] = stripHtmlToText(p.texto).trim();
+  });
   return fields;
 }
 function allEntities(){
@@ -886,18 +907,25 @@ function toggleCornell(){
   const note = collectNoteFromForm();
   const mainEl = document.getElementById('mainArea');
   const currentHTML = mainEl ? mainEl.innerHTML : (note.Contenido||'');
+  const pairs = extractFieldPairs(note); // lee lo que ya haya, sea tabla o párrafos
   if(editingCornell){
-    const rows = Array.from(mainEl ? mainEl.querySelectorAll('table.cornell-table tr') : []);
-    note.Contenido = rows.map(r=>{
-      const cells = r.querySelectorAll('td');
-      const cue = cells[0] ? cells[0].innerHTML.trim() : '';
-      const texto = cells[1] ? cells[1].innerHTML : '';
-      const cueClean = cue.replace(/^(<br\s*\/?>)+$/i,'');
-      return (cueClean ? '<p><b>'+cueClean+':</b></p>' : '') + texto;
-    }).join('') || currentHTML;
+    // apagar: cada fila se vuelve "#campo" + valor en párrafos seguidos —
+    // así getNoteFields() los sigue leyendo igual en la vista normal.
+    note.Contenido = pairs.length ? pairs.map(p=>{
+      const isField = /^#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+$/.test(p.cue);
+      if(isField) return '<p>'+escHtml(p.cue)+'</p><p>'+(p.texto||'<br>')+'</p>';
+      if(p.cue) return '<p><b>'+escHtml(p.cue)+':</b> '+(p.texto||'')+'</p>';
+      return '<p>'+(p.texto||'<br>')+'</p>';
+    }).join('') : (currentHTML || '<p><br></p>');
     note.Cornell='';
   } else {
-    note.Contenido = '<table class="rt-table cornell-table"><tr><td class="cornell-cue-cell"><br></td><td>'+(currentHTML||'<br>')+'</td></tr></table>';
+    // encender: si ya había pares "#campo"/valor escritos seguidos, cada
+    // uno se vuelve su propia fila (cue=campo, texto=valor); si no, todo
+    // el contenido pasa a la columna derecha de una sola fila.
+    const rows = pairs.length ? pairs : [{ cue:'', texto: currentHTML || '<br>' }];
+    note.Contenido = '<table class="rt-table cornell-table">' + rows.map(p=>
+      '<tr><td class="cornell-cue-cell">'+(escHtml(p.cue)||'<br>')+'</td><td>'+(p.texto||'<br>')+'</td></tr>'
+    ).join('') + '</table>';
     note.Cornell='1';
   }
   persistCurrentNote(note);

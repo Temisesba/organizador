@@ -376,7 +376,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Alcázar de Segovia';
+const BUILD_VERSION = 'Notre Dame';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2849,10 +2849,18 @@ function acceptAiResult(){
   saveEntity('FEEDBACK', { ID:uid(), Fecha:new Date().toISOString(), Original:aiLastOriginal, Correccion:aiLastResult, Contexto:aiLastMode });
   showToast('Guardado en el historial de correcciones'); renderFeedbackList();
 }
+/* Mismo bug que pullFromActiveNote tenía antes: #mainArea es un div
+   contenteditable, no un <textarea> — .value no existe ahí, así que
+   "insertar" no hacía nada visible (solo creaba una propiedad JS suelta
+   que nadie renderiza). Ahora sí inserta de verdad en el cursor. */
 function insertAiIntoNote(){
   const ta = document.getElementById('mainArea');
   if(!ta){ showToast('Abre una nota primero'); return; }
-  ta.value += (ta.value?'\n\n':'') + aiLastResult; scheduleSave(); showToast('Insertado en la nota');
+  focusMainEditor();
+  const html = escHtml(aiLastResult).split(/\n+/).map(line=>'<p>'+line+'</p>').join('');
+  document.execCommand('insertHTML', false, html);
+  scheduleSave();
+  showToast('Insertado en la nota');
 }
 function sendToDicFromAI(){
   const term = aiLastOriginal.split('\n')[0].slice(0,60);

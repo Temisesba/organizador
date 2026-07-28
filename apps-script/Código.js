@@ -30,17 +30,18 @@ const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 
 const TABLE_DEFS = {
-  NOTAS:         ['ID', 'Fecha', 'FechaEdicion', 'Titulo', 'Contenido', 'Tags', 'Notebook', 'Cornell', 'CornellCue', 'Color', 'Pinned', 'Orden', 'Archivo', 'Papelera', 'GCalEventId'],
+  NOTAS:         ['ID', 'Fecha', 'FechaEdicion', 'Titulo', 'Contenido', 'Tags', 'Notebook', 'Cornell', 'CornellCue', 'Color', 'Pinned', 'Orden', 'Archivo', 'Papelera', 'GCalEventId', 'PlantillaPropID'],
   TAGS:          ['ID', 'Etiqueta', 'Color', 'EsComando', 'Descripcion'],
   NOTEBOOKS:     ['ID', 'Nombre', 'TagsHeredados', 'Color', 'TagAuto'],
-  PLANTILLAS:    ['ID', 'Nombre', 'ItemsJSON', 'Tags'],
+  PLANTILLAS:    ['ID', 'Nombre', 'ItemsJSON', 'Tags', 'Recordatorio'],
   HISTORIAL:     ['ID', 'PlantillaID', 'Fecha', 'ItemsJSON', 'NotaID', 'Nombre'],
   DICCIONARIO:   ['ID', 'Termino', 'Traduccion', 'Notas', 'Fecha'],
   FEEDBACK:      ['ID', 'Fecha', 'Original', 'Correccion', 'Contexto'],
   BLOQUE_TABLAS: ['ID', 'Nombre', 'TagFiltro', 'CampoFiltro', 'ValorFiltro', 'Columnas'],
-  PLANTILLAS_PROP: ['ID', 'Nombre', 'CamposJSON'],
+  PLANTILLAS_PROP: ['ID', 'Nombre', 'CamposJSON', 'UsaPersona', 'Recordatorio'],
   FLAGS:         ['ID', 'Nombre', 'Emoji', 'Color'],
-  BUSQUEDAS:     ['ID', 'Nombre', 'Query', 'Tags', 'Modo']
+  BUSQUEDAS:     ['ID', 'Nombre', 'Query', 'Tags', 'Modo'],
+  PERSONAS:      ['ID', 'Nombre', 'Color']
 };
 
 // ── Router GET (solo lectura ligera, ej. ping de conexión) ────

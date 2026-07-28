@@ -256,10 +256,27 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .items-table input[type=text]:focus{border-color:var(--border);background:var(--bg-soft)}
 .items-table tr.done-row{opacity:.55}
 .items-table-wrap{overflow-x:auto}
+.habit-row{margin-bottom:16px}
+.habit-row-head{display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:4px;gap:8px}
+.habit-pct{color:var(--text-dim);font-size:12px;flex:none}
+.habit-bar{height:6px;border-radius:3px;background:var(--bg-soft);overflow:hidden}
+.habit-bar-fill{height:100%;background:var(--accent)}
+.habit-heat{display:flex;gap:2px;margin-top:6px;flex-wrap:wrap}
+.habit-dot{width:9px;height:9px;border-radius:2px;display:inline-block}
+.habit-dot.on{background:var(--accent)}
+.habit-dot.off{background:var(--bg-soft);border:1px solid var(--border)}
 
 /* toast */
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 16px;border-radius:20px;font-size:13px;z-index:999;opacity:0;pointer-events:none;transition:opacity .2s}
 #toast.show{opacity:1}
+
+/* recordatorio del día */
+#reminderBanner:empty{display:none}
+.reminder-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 16px;background:var(--accent-soft,var(--bg-soft));border-bottom:1px solid var(--border);font-size:13px}
+.reminder-bar b{flex:none}
+.reminder-bar .reminder-chips{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+.reminder-chip{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--border);background:var(--bg-elev);border-radius:14px;padding:3px 4px 3px 10px;font-size:12px}
+.reminder-chip:hover{background:var(--bg-soft)}
 
 /* dropzone for file link */
 .file-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:4px 8px;font-size:12px;background:var(--bg-soft)}
@@ -349,6 +366,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="btn no-print" onclick="openNoteEditor(null)">+ Nota</button>
   </header>
 
+  <div id="reminderBanner" class="no-print"></div>
   <div class="layout">
     <aside id="sidebar">
       <div class="sb-section" data-sb="cuaderno">
@@ -404,7 +422,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Muralla China';
+const BUILD_VERSION = 'Petra III';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -707,7 +725,7 @@ function deleteGoogleEventUI(eventId){
 }
 let GAS_URL = localStorage.getItem('org_gas_url') || '';
 let SHEET_ID = localStorage.getItem('org_sheet_id') || '';
-let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[] };
+let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[], personas:[] };
 // Banderas rápidas de fábrica (no se pueden borrar) — las que agrega el
 // usuario desde Configuración se guardan como filas normales en el Sheet
 // (tabla FLAGS), igual que cualquier otra etiqueta o nota, para que
@@ -869,12 +887,12 @@ function normalizeData(d){
     plantillas: d.plantillas||[], historial: d.historial||[],
     diccionario: d.diccionario||[], feedback: d.feedback||[],
     bloque_tablas: d.bloque_tablas||[], plantillas_prop: d.plantillas_prop||[],
-    flags: d.flags||[], busquedas: d.busquedas||[]
+    flags: d.flags||[], busquedas: d.busquedas||[], personas: d.personas||[]
   };
 }
 
 /* ============ CRUD genérico local + remoto ============ */
-const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas' };
+const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas' };
 function cacheData(){ try{ localStorage.setItem('org_data_cache', JSON.stringify(DATA)); }catch(e){} }
 async function saveEntity(table, obj){
   if(!obj.ID) obj.ID = uid();
@@ -1303,7 +1321,57 @@ function getFilteredSortedNotes(query){
   return notes;
 }
 
-function renderAll(){ renderSidebar(); renderMain(); updateSyncIndicator(); }
+function renderAll(){ renderSidebar(); renderMain(); updateSyncIndicator(); renderReminderBanner(); }
+/* "Avísame si no la he llenado hoy": un aviso DENTRO de la app, no una
+   notificación real del celular — esta app no tiene servidor de push
+   (es HTML estático + Apps Script), así que no hay forma honesta de
+   avisar con la app cerrada. Esto se ve la próxima vez que abres
+   Organizador si algo marcado con Recordatorio="diario" no tiene
+   entrada de hoy. Se puede quitar por hoy con "✕" (vuelve a aparecer
+   mañana si sigue sin llenarse). */
+function todayStr(){ return new Date().toDateString(); }
+function pendingRemindersToday(){
+  const pending = [];
+  DATA.plantillas_prop.forEach(pt=>{
+    if(pt.Recordatorio!=='diario') return;
+    const has = DATA.notas.some(n=>n.PlantillaPropID===pt.ID && !n.Papelera && new Date(n.Fecha).toDateString()===todayStr());
+    if(!has) pending.push({ type:'plantilla_prop', id:pt.ID, nombre:pt.Nombre });
+  });
+  DATA.plantillas.forEach(p=>{
+    if(p.Recordatorio!=='diario') return;
+    const has = DATA.historial.some(h=>h.PlantillaID===p.ID && new Date(h.Fecha).toDateString()===todayStr());
+    if(!has) pending.push({ type:'plantilla', id:p.ID, nombre:p.Nombre });
+  });
+  return pending;
+}
+function dismissedReminderIds(){
+  try{
+    const d = JSON.parse(localStorage.getItem('org_reminders_dismissed')||'{}');
+    return d.date===new Date().toDateString() ? new Set(d.ids) : new Set();
+  }catch(e){ return new Set(); }
+}
+function dismissReminder(key){
+  const cur = dismissedReminderIds(); cur.add(key);
+  localStorage.setItem('org_reminders_dismissed', JSON.stringify({ date:new Date().toDateString(), ids:Array.from(cur) }));
+  renderReminderBanner();
+}
+function openReminderTarget(type, id){
+  if(type==='plantilla_prop') openQuickFieldFill(id);
+  else openFillModal(id);
+}
+function renderReminderBanner(){
+  const el = document.getElementById('reminderBanner'); if(!el) return;
+  const dismissed = dismissedReminderIds();
+  const pending = pendingRemindersToday().filter(r=>!dismissed.has(r.type+':'+r.id));
+  if(!pending.length){ el.innerHTML=''; return; }
+  el.innerHTML = `<div class="reminder-bar">
+    <b>⏰ Pendiente hoy:</b>
+    <span class="reminder-chips">${pending.map(r=>`<span class="reminder-chip">
+      <span style="cursor:pointer" onclick="openReminderTarget('${r.type}','${escAttr(r.id)}')">${escHtml(r.nombre)}</span>
+      <button class="icon-btn" style="padding:0 3px" title="Ocultar por hoy" onclick="dismissReminder('${r.type}:${escAttr(r.id)}')">✕</button>
+    </span>`).join('')}</span>
+  </div>`;
+}
 
 function renderMain(){
   const main = document.getElementById('viewArea');
@@ -2872,7 +2940,7 @@ function renderChecklistBody(){
     return `<div class="tpl-card">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <b>${escHtml(p.Nombre)}</b>
-        <span><button class="icon-btn" onclick="openFillModal('${p.ID}')">▶ Llenar</button><button class="icon-btn" onclick="openTemplateModal('${p.ID}')" title="Editar plantilla">✏️</button><button class="icon-btn" onclick="deleteTemplateUI('${p.ID}')">🗑️</button></span>
+        <span><button class="icon-btn" onclick="openFillModal('${p.ID}')">▶ Llenar</button><button class="icon-btn" onclick="openChecklistStatsModal('${p.ID}')" title="Ver estadísticas (rachas y cumplimiento)">📊</button><button class="icon-btn" onclick="openTemplateModal('${p.ID}')" title="Editar plantilla">✏️</button><button class="icon-btn" onclick="deleteTemplateUI('${p.ID}')">🗑️</button></span>
       </div>
       <div>${hist.map((h,idx)=>histEntryHTML(h, idx===0)).join('') || '<p class="hint" style="color:var(--text-dim)">Sin historial aún</p>'}</div>
     </div>`;
@@ -3140,6 +3208,9 @@ cartera | equipaje de mano
 ropa:
 camisetas | maleta documentada
 protector solar | comprar al llegar">${existing?escHtml(templateItemsToText(items)):''}</textarea>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:12px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="tplRecordatorio" ${existing&&existing.Recordatorio==='diario'?'checked':''}> Avísame si no la he llenado hoy
+      </label>
       <div style="margin-top:14px"><button class="btn" onclick="saveTemplateModal(this,'${existingId||''}')">Guardar plantilla</button></div>
     </div>
   </div>`;
@@ -3151,10 +3222,11 @@ function saveTemplateModal(btn, existingId){
   const itemsText = document.getElementById('tplItemsInput').value;
   if(!nombre){ showToast('Ponle un nombre a la plantilla'); return; }
   const items = parseTemplateText(itemsText);
-  const row = { ID: existingId||uid(), Nombre:nombre, ItemsJSON: JSON.stringify(items), Tags:'' };
+  const recordatorio = document.getElementById('tplRecordatorio').checked ? 'diario' : '';
+  const row = { ID: existingId||uid(), Nombre:nombre, ItemsJSON: JSON.stringify(items), Tags:'', Recordatorio:recordatorio };
   saveEntity('PLANTILLAS', row).then(()=>{
     btn.closest('.modal-overlay').remove();
-    renderChecklistBody(); renderSidebar();
+    renderChecklistBody(); renderSidebar(); renderReminderBanner();
   });
 }
 function deleteTemplateUI(id){ if(!confirm('¿Eliminar esta plantilla?')) return; deleteEntity('PLANTILLAS', id).then(()=>{ renderChecklistBody(); renderSidebar(); }); }
@@ -3253,7 +3325,7 @@ async function saveFillModal(templateId, btn){
   await withSavingFeedback(btn, async ()=>{
     await saveEntity('HISTORIAL', row);
     btn.closest('.modal-overlay').remove();
-    renderChecklistBody(); renderSidebar(); showToast('Guardado');
+    renderChecklistBody(); renderSidebar(); renderReminderBanner(); showToast('Guardado');
   });
 }
 
@@ -3276,6 +3348,55 @@ function histAddItem(id){
   const text = prompt('Nuevo elemento para esta lista (opcional "categoría: elemento"):'); if(!text || !text.trim()) return;
   const m = text.match(/^(.+?):\s*(.+)$/);
   histMutate(id, items=> items.push(m ? { text:m[2].trim(), checked:false, note:'', destino:'', priority:'', section:m[1].trim() } : { text: text.trim(), checked:false, note:'', destino:'', priority:'', section:'' }));
+}
+
+/* ---- Estadísticas de checklist: cumplimiento y rachas por elemento,
+   estilo apps de hábitos (Streaks/Loop) — % de veces marcado, racha
+   actual y mejor racha, y una tira de los últimos 30 llenados. Empareja
+   elementos entre llenados por su TEXTO (mismo criterio simple que ya
+   usa el resto del checklist; si el texto de un elemento cambia entre
+   llenados, cuenta como uno nuevo — es el mismo comportamiento
+   implícito que ya tenía renombrar un elemento en el historial). */
+function checklistHistorySorted(templateId){
+  return DATA.historial.filter(h=>h.PlantillaID===templateId).sort((a,b)=>new Date(a.Fecha)-new Date(b.Fecha));
+}
+function openChecklistStatsModal(templateId){
+  const p = DATA.plantillas.find(x=>x.ID===templateId); if(!p) return;
+  const hist = checklistHistorySorted(templateId);
+  if(!hist.length){ showToast('Todavía no hay historial de "'+p.Nombre+'"'); return; }
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(640px,100%)">
+    <div class="modal-head"><b>📊 ${escHtml(p.Nombre)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body" id="chkStatsBody"></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('chkStatsBody').innerHTML = checklistStatsHTML(hist);
+}
+function checklistStatsHTML(hist){
+  const itemNames = []; const seen = new Set();
+  hist.forEach(h=>{
+    let items=[]; try{ items=JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
+    items.forEach(it=>{ if(it.text && !seen.has(it.text)){ seen.add(it.text); itemNames.push(it.text); } });
+  });
+  const rows = itemNames.map(name=>{
+    const series = hist.map(h=>{
+      let items=[]; try{ items=JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
+      const it = items.find(x=>x.text===name);
+      return it ? { date:new Date(h.Fecha), checked: !!it.checked } : null;
+    }).filter(Boolean);
+    const total = series.length;
+    const doneCount = series.filter(s=>s.checked).length;
+    const pct = total ? Math.round(100*doneCount/total) : 0;
+    let streak=0; for(let i=series.length-1;i>=0;i--){ if(series[i].checked) streak++; else break; }
+    let best=0, run=0; series.forEach(s=>{ if(s.checked){ run++; best=Math.max(best,run); } else run=0; });
+    const heat = series.slice(-30).map(s=>`<span class="habit-dot ${s.checked?'on':'off'}" title="${escAttr(s.date.toLocaleDateString('es-MX'))}"></span>`).join('');
+    return `<div class="habit-row">
+      <div class="habit-row-head"><b>${escHtml(name)}</b><span class="habit-pct">${pct}% · 🔥${streak}${best>streak?(' (mejor '+best+')'):''}</span></div>
+      <div class="habit-bar"><div class="habit-bar-fill" style="width:${pct}%"></div></div>
+      <div class="habit-heat">${heat}</div>
+    </div>`;
+  }).join('');
+  return `<p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">${hist.length} llenado${hist.length===1?'':'s'} registrados — últimos 30 en la tira de cada elemento.</p>${rows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos con nombre en el historial todavía.</p>'}`;
 }
 
 /* ============ Tablas dinámicas por bloque ============
@@ -3338,9 +3459,10 @@ function renderFieldTablesBody(){
     </div>`).join('') || '<p style="color:var(--text-dim)">Sin tablas todavía — crea una arriba.</p>';
   document.getElementById('fieldTemplatesList').innerHTML = DATA.plantillas_prop.map(pt=>`
     <div class="settings-row">
-      <span style="flex:1">${escHtml(pt.Nombre)} <span style="color:var(--text-dim);font-size:12px">(${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')})</span></span>
+      <span style="flex:1">${escHtml(pt.Nombre)} ${pt.UsaPersona?'<span class="tag-badge" title="Por persona">👤</span>':''}${pt.Recordatorio?'<span class="tag-badge" title="Recordatorio diario">⏰</span>':''}<br><span style="color:var(--text-dim);font-size:12px">${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')}</span></span>
+      <button class="icon-btn" onclick="openFieldTemplateModal('${pt.ID}')" title="Editar plantilla">✏️</button>
       <button class="icon-btn" onclick="deleteEntity('PLANTILLAS_PROP','${pt.ID}').then(renderFieldTablesBody)">🗑️</button>
-    </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas — créalas aquí y luego insértalas desde 🏷️ en el editor de la nota.</p>';
+    </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas — créalas aquí y luego insértalas desde 🏷️ en el editor de la nota, o con "+ Plantilla" en el encabezado.</p>';
 }
 async function saveFieldTable(){
   const nombre = document.getElementById('ftNombre').value.trim();
@@ -3403,32 +3525,42 @@ function exportFieldTablePDF(id){
   area.innerHTML = '<h1>'+escHtml(bt.Nombre)+'</h1>' + fieldTableRenderHTML(bt).replace(/<button[^>]*>.*?<\/button>/g,'');
   window.print();
 }
-function openFieldTemplateModal(){
+function openFieldTemplateModal(existingId){
+  const existing = existingId ? DATA.plantillas_prop.find(p=>p.ID===existingId) : null;
+  let campos = []; if(existing){ try{ campos = JSON.parse(existing.CamposJSON||'[]'); }catch(e){} }
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
-    <div class="modal-head"><b>+ Plantilla de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-head"><b>${existing?'✏️ Editar':'+'} Plantilla de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Esta misma lista de campos la puedes insertar después como texto (#campo debajo del otro) o como columna izquierda de una tabla Cornell — eliges al momento de insertarla.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Esta misma lista de campos la puedes insertar después como texto (#campo debajo del otro), como columna izquierda de una tabla Cornell, o llenarla directo con el formulario rápido (⚡) — eliges al momento de usarla.</p>
       <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Nombre</label>
-      <input type="text" id="ftplNombre" placeholder="ej. Enfermedad">
+      <input type="text" id="ftplNombre" value="${existing?escAttr(existing.Nombre):''}" placeholder="ej. Enfermedad">
       <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Campos (uno por línea, sin #)</label>
       <textarea id="ftplCampos" rows="6" placeholder="nombre enfermedad
 definicion
 morfo
 tx
-dx"></textarea>
-      <div style="margin-top:14px"><button class="btn" onclick="saveFieldTemplate(this)">Guardar</button></div>
+dx">${existing?escHtml(campos.join('\n')):''}</textarea>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:12px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="ftplUsaPersona" ${existing&&existing.UsaPersona?'checked':''}> Es por persona (varios familiares/pacientes, cada quien su historial — ej. Somatometría)
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="ftplRecordatorio" ${existing&&existing.Recordatorio==='diario'?'checked':''}> Avísame si no la he llenado hoy
+      </label>
+      <div style="margin-top:14px"><button class="btn" onclick="saveFieldTemplate(this,'${existingId||''}')">Guardar</button></div>
     </div>
   </div>`;
   document.body.appendChild(overlay);
   document.getElementById('ftplNombre').focus();
 }
-function saveFieldTemplate(btn){
+function saveFieldTemplate(btn, existingId){
   const nombre = document.getElementById('ftplNombre').value.trim();
   const campos = document.getElementById('ftplCampos').value.split('\n').map(s=>s.trim().toLowerCase().replace(/\s+/g,'_')).filter(Boolean);
+  const usaPersona = document.getElementById('ftplUsaPersona').checked ? '1' : '';
+  const recordatorio = document.getElementById('ftplRecordatorio').checked ? 'diario' : '';
   if(!nombre || !campos.length){ showToast('Ponle nombre y al menos un campo'); return; }
-  saveEntity('PLANTILLAS_PROP', { ID:uid(), Nombre:nombre, CamposJSON: JSON.stringify(campos) }).then(()=>{
-    btn.closest('.modal-overlay').remove(); renderFieldTablesBody();
+  saveEntity('PLANTILLAS_PROP', { ID: existingId||uid(), Nombre:nombre, CamposJSON: JSON.stringify(campos), UsaPersona:usaPersona, Recordatorio:recordatorio }).then(()=>{
+    btn.closest('.modal-overlay').remove(); renderFieldTablesBody(); renderReminderBanner();
   });
 }
 function openFieldTemplatePicker(){
@@ -3441,6 +3573,7 @@ function openFieldTemplatePicker(){
       <div class="settings-row" style="align-items:flex-start">
         <span style="flex:1;font-size:13px">${escHtml(pt.Nombre)}<br><span style="color:var(--text-dim);font-size:12px">${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')}</span></span>
         <button class="btn" style="padding:4px 10px;font-size:12px;flex:none" onclick="this.closest('.modal-overlay').remove();openQuickFieldFill('${pt.ID}')" title="Formulario rápido — llena cada campo y guarda, sin tocar tablas">⚡ Llenar</button>
+        <button class="icon-btn" onclick="this.closest('.modal-overlay').remove();openFieldStatsModal('${pt.ID}')" title="Ver estadísticas (gráfica en el tiempo)">📊</button>
         ${editorOpen ? `<button class="icon-btn" onclick="insertFieldTemplate('${pt.ID}');this.closest('.modal-overlay').remove()" title="Insertar como texto en la nota abierta">📄</button>
         <button class="icon-btn" onclick="insertFieldTemplateAsCornell('${pt.ID}');this.closest('.modal-overlay').remove()" title="Insertar como tabla Cornell en la nota abierta">📐</button>` : ''}
       </div>`).join('')}</div>
@@ -3495,11 +3628,18 @@ function openQuickFieldFill(id){
   const pt = DATA.plantillas_prop.find(x=>x.ID===id); if(!pt) return;
   let campos=[]; try{ campos = JSON.parse(pt.CamposJSON||'[]'); }catch(e){}
   if(!campos.length) return;
+  const usaPersona = !!pt.UsaPersona;
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
     <div class="modal-head"><b>⚡ ${escHtml(pt.Nombre)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Título de esta nota</label>
+      ${usaPersona ? `<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Persona</label>
+      <select id="qffPersona" onchange="handleQffPersonaChange(this)">
+        <option value="">— elegir —</option>
+        ${DATA.personas.map(p=>`<option value="${escAttr(p.ID)}">${escHtml(p.Nombre)}</option>`).join('')}
+        <option value="__new__">+ nueva persona…</option>
+      </select>` : ''}
+      <label style="font-size:12px;font-weight:600;display:block;margin:12px 0 4px">Título de esta nota</label>
       <input type="text" id="qffTitle" value="${escAttr(pt.Nombre+' — '+fmtDate(new Date().toISOString()))}">
       ${campos.map((c,i)=>`
         <label style="font-size:12px;font-weight:600;display:block;margin:12px 0 4px">${escHtml(prettyFieldLabel(c))}</label>
@@ -3508,15 +3648,36 @@ function openQuickFieldFill(id){
     </div>
   </div>`;
   document.body.appendChild(overlay);
-  document.getElementById('qffTitle').focus();
-  document.getElementById('qffTitle').select();
-  document.getElementById('qffSaveBtn').addEventListener('click', ()=> saveQuickFieldFill(campos, overlay));
+  if(usaPersona) document.getElementById('qffPersona').focus();
+  else { document.getElementById('qffTitle').focus(); document.getElementById('qffTitle').select(); }
+  document.getElementById('qffSaveBtn').addEventListener('click', ()=> saveQuickFieldFill(pt, campos, overlay));
 }
-async function saveQuickFieldFill(campos, overlay){
+async function handleQffPersonaChange(sel){
+  if(sel.value==='__new__'){
+    const p = await promptNewPersona();
+    if(p){
+      const opt = document.createElement('option'); opt.value=p.ID; opt.textContent=p.Nombre; opt.selected=true;
+      sel.insertBefore(opt, sel.lastElementChild);
+    } else { sel.value=''; }
+  }
+  updateQffTitleFromPersona(sel);
+}
+function updateQffTitleFromPersona(sel){
+  const overlay = sel.closest('.modal-overlay');
+  const titleInput = overlay.querySelector('#qffTitle');
+  const personaName = (sel.value && sel.value!=='__new__') ? sel.selectedOptions[0].textContent : '';
+  const baseName = overlay.querySelector('.modal-head b').textContent.replace(/^⚡\s*/,'');
+  titleInput.value = baseName + (personaName?(' — '+personaName):'') + ' — ' + fmtDate(new Date().toISOString());
+}
+async function saveQuickFieldFill(pt, campos, overlay){
   const btn = overlay.querySelector('#qffSaveBtn');
+  const personaSel = overlay.querySelector('#qffPersona');
+  if(pt.UsaPersona && (!personaSel || !personaSel.value || personaSel.value==='__new__')){ showToast('Elige o agrega una persona'); return; }
   await withSavingFeedback(btn, async ()=>{
     const titulo = (document.getElementById('qffTitle').value||'').trim() || 'Sin título';
-    const trs = campos.map((c,i)=>{
+    const personaName = pt.UsaPersona ? ((DATA.personas.find(p=>p.ID===personaSel.value)||{}).Nombre||'') : '';
+    let trs = pt.UsaPersona ? ('<tr><td class="cornell-cue-cell">#persona</td><td><p>'+escHtml(personaName)+'</p></td></tr>') : '';
+    trs += campos.map((c,i)=>{
       const val = (document.getElementById('qffField'+i).value||'').trim();
       return '<tr><td class="cornell-cue-cell">#'+escHtml(c)+'</td><td>'+(val?'<p>'+escHtml(val).replace(/\n/g,'</p><p>')+'</p>':'<br>')+'</td></tr>';
     }).join('');
@@ -3525,11 +3686,96 @@ async function saveQuickFieldFill(campos, overlay){
     note.Titulo = titulo;
     note.Contenido = '<table class="rt-table cornell-table">'+trs+'</table>';
     note.Cornell = '1';
+    note.PlantillaPropID = pt.ID;
     await saveEntity('NOTAS', note);
     overlay.remove();
     renderAll();
     showToast('✅ Guardado');
   });
+}
+
+/* ---- Estadísticas de una plantilla de campos: gráfica de línea en el
+   tiempo, una serie por persona si la plantilla es "por persona" (ej.
+   Somatometría de varios familiares). Sin librería externa — un SVG
+   simple armado a mano, consistente con que esta app es un solo
+   archivo autocontenido. Solo grafica campos cuyo valor se puede leer
+   como número; si el campo elegido es texto libre, se avisa en vez de
+   mostrar una gráfica vacía o rota. */
+function fieldTemplateNotes(templateId){
+  return activeNotes().filter(n=>n.PlantillaPropID===templateId);
+}
+function seriesColor(name){
+  const p = DATA.personas.find(x=>x.Nombre===name);
+  if(p && p.Color) return p.Color;
+  let h=0; for(let i=0;i<name.length;i++) h = (h*31 + name.charCodeAt(i))>>>0;
+  const palette = ['#8a5a3b','#3d7a4f','#4a6fa5','#b3432b','#7d5ba6','#c9a227'];
+  return palette[h % palette.length];
+}
+function openFieldStatsModal(templateId){
+  const pt = DATA.plantillas_prop.find(x=>x.ID===templateId); if(!pt) return;
+  let campos=[]; try{ campos = JSON.parse(pt.CamposJSON||'[]'); }catch(e){}
+  const notes = fieldTemplateNotes(templateId);
+  if(!notes.length){ showToast('Todavía no hay registros de "'+pt.Nombre+'"'); return; }
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(640px,100%)">
+    <div class="modal-head"><b>📊 ${escHtml(pt.Nombre)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <label style="font-size:12px;font-weight:600">Campo:</label>
+        <select id="fsField" onchange="renderFieldStatsChart('${templateId}')">
+          ${campos.map(c=>`<option value="${escAttr(c)}">${escHtml(prettyFieldLabel(c))}</option>`).join('')}
+        </select>
+        <span style="font-size:12px;color:var(--text-dim)">${notes.length} registro${notes.length===1?'':'s'}</span>
+      </div>
+      <div id="fsChartArea" style="margin-top:14px"></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  renderFieldStatsChart(templateId);
+}
+function renderFieldStatsChart(templateId){
+  const pt = DATA.plantillas_prop.find(x=>x.ID===templateId); if(!pt) return;
+  const fieldSel = document.getElementById('fsField'); if(!fieldSel) return;
+  const field = fieldSel.value;
+  const notes = fieldTemplateNotes(templateId);
+  const series = {};
+  notes.forEach(n=>{
+    const fields = getNoteFields(n);
+    const num = parseFloat(String(fields[field]||'').replace(',','.'));
+    if(isNaN(num)) return;
+    const who = pt.UsaPersona ? (fields.persona||'(sin persona)') : 'Registro';
+    (series[who] = series[who]||[]).push({ date:new Date(n.Fecha), value:num });
+  });
+  Object.values(series).forEach(arr=>arr.sort((a,b)=>a.date-b.date));
+  const area = document.getElementById('fsChartArea'); if(!area) return;
+  const names = Object.keys(series);
+  if(!names.length){ area.innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:12px">Ese campo no tiene valores numéricos todavía (si es texto libre, no se puede graficar).</p>'; return; }
+  const legend = names.map(n=>{
+    const arr = series[n]; const last = arr[arr.length-1];
+    return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px"><span style="width:10px;height:10px;border-radius:50%;background:${seriesColor(n)};display:inline-block"></span>${escHtml(n)}: último ${last.value} (${fmtDate(last.date.toISOString())})</span>`;
+  }).join('');
+  area.innerHTML = svgLineChart(series) + `<div style="margin-top:8px;display:flex;gap:12px;flex-wrap:wrap">${legend}</div>`;
+}
+function svgLineChart(series){
+  const W=560,H=220,padL=36,padR=10,padT=10,padB=22;
+  const allPoints = Object.values(series).flat();
+  const dates = allPoints.map(p=>+p.date), values = allPoints.map(p=>p.value);
+  const minD=Math.min(...dates), maxD=Math.max(...dates);
+  const minV=Math.min(...values), maxV=Math.max(...values);
+  const spanV = (maxV-minV)||1, spanD=(maxD-minD)||1;
+  const x = d => padL + (maxD>minD ? (d-minD)/spanD : 0.5) * (W-padL-padR);
+  const y = v => H-padB - ((v-minV)/spanV) * (H-padT-padB);
+  const gridLines = [0,0.25,0.5,0.75,1].map(t=>{
+    const val = minV + t*spanV; const yy = H-padB-(t*(H-padT-padB));
+    return `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W-padR}" y2="${yy.toFixed(1)}" style="stroke:var(--border)" stroke-width="1"/><text x="2" y="${(yy+3).toFixed(1)}" font-size="9" style="fill:var(--text-dim)">${val.toFixed(1)}</text>`;
+  }).join('');
+  const lines = Object.entries(series).map(([name,pts])=>{
+    const color = seriesColor(name);
+    const d = pts.map((p,i)=>(i===0?'M':'L')+x(+p.date).toFixed(1)+','+y(p.value).toFixed(1)).join(' ');
+    const dots = pts.map(p=>`<circle cx="${x(+p.date).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3" fill="${color}"><title>${escHtml(name)}: ${p.value} — ${p.date.toLocaleDateString('es-MX')}</title></circle>`).join('');
+    return (pts.length>1?`<path d="${d}" fill="none" stroke="${color}" stroke-width="2"/>`:'')+dots;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;max-height:260px">${gridLines}${lines}</svg>`;
 }
 
 /* ---- Tablas por etiqueta de bloque (párrafo con #tag inline) — modo
@@ -3721,6 +3967,7 @@ function openSettings(){
     <div class="tabs">
       <button class="active" onclick="settingsTab(this,'tags')">Etiquetas</button>
       <button onclick="settingsTab(this,'notebooks')">Cuadernos</button>
+      <button onclick="settingsTab(this,'personas')">👤 Personas</button>
       <button onclick="settingsTab(this,'appearance')">Apariencia</button>
       <button onclick="settingsTab(this,'connection')">Conexión</button>
       <button onclick="settingsTab(this,'mejoras')">💡 Mejoras</button>
@@ -3735,10 +3982,30 @@ function settingsTab(btn, tab){
   btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
   if(tab==='tags') renderSettingsTags();
   if(tab==='notebooks') renderSettingsNotebooks();
+  if(tab==='personas') renderSettingsPersonas();
   if(tab==='appearance') renderSettingsAppearance();
   if(tab==='connection') renderSettingsConnection();
   if(tab==='mejoras') renderSettingsMejoras();
 }
+/* Personas: lista reutilizable (como Cuadernos) para plantillas "por
+   persona" (ej. Somatometría de varios familiares) — evita que cada
+   quien escriba el nombre a mano y termine con "Persona 2"/"persona1"
+   como entradas distintas por un typo o una mayúscula. */
+function renderSettingsPersonas(){
+  const body = document.getElementById('settingsBody'); if(!body) return;
+  body.innerHTML = `<button class="btn secondary" onclick="promptNewPersona()">+ nueva persona</button><div id="personaRows" style="margin-top:10px"></div>`;
+  document.getElementById('personaRows').innerHTML = DATA.personas.map(p=>`
+    <div class="settings-row">
+      <input type="color" value="${p.Color||'#8a5a3b'}" onchange="updatePersonaField('${p.ID}','Color',this.value)">
+      <input type="text" value="${escAttr(p.Nombre)}" onchange="updatePersonaField('${p.ID}','Nombre',this.value)">
+      <button class="icon-btn" onclick="deleteEntity('PERSONAS','${p.ID}').then(renderSettingsPersonas)">🗑️</button>
+    </div>`).join('') || '<p style="color:var(--text-dim)">Sin personas todavía — agrégalas aquí, o desde "+ nueva persona" al llenar una plantilla que las use.</p>';
+}
+function promptNewPersona(){
+  const name = prompt('Nombre de la persona:'); if(!name || !name.trim()) return;
+  return saveEntity('PERSONAS', { ID:uid(), Nombre:name.trim(), Color:randomColor() }).then(p=>{ renderSettingsPersonas(); return p; });
+}
+function updatePersonaField(id, field, val){ const p=DATA.personas.find(x=>x.ID===id); if(!p) return; p[field]=val; saveEntity('PERSONAS', p); }
 /* Las banderas rápidas (⚑★⚠ + las que agregues) se guardan en este mismo
    dispositivo (localStorage), no en el Sheet — son un atajo de la
    interfaz, no un dato de tus notas; las notas que crean solo llevan la

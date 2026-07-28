@@ -120,6 +120,11 @@ table.org-table th{background:var(--bg-soft);cursor:pointer;white-space:nowrap;p
 table.org-table tr:hover td{background:var(--bg-soft)}
 table.org-table td.title-cell{cursor:pointer;font-weight:600}
 .col-filter{width:100%;font-size:11px;padding:2px 4px;margin-top:3px}
+/* tablas por campo: más grandes y con celdas editables directo */
+#blockTablesBody table.org-table{font-size:14.5px}
+#blockTablesBody table.org-table th,#blockTablesBody table.org-table td{padding:9px 12px}
+table.org-table td.field-cell{cursor:text}
+table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{background:var(--accent-soft, var(--bg-soft));outline:1px solid var(--accent)}
 
 /* split */
 .split-wrap{display:flex;height:100%}
@@ -282,6 +287,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" onclick="openChecklists()" title="Checklists">☑️</button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
     <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel">Sync</span></button>
+    <button class="btn secondary no-print" onclick="openQuickDatoModal()" title="Anotar rápido: #etiqueta, lo que sea — se va a tu listado de Datos generales">+ Dato general</button>
     <button class="btn no-print" onclick="openNoteEditor(null)">+ Nota</button>
   </header>
 
@@ -1439,6 +1445,67 @@ function deleteNoteUI(id){
   deleteEntity('NOTAS', id).then(()=>{ closeNoteEditor(); editingNoteId=null; renderAll(); showToast('Nota eliminada'); });
 }
 
+/* ============ + Dato general: captura ultrarrápida "#etiqueta, texto" ==
+   cada una se guarda como su propia notita dentro del cuaderno especial
+   "Datos generales", ordenadas por fecha — el modal se queda abierto para
+   seguir metiendo una tras otra sin tener que reabrirlo cada vez. */
+function openQuickDatoModal(){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
+    <div class="modal-head"><b>⚡ Dato general</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">
+        "#etiqueta, lo que quieras" — se guarda solo en tu listado de Datos generales, ordenado por fecha. Ábrela después para agregarle más.
+      </p>
+      <input type="text" id="quickDatoInput" placeholder="#cancion, ayer la vi">
+      <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center">
+        <button class="btn" onclick="saveQuickDato()">Guardar</button>
+        <button class="mini-btn" style="width:auto" onclick="openNoteEditor(null);this.closest('.modal-overlay').remove()">Ver como nota completa →</button>
+      </div>
+      <div id="quickDatoList" style="margin-top:16px;max-height:220px;overflow-y:auto"></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const inp = document.getElementById('quickDatoInput');
+  inp.focus();
+  inp.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); saveQuickDato(); } });
+  renderQuickDatoList();
+}
+async function ensureDatosGeneralesNotebook(){
+  let nb = DATA.notebooks.find(n=>n.Nombre==='Datos generales');
+  if(!nb) nb = await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:'Datos generales', TagsHeredados:'', Color:'#7d5ba6', TagAuto:'' });
+  return nb;
+}
+async function saveQuickDato(){
+  const inp = document.getElementById('quickDatoInput');
+  const raw = (inp.value||'').trim(); if(!raw) return;
+  const m = raw.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)\s*[,:]?\s*(.*)$/);
+  const tag = m ? m[1] : '';
+  const texto = m ? m[2] : raw;
+  const nb = await ensureDatosGeneralesNotebook();
+  const note = {
+    ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(),
+    Titulo: tag ? ('#'+tag) : raw.slice(0,40),
+    Contenido: '<p>'+(tag?('<b>#'+escHtml(tag)+'</b> '):'')+escHtml(texto)+'</p>',
+    Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:''
+  };
+  await saveEntity('NOTAS', note);
+  if(tag) ensureTagsRegistered('#'+tag);
+  renderAll();
+  showToast('✅ Guardado en Datos generales');
+  inp.value=''; inp.focus();
+  renderQuickDatoList();
+}
+function renderQuickDatoList(){
+  const wrap = document.getElementById('quickDatoList'); if(!wrap) return;
+  const nb = DATA.notebooks.find(n=>n.Nombre==='Datos generales');
+  const items = nb ? DATA.notas.filter(n=>n.Notebook==='Datos generales').sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha))).slice(0,8) : [];
+  wrap.innerHTML = items.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteEditor('${n.ID}')">
+      <span style="flex:1;font-size:13px">${escHtml(n.Titulo)} <span style="color:var(--text-dim)">— ${escHtml(noteSnippetText(n).slice(0,40))}</span></span>
+      <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
+    </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Aún no hay nada aquí — el primero que guardes aparece arriba.</p>';
+}
+
 /* ============ Exportar a PDF (impresión del navegador) ============ */
 function exportNotePDF(id){
   const note = id ? getNote(id) : collectNoteFromForm();
@@ -1816,7 +1883,7 @@ function histAddItem(id){
    mismo bloque como columnas. */
 function openBlockTables(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  overlay.innerHTML = `<div class="modal" style="width:min(940px,100%)">
+  overlay.innerHTML = `<div class="modal" style="width:min(1200px,96vw)">
     <div class="modal-head"><b>🧩 Tablas</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="tabs">
       <button class="active" onclick="blockTablesTab(this,'campos')">Por campos de nota</button>
@@ -1881,6 +1948,33 @@ function saveFieldTable(){
   if(!nombre || !cols){ showToast('Ponle nombre y al menos una columna'); return; }
   saveEntity('BLOQUE_TABLAS', { ID:uid(), Nombre:nombre, TagFiltro:'', CampoFiltro:campo, ValorFiltro:valor, Columnas:cols }).then(renderFieldTablesBody);
 }
+/* Escribe de vuelta el valor editado en la tabla hacia el campo real de la
+   nota de origen (tabla Cornell o párrafos "#campo"/valor, según cómo esté
+   guardada esa nota) — la tabla es solo una vista, el dato vive en la nota. */
+function updateEntityField(noteId, fieldKey, newValueText){
+  const note = getNote(noteId); if(!note) return;
+  const pairs = extractFieldPairs(note);
+  const idx = pairs.findIndex(p=>{
+    const m = p.cue.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)$/);
+    return m && m[1].toLowerCase()===fieldKey;
+  });
+  if(idx<0) return false;
+  pairs[idx].texto = escHtml(newValueText);
+  if(isCornellNote(note)){
+    note.Contenido = '<table class="rt-table cornell-table">'+pairs.map(p=>
+      '<tr><td class="cornell-cue-cell">'+escHtml(p.cue)+'</td><td>'+(p.texto||'<br>')+'</td></tr>').join('')+'</table>';
+  } else {
+    note.Contenido = pairs.map(p=>'<p>'+escHtml(p.cue)+'</p><p>'+(p.texto||'<br>')+'</p>').join('');
+  }
+  note.FechaEdicion = new Date().toISOString();
+  saveEntity('NOTAS', note);
+  return true;
+}
+function handleFieldTableCellEdit(td){
+  const noteId = td.dataset.note; const field = td.dataset.field;
+  const ok = updateEntityField(noteId, field, td.textContent);
+  if(ok){ const n=getNote(noteId); showToast('✏️ Actualizado en "'+(n?n.Titulo:'')+'"'); }
+}
 function fieldTableRenderHTML(bt){
   const campo = (bt.CampoFiltro||'').toLowerCase();
   const valor = (bt.ValorFiltro||'').toLowerCase();
@@ -1893,7 +1987,7 @@ function fieldTableRenderHTML(bt){
   const body = rows.map(e=>{
     const originTxt = e.origin.length ? ' <span style="color:var(--text-dim);font-weight:400">('+e.origin.map(t=>'#'+escHtml(t)).join(' ')+')</span>' : '';
     return '<tr><td class="title-cell" onclick="openNoteEditor(\''+e.note.ID+'\')">'+escHtml(e.entity)+originTxt+'</td>'
-      + cols.map(c=>'<td>'+escHtml(e.fields[c]||'')+'</td>').join('') + '</tr>';
+      + cols.map(c=>'<td class="field-cell" contenteditable="true" data-note="'+e.note.ID+'" data-field="'+escAttr(c)+'" onblur="handleFieldTableCellEdit(this)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();this.blur();}">'+escHtml(e.fields[c]||'')+'</td>').join('') + '</tr>';
   }).join('');
   return '<div style="overflow:auto;margin-top:8px"><table class="org-table"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }

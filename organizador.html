@@ -461,10 +461,19 @@ function notebookInherited(name){
   const nb = findNotebook(name);
   return nb ? parseTagsText(nb.TagsHeredados) : [];
 }
+/* Etiquetas escritas SUELTAS dentro del texto de la nota (no solo en el
+   campo "Etiquetas") — así #dx, #dengue, etc. escritas en el cuerpo
+   también aparecen en la búsqueda y en el panel lateral, igual que las
+   del campo dedicado o las heredadas del cuaderno. */
+function inlineTagsFromContent(note){
+  const text = stripHtmlToText(note.Contenido||'');
+  return Array.from(new Set((text.match(/#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ:-]+)/g)||[]).map(t=>t.slice(1))));
+}
 function effectiveTags(note){
   const own = parseTagsText(note.Tags);
   const inh = notebookInherited(note.Notebook);
-  return Array.from(new Set([...own, ...inh]));
+  const inline = inlineTagsFromContent(note);
+  return Array.from(new Set([...own, ...inh, ...inline]));
 }
 function tagColor(name){
   const flag = FLAG_TAGS.find(f=>f[0]===name);

@@ -376,7 +376,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Notre Dame';
+const BUILD_VERSION = 'Machu Picchu II';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2352,18 +2352,37 @@ function renderChecklistBody(){
 
 /* Los items llevan una "section" opcional (ej. "ropa", "comida") para poder
    agrupar el checklist en categorías, tanto en la plantilla como al llenar
-   y en el historial. */
-function groupBySection(items){
+   y en el historial. Un segundo eje, independiente de la categoría, es
+   "destino" — a dónde va cada elemento (equipaje de mano / maleta
+   documentada / comprar al llegar en un viaje, o lo que aplique según el
+   tipo de checklist — no es exclusivo de viajes). filterFn es opcional;
+   si se pasa, se filtra ANTES de agrupar pero conservando el índice
+   original de "items" (los onchange de cada fila apuntan a ese índice). */
+function groupBySection(items, filterFn){
+  const withIdx = items.map((it,i)=>({it,i})).filter(x => !filterFn || filterFn(x.it));
   const order = []; const seen = new Set();
-  items.forEach(it=>{ const s=it.section||''; if(!seen.has(s)){ seen.add(s); order.push(s); } });
-  return order.map(sec=>({ sec, rows: items.map((it,i)=>({it,i})).filter(x=>(x.it.section||'')===sec) }));
+  withIdx.forEach(({it})=>{ const s=it.section||''; if(!seen.has(s)){ seen.add(s); order.push(s); } });
+  return order.map(sec=>({ sec, rows: withIdx.filter(x=>(x.it.section||'')===sec) }));
+}
+function distinctDestinos(items){
+  return Array.from(new Set(items.map(it=>it.destino).filter(Boolean)));
+}
+function destinoFilterBarHTML(items, activeDestino, setterName, ownerArg){
+  const destinos = distinctDestinos(items); if(!destinos.length) return '';
+  const arg = ownerArg!==undefined ? `'${escAttr(ownerArg)}',` : '';
+  return `<div class="tag-filter-mode" style="margin-bottom:8px;flex-wrap:wrap">
+    <button class="${!activeDestino?'active':''}" onclick="${setterName}(${arg}'')">Todos</button>
+    ${destinos.map(d=>`<button class="${activeDestino===d?'active':''}" onclick="${setterName}(${arg}'${escAttr(d)}')">${escHtml(d)}</button>`).join('')}
+  </div>`;
 }
 function parseTemplateText(text){
   let section = ''; const items = [];
   (text||'').split('\n').forEach(raw=>{
     const line = raw.trim(); if(!line) return;
     if(/:$/.test(line)){ section = line.slice(0,-1).trim(); return; }
-    items.push({ text: line, section });
+    const pipeIdx = line.lastIndexOf('|');
+    if(pipeIdx>-1) items.push({ text: line.slice(0,pipeIdx).trim(), destino: line.slice(pipeIdx+1).trim(), section });
+    else items.push({ text: line, destino:'', section });
   });
   return items;
 }
@@ -2372,29 +2391,42 @@ function templateItemsToText(items){
   items.forEach(it=>{
     const sec = it.section||'';
     if(sec!==last){ if(out.length) out.push(''); if(sec) out.push(sec+':'); last=sec; }
-    out.push(it.text);
+    out.push(it.text + (it.destino?(' | '+it.destino):''));
   });
   return out.join('\n');
 }
 
 function histEntryHTML(h){
   let items=[]; try{ items = JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
-  const body = groupBySection(items).map(({sec,rows})=>`
-    <div class="fill-section">
+  window._histDestinoFilters = window._histDestinoFilters || {};
+  const activeDestino = window._histDestinoFilters[h.ID] || '';
+  const filterBar = destinoFilterBarHTML(items, activeDestino, 'setHistDestinoFilter', h.ID);
+  const filterFn = activeDestino ? (it=>it.destino===activeDestino) : null;
+  const body = groupBySection(items, filterFn).map(({sec,rows})=>{
+    if(!rows.length) return '';
+    return `<div class="fill-section">
       ${sec ? `<div class="fill-section-title">${escHtml(sec)}</div>` : ''}
       <ul>${rows.map(({it,i})=>`<li>
         <input type="checkbox" ${it.checked?'checked':''} onchange="histToggle('${h.ID}',${i},this.checked)">
         <span class="${it.checked?'done':''}">${escHtml(it.text)}</span>
+        <input type="text" class="hist-note" style="max-width:100px" placeholder="destino" value="${escAttr(it.destino||'')}" onchange="histDestinoChange('${h.ID}',${i},this.value)">
         <input type="text" class="hist-note" placeholder="nota (cuántos, estado…)" value="${escAttr(it.note||'')}" onchange="histNoteChange('${h.ID}',${i},this.value)">
       </li>`).join('')}</ul>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   return `<div class="hist-entry">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:12px;color:var(--text-dim)">${fmtDate(h.Fecha)}</span>
       <button class="icon-btn" onclick="histAddItem('${h.ID}')" title="Agregar elemento a esta lista">+ elemento</button>
     </div>
+    ${filterBar}
     ${body}
   </div>`;
+}
+function setHistDestinoFilter(historyId, d){
+  window._histDestinoFilters = window._histDestinoFilters || {};
+  window._histDestinoFilters[historyId] = d;
+  renderChecklistBody();
 }
 function openTemplateModal(existingId){
   const existing = existingId ? DATA.plantillas.find(p=>p.ID===existingId) : null;
@@ -2405,14 +2437,13 @@ function openTemplateModal(existingId){
     <div class="modal-body">
       <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Nombre</label>
       <input type="text" id="tplNameInput" value="${existing?escAttr(existing.Nombre):''}" placeholder="ej. Viaje a la playa">
-      <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Elementos — uno por línea. Una línea que termine en ":" empieza una categoría nueva.</label>
-      <textarea id="tplItemsInput" rows="10" placeholder="ropa:
-tenis
-chamarra
-
-comida:
-chicles
-dulces">${existing?escHtml(templateItemsToText(items)):''}</textarea>
+      <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Elementos — uno por línea. Una línea que termine en ":" empieza una categoría nueva. Para marcar a dónde va cada elemento (útil en cualquier tipo de lista, no solo viajes), agrégalo al final con "|" — luego puedes filtrar por eso al llenar la lista.</label>
+      <textarea id="tplItemsInput" rows="10" placeholder="documentos y dinero:
+pasaporte y visa | equipaje de mano
+cartera | equipaje de mano
+ropa:
+camisetas | maleta documentada
+protector solar | comprar al llegar">${existing?escHtml(templateItemsToText(items)):''}</textarea>
       <div style="margin-top:14px"><button class="btn" onclick="saveTemplateModal(this,'${existingId||''}')">Guardar plantilla</button></div>
     </div>
   </div>`;
@@ -2437,8 +2468,9 @@ function deleteTemplateUI(id){ if(!confirm('¿Eliminar esta plantilla?')) return
    vez. */
 function openFillModal(templateId){
   const p = DATA.plantillas.find(x=>x.ID===templateId); if(!p) return;
-  let baseItems; try{ baseItems = JSON.parse(p.ItemsJSON||'[]').map(it=>({ text: it.text!==undefined?it.text:it, checked:false, note:'', section: it.section||'' })); }catch(e){ baseItems=[]; }
+  let baseItems; try{ baseItems = JSON.parse(p.ItemsJSON||'[]').map(it=>({ text: it.text!==undefined?it.text:it, checked:false, note:'', destino: it.destino||'', section: it.section||'' })); }catch(e){ baseItems=[]; }
   window._fillItems = baseItems;
+  _fillDestinoFilter = '';
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
     <div class="modal-head"><b>▶ Llenar: ${escHtml(p.Nombre)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
@@ -2454,25 +2486,33 @@ function openFillModal(templateId){
   document.body.appendChild(overlay);
   renderFillItemsList();
 }
+let _fillDestinoFilter = '';
+function setFillDestinoFilter(d){ _fillDestinoFilter = d; renderFillItemsList(); }
 function renderFillItemsList(){
   const el = document.getElementById('fillItemsList'); if(!el) return;
-  el.innerHTML = groupBySection(window._fillItems).map(({sec,rows})=>`
-    <div class="fill-section">
+  const filterBar = destinoFilterBarHTML(window._fillItems, _fillDestinoFilter, 'setFillDestinoFilter');
+  const filterFn = _fillDestinoFilter ? (it=>it.destino===_fillDestinoFilter) : null;
+  const groups = groupBySection(window._fillItems, filterFn).map(({sec,rows})=>{
+    if(!rows.length) return '';
+    return `<div class="fill-section">
       ${sec ? `<div class="fill-section-title">${escHtml(sec)}</div>` : ''}
       ${rows.map(({it,i})=>fillRowHTML(it,i)).join('')}
       <button class="mini-btn" onclick="addFillRow('${escAttr(sec)}')">+ elemento en ${sec?escHtml(sec):'esta lista'}</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+  el.innerHTML = filterBar + groups;
 }
 function fillRowHTML(it,i){
   return `<div class="fill-row">
     <input type="checkbox" ${it.checked?'checked':''} onchange="window._fillItems[${i}].checked=this.checked">
     <input type="text" style="flex:1.3" value="${escAttr(it.text)}" placeholder="elemento" onchange="window._fillItems[${i}].text=this.value">
+    <input type="text" style="flex:.7" value="${escAttr(it.destino||'')}" placeholder="destino (opcional)" onchange="window._fillItems[${i}].destino=this.value;renderFillItemsList()">
     <input type="text" style="flex:1" value="${escAttr(it.note||'')}" placeholder="nota (cuántos, si hace calor…)" onchange="window._fillItems[${i}].note=this.value">
     <button class="icon-btn" onclick="removeFillRow(${i})">🗑️</button>
   </div>`;
 }
-function addFillRow(section){ window._fillItems.push({text:'',checked:false,note:'',section:section||''}); renderFillItemsList(); }
-function addFillSection(){ const name = prompt('Nombre de la categoría (ej. Ropa):'); if(!name || !name.trim()) return; window._fillItems.push({text:'',checked:false,note:'',section:name.trim()}); renderFillItemsList(); }
+function addFillRow(section){ window._fillItems.push({text:'',checked:false,note:'',destino:'',section:section||''}); renderFillItemsList(); }
+function addFillSection(){ const name = prompt('Nombre de la categoría (ej. Ropa):'); if(!name || !name.trim()) return; window._fillItems.push({text:'',checked:false,note:'',destino:'',section:name.trim()}); renderFillItemsList(); }
 function removeFillRow(i){ window._fillItems.splice(i,1); renderFillItemsList(); }
 async function saveFillModal(templateId, btn){
   const items = window._fillItems.filter(it=>it.text && it.text.trim());
@@ -2492,10 +2532,11 @@ async function histMutate(historyId, mutator){
 }
 function histToggle(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].checked = val; }); }
 function histNoteChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].note = val; }); }
+function histDestinoChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].destino = val; }); }
 function histAddItem(id){
   const text = prompt('Nuevo elemento para esta lista (opcional "categoría: elemento"):'); if(!text || !text.trim()) return;
   const m = text.match(/^(.+?):\s*(.+)$/);
-  histMutate(id, items=> items.push(m ? { text:m[2].trim(), checked:false, note:'', section:m[1].trim() } : { text: text.trim(), checked:false, note:'', section:'' }));
+  histMutate(id, items=> items.push(m ? { text:m[2].trim(), checked:false, note:'', destino:'', section:m[1].trim() } : { text: text.trim(), checked:false, note:'', destino:'', section:'' }));
 }
 
 /* ============ Tablas dinámicas por bloque ============

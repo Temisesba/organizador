@@ -100,8 +100,11 @@ aside h3{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(
 /* ✏️/👁 solo aparecen al pasar el cursor — si siempre están ahí, en
    nombres largos de etiqueta se comen el espacio y cortan el texto antes
    de que se alcance a leer completo. */
-.tag-chip-row .icon-btn{opacity:0;transition:opacity .1s;flex:none}
-.tag-chip-row:hover .icon-btn{opacity:1}
+/* display:none (no opacity:0) a propósito — opacity solo lo hace
+   invisible pero sigue ocupando su espacio en el layout, que es
+   justo lo que cortaba nombres largos de etiqueta aunque "no se vieran". */
+.tag-chip-row .icon-btn{display:none;flex:none}
+.tag-chip-row:hover .icon-btn{display:inline-flex}
 .nb-item.active .cnt{color:var(--accent-text);opacity:.8}
 main{flex:1;overflow-y:auto;padding:14px;min-width:0}
 main:fullscreen{background:var(--bg);padding:20px}
@@ -373,7 +376,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Neuschwanstein';
+const BUILD_VERSION = 'Alcázar de Segovia';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.

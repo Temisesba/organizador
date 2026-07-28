@@ -239,11 +239,23 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .hist-entry{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin:6px 0}
 .hist-entry ul{list-style:none;margin:6px 0 0;padding:0}
 .hist-entry li{padding:3px 0;display:flex;gap:6px;align-items:center}
-.hist-entry li span.done{text-decoration:line-through;color:var(--text-dim)}
-.hist-entry li span{flex:1}
-.hist-note{width:150px;font-size:12px;padding:3px 6px}
+.hist-name-input{font-weight:700;font-size:14px;flex:1;min-width:0}
+.hist-item-text{flex:1.3;min-width:0;border:1px solid transparent;background:transparent;font-size:13.5px;padding:2px 4px}
+.hist-item-text:focus{border-color:var(--border);background:var(--bg-soft);border-radius:4px}
+.hist-item-text.done{text-decoration:line-through;color:var(--text-dim)}
+.hist-note{flex:1;min-width:0;font-size:12px;padding:3px 6px}
 .fill-row{display:flex;gap:6px;align-items:center;margin:6px 0}
 .fill-row input[type=text]{font-size:13px}
+.fill-toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.fill-toolbar input[type=text]{font-size:12px;padding:4px 8px;border-radius:14px}
+.fill-toolbar select{font-size:12px}
+.items-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px}
+.items-table th{text-align:left;font-size:11px;color:var(--text-dim);font-weight:600;padding:4px 6px}
+.items-table td{padding:2px 4px;border-bottom:1px solid var(--border)}
+.items-table input[type=text]{width:100%;border:1px solid transparent;background:transparent;padding:3px 4px;font-size:12.5px}
+.items-table input[type=text]:focus{border-color:var(--border);background:var(--bg-soft)}
+.items-table tr.done-row{opacity:.55}
+.items-table-wrap{overflow-x:auto}
 
 /* toast */
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 16px;border-radius:20px;font-size:13px;z-index:999;opacity:0;pointer-events:none;transition:opacity .2s}
@@ -391,7 +403,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Alhambra';
+const BUILD_VERSION = 'Sagrada Familia';
 // El cuaderno de Mejoras vive SOLO en Configuración → 💡 Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2861,24 +2873,23 @@ function renderChecklistBody(){
         <b>${escHtml(p.Nombre)}</b>
         <span><button class="icon-btn" onclick="openFillModal('${p.ID}')">▶ Llenar</button><button class="icon-btn" onclick="openTemplateModal('${p.ID}')" title="Editar plantilla">✏️</button><button class="icon-btn" onclick="deleteTemplateUI('${p.ID}')">🗑️</button></span>
       </div>
-      <div>${hist.map(h=>histEntryHTML(h)).join('') || '<p class="hint" style="color:var(--text-dim)">Sin historial aún</p>'}</div>
+      <div>${hist.map((h,idx)=>histEntryHTML(h, idx===0)).join('') || '<p class="hint" style="color:var(--text-dim)">Sin historial aún</p>'}</div>
     </div>`;
   }).join('') || '<p style="color:var(--text-dim)">Sin plantillas — crea la primera.</p>';
 }
 
 /* Los items llevan una "section" opcional (ej. "ropa", "comida") para poder
-   agrupar el checklist en categorías, tanto en la plantilla como al llenar
-   y en el historial. Un segundo eje, independiente de la categoría, es
-   "destino" — a dónde va cada elemento (equipaje de mano / maleta
-   documentada / comprar al llegar en un viaje, o lo que aplique según el
-   tipo de checklist — no es exclusivo de viajes). filterFn es opcional;
-   si se pasa, se filtra ANTES de agrupar pero conservando el índice
-   original de "items" (los onchange de cada fila apuntan a ese índice). */
-function groupBySection(items, filterFn){
-  const withIdx = items.map((it,i)=>({it,i})).filter(x => !filterFn || filterFn(x.it));
+   agrupar el checklist en categorías, una "destino" opcional (a dónde va
+   cada elemento — equipaje de mano / maleta documentada / comprar al
+   llegar en un viaje, o lo que aplique según el tipo de checklist, no es
+   exclusivo de viajes) y una "priority" opcional (alta/media/baja).
+   groupBySection ya recibe las filas filtradas+ordenadas (ver
+   filterSortRows) junto con su índice original en el arreglo real, para
+   que los onchange de cada fila sigan apuntando al elemento correcto. */
+function groupBySection(rows){
   const order = []; const seen = new Set();
-  withIdx.forEach(({it})=>{ const s=it.section||''; if(!seen.has(s)){ seen.add(s); order.push(s); } });
-  return order.map(sec=>({ sec, rows: withIdx.filter(x=>(x.it.section||'')===sec) }));
+  rows.forEach(({it})=>{ const s=it.section||''; if(!seen.has(s)){ seen.add(s); order.push(s); } });
+  return order.map(sec=>({ sec, rows: rows.filter(x=>(x.it.section||'')===sec) }));
 }
 function distinctDestinos(items){
   return Array.from(new Set(items.map(it=>it.destino).filter(Boolean)));
@@ -2891,14 +2902,101 @@ function destinoFilterBarHTML(items, activeDestino, setterName, ownerArg){
     ${destinos.map(d=>`<button class="${activeDestino===d?'active':''}" onclick="${setterName}(${arg}'${escAttr(d)}')">${escHtml(d)}</button>`).join('')}
   </div>`;
 }
+const PRIORITY_LEVELS = [
+  { v:'alta',  label:'🔴 Alta',  rank:0 },
+  { v:'media', label:'🟡 Media', rank:1 },
+  { v:'baja',  label:'🟢 Baja',  rank:2 },
+  { v:'',      label:'—',        rank:3 }
+];
+function normalizePriority(s){ const v=String(s||'').trim().toLowerCase(); return (v==='alta'||v==='media'||v==='baja') ? v : ''; }
+function priorityRank(p){ const f=PRIORITY_LEVELS.find(x=>x.v===(p||'')); return f?f.rank:3; }
+function prioritySelectHTML(value, onchangeExpr){
+  return `<select class="hist-note" style="flex:none;width:56px;padding:2px 4px" title="Prioridad" onchange="${onchangeExpr}">${PRIORITY_LEVELS.map(l=>`<option value="${l.v}" ${(value||'')===l.v?'selected':''}>${l.label}</option>`).join('')}</select>`;
+}
+/* Búsqueda+orden+destino en un solo paso: se aplica ANTES de agrupar por
+   sección, así que cuando el orden es distinto de "orig" (el de la
+   plantilla) ya no tiene sentido seguir agrupando por categoría — el
+   usuario pidió explícitamente reordenar, así que se muestra plano. */
+function filterSortRows(items, opts){
+  opts = opts||{};
+  const search = String(opts.search||'').toLowerCase().trim();
+  const destino = opts.destino||''; const sort = opts.sort||'orig';
+  let rows = items.map((it,i)=>({it,i})).filter(({it})=>{
+    if(destino && it.destino!==destino) return false;
+    if(search && !String(it.text||'').toLowerCase().includes(search)) return false;
+    return true;
+  });
+  if(sort==='priority') rows = rows.slice().sort((a,b)=>priorityRank(a.it.priority)-priorityRank(b.it.priority));
+  else if(sort==='az') rows = rows.slice().sort((a,b)=>String(a.it.text||'').localeCompare(String(b.it.text||''),'es'));
+  else if(sort==='pending') rows = rows.slice().sort((a,b)=>(a.it.checked?1:0)-(b.it.checked?1:0));
+  return rows;
+}
+/* Barra compartida entre "Llenar" e historial: buscar (se actualiza sin
+   rehacer todo el modal, para no perder el foco mientras se escribe —
+   ver setFillSearch/setHistSearch), ordenar, alternar lista/tabla, y los
+   chips de destino ya existentes. */
+function itemsToolbarHTML(items, cfg){
+  const arg = cfg.ownerArg!==undefined ? `'${escAttr(cfg.ownerArg)}',` : '';
+  const destinoBar = destinoFilterBarHTML(items, cfg.destino, cfg.setDestino, cfg.ownerArg);
+  return `<div class="fill-toolbar">
+    <input type="text" placeholder="🔎 buscar…" value="${escAttr(cfg.search||'')}" oninput="${cfg.setSearch}(${arg}this.value)">
+    <select onchange="${cfg.setSort}(${arg}this.value)">
+      <option value="orig" ${cfg.sort==='orig'?'selected':''}>Orden de la lista</option>
+      <option value="priority" ${cfg.sort==='priority'?'selected':''}>Por prioridad</option>
+      <option value="az" ${cfg.sort==='az'?'selected':''}>A-Z</option>
+      <option value="pending" ${cfg.sort==='pending'?'selected':''}>Pendientes primero</option>
+    </select>
+    <button class="icon-btn" title="${cfg.view==='table'?'Ver como lista':'Ver como tabla'}" onclick="${cfg.setView}(${arg}'${cfg.view==='table'?'list':'table'}')">${cfg.view==='table'?'📋':'🔲'}</button>
+  </div>
+  ${destinoBar}`;
+}
+function itemsTableHTML(rows, h){
+  if(!rows.length) return '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
+  return `<div class="items-table-wrap"><table class="items-table">
+    <tr><th></th><th>Elemento</th><th>Categoría</th><th>Destino</th><th>Prioridad</th><th>Nota</th><th></th></tr>
+    ${rows.map(({it,i})=>`<tr class="${it.checked?'done-row':''}">
+      <td><input type="checkbox" ${it.checked?'checked':''} onchange="${h.checkedExpr(i)}"></td>
+      <td><input type="text" value="${escAttr(it.text)}" onchange="${h.textExpr(i)}"></td>
+      <td><input type="text" value="${escAttr(it.section||'')}" onchange="${h.sectionExpr(i)}"></td>
+      <td><input type="text" value="${escAttr(it.destino||'')}" onchange="${h.destinoExpr(i)}"></td>
+      <td>${prioritySelectHTML(it.priority, h.priorityExpr(i))}</td>
+      <td><input type="text" value="${escAttr(it.note||'')}" onchange="${h.noteExpr(i)}"></td>
+      <td><button class="icon-btn" onclick="${h.delExpr(i)}">🗑️</button></td>
+    </tr>`).join('')}
+  </table></div>`;
+}
+/* "Pegar varios": mismo formato de línea que al crear una plantilla
+   (categoría:, "elemento | destino | prioridad"), para copiar/pegar una
+   lista completa de otro lado en vez de darle "+ elemento" uno por uno. */
+function openBulkAddModal(onAdd){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
+    <div class="modal-head"><b>📋 Pegar varios elementos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin-bottom:8px">Uno por línea. Una línea que termina en ":" empieza una categoría nueva. "elemento | destino" o "elemento | destino | prioridad" (alta/media/baja).</p>
+      <textarea id="bulkAddText" rows="8" placeholder="ropa:
+camiseta | maleta documentada
+protector solar | comprar al llegar | alta"></textarea>
+      <div style="margin-top:12px"><button class="btn" id="bulkAddBtn">Agregar</button></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('bulkAddText').focus();
+  document.getElementById('bulkAddBtn').addEventListener('click', ()=>{
+    const parsed = parseTemplateText(document.getElementById('bulkAddText').value).map(it=>Object.assign({checked:false,note:''}, it));
+    if(parsed.length) onAdd(parsed);
+    overlay.remove();
+  });
+}
 function parseTemplateText(text){
   let section = ''; const items = [];
   (text||'').split('\n').forEach(raw=>{
     const line = raw.trim(); if(!line) return;
     if(/:$/.test(line)){ section = line.slice(0,-1).trim(); return; }
-    const pipeIdx = line.lastIndexOf('|');
-    if(pipeIdx>-1) items.push({ text: line.slice(0,pipeIdx).trim(), destino: line.slice(pipeIdx+1).trim(), section });
-    else items.push({ text: line, destino:'', section });
+    const parts = line.split('|').map(s=>s.trim());
+    if(parts.length>=3) items.push({ text:parts[0], destino:parts[1], priority:normalizePriority(parts[2]), section });
+    else if(parts.length===2) items.push({ text:parts[0], destino:parts[1], priority:'', section });
+    else items.push({ text:parts[0], destino:'', priority:'', section });
   });
   return items;
 }
@@ -2907,42 +3005,123 @@ function templateItemsToText(items){
   items.forEach(it=>{
     const sec = it.section||'';
     if(sec!==last){ if(out.length) out.push(''); if(sec) out.push(sec+':'); last=sec; }
-    out.push(it.text + (it.destino?(' | '+it.destino):''));
+    let line = it.text;
+    if(it.priority) line += ' | '+(it.destino||'')+' | '+it.priority;
+    else if(it.destino) line += ' | '+it.destino;
+    out.push(line);
   });
   return out.join('\n');
 }
 
-function histEntryHTML(h){
-  let items=[]; try{ items = JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
+/* Cada lista llenada se puede plegar (la más reciente empieza abierta, el
+   resto plegado, para no acumular un historial larguísimo siempre
+   visible) y renombrar (el nombre por default es la fecha, pero se le
+   puede poner uno propio al llenar o después, con el lápiz). */
+window._histCollapsed = window._histCollapsed || {};
+function isHistCollapsed(h, isNewest){
+  return window._histCollapsed.hasOwnProperty(h.ID) ? window._histCollapsed[h.ID] : !isNewest;
+}
+function toggleHistCollapsed(historyId, isNewest){
+  const cur = window._histCollapsed.hasOwnProperty(historyId) ? window._histCollapsed[historyId] : !isNewest;
+  window._histCollapsed[historyId] = !cur;
+  renderChecklistBody();
+}
+function startHistNameEdit(historyId, btn){
+  const h = DATA.historial.find(x=>x.ID===historyId); if(!h) return;
+  const span = btn.closest('.hist-entry').querySelector('.hist-name'); if(!span) return;
+  const input = document.createElement('input');
+  input.type='text'; input.className='hist-name-input'; input.value = h.Nombre || fmtDate(h.Fecha);
+  input.onclick = e=>e.stopPropagation();
+  input.onblur = ()=>finishHistNameEdit(historyId, input);
+  input.onkeydown = e=>{ if(e.key==='Enter') input.blur(); if(e.key==='Escape') renderChecklistBody(); };
+  span.replaceWith(input);
+  input.focus(); input.select();
+}
+function finishHistNameEdit(historyId, input){
+  const name = input.value.trim();
+  const h = DATA.historial.find(x=>x.ID===historyId); if(!h) return;
+  saveEntity('HISTORIAL', Object.assign({}, h, { Nombre: name })).then(()=> renderChecklistBody());
+}
+function histEntryHTML(h, isNewest){
   window._histDestinoFilters = window._histDestinoFilters || {};
-  const activeDestino = window._histDestinoFilters[h.ID] || '';
-  const filterBar = destinoFilterBarHTML(items, activeDestino, 'setHistDestinoFilter', h.ID);
-  const filterFn = activeDestino ? (it=>it.destino===activeDestino) : null;
-  const body = groupBySection(items, filterFn).map(({sec,rows})=>{
+  window._histSearch = window._histSearch || {};
+  window._histSort = window._histSort || {};
+  window._histViewMode = window._histViewMode || {};
+  const collapsed = isHistCollapsed(h, isNewest);
+  const displayName = h.Nombre || fmtDate(h.Fecha);
+  let rawItems=[]; try{ rawItems = JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
+  return `<div class="hist-entry">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+      <span style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;min-width:0" onclick="toggleHistCollapsed('${h.ID}',${isNewest?'true':'false'})">
+        <span style="flex:none">${collapsed?'▸':'▾'}</span>
+        <b class="hist-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(displayName)}</b>
+        <span style="font-size:11px;color:var(--text-dim);flex:none">${fmtDate(h.Fecha)}</span>
+      </span>
+      <span style="display:flex;gap:2px;flex:none">
+        <button class="icon-btn" onclick="event.stopPropagation();startHistNameEdit('${h.ID}',this)" title="Renombrar esta lista">✏️</button>
+        <button class="icon-btn" onclick="event.stopPropagation();openBulkAddForHist('${h.ID}')" title="Pegar varios elementos">📋</button>
+        <button class="icon-btn" onclick="event.stopPropagation();histAddItem('${h.ID}')" title="Agregar elemento a esta lista">+ elemento</button>
+      </span>
+    </div>
+    ${collapsed ? '' : `
+      <div id="histToolbar-${h.ID}" style="margin-top:8px">${itemsToolbarHTML(rawItems, {
+        search: window._histSearch[h.ID]||'', destino: window._histDestinoFilters[h.ID]||'', sort: window._histSort[h.ID]||'orig', view: window._histViewMode[h.ID]||'list',
+        setSearch:'setHistSearch', setDestino:'setHistDestinoFilter', setSort:'setHistSort', setView:'setHistViewMode', ownerArg:h.ID
+      })}</div>
+      <div id="histBody-${h.ID}">${histBodyHTML(h)}</div>`}
+  </div>`;
+}
+function histBodyHTML(h){
+  let items=[]; try{ items = JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
+  const search = (window._histSearch&&window._histSearch[h.ID])||'';
+  const destino = (window._histDestinoFilters&&window._histDestinoFilters[h.ID])||'';
+  const sort = (window._histSort&&window._histSort[h.ID])||'orig';
+  const view = (window._histViewMode&&window._histViewMode[h.ID])||'list';
+  const rows = filterSortRows(items, {search, destino, sort});
+  if(view==='table'){
+    return itemsTableHTML(rows, {
+      checkedExpr:i=>`histToggle('${h.ID}',${i},this.checked)`,
+      textExpr:i=>`histTextChange('${h.ID}',${i},this.value)`,
+      sectionExpr:i=>`histSectionChange('${h.ID}',${i},this.value)`,
+      destinoExpr:i=>`histDestinoChange('${h.ID}',${i},this.value)`,
+      priorityExpr:i=>`histPriorityChange('${h.ID}',${i},this.value)`,
+      noteExpr:i=>`histNoteChange('${h.ID}',${i},this.value)`,
+      delExpr:i=>`histDeleteItem('${h.ID}',${i})`
+    });
+  }
+  if(sort!=='orig'){
+    return rows.length ? `<ul>${rows.map(({it,i})=>histRowHTML(h.ID,it,i)).join('')}</ul>` : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
+  }
+  const groups = groupBySection(rows).map(({sec,rows})=>{
     if(!rows.length) return '';
     return `<div class="fill-section">
       ${sec ? `<div class="fill-section-title">${escHtml(sec)}</div>` : ''}
-      <ul>${rows.map(({it,i})=>`<li>
-        <input type="checkbox" ${it.checked?'checked':''} onchange="histToggle('${h.ID}',${i},this.checked)">
-        <span class="${it.checked?'done':''}">${escHtml(it.text)}</span>
-        <input type="text" class="hist-note" style="max-width:100px" placeholder="destino" value="${escAttr(it.destino||'')}" onchange="histDestinoChange('${h.ID}',${i},this.value)">
-        <input type="text" class="hist-note" placeholder="nota (cuántos, estado…)" value="${escAttr(it.note||'')}" onchange="histNoteChange('${h.ID}',${i},this.value)">
-      </li>`).join('')}</ul>
+      <ul>${rows.map(({it,i})=>histRowHTML(h.ID,it,i)).join('')}</ul>
     </div>`;
   }).join('');
-  return `<div class="hist-entry">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <span style="font-size:12px;color:var(--text-dim)">${fmtDate(h.Fecha)}</span>
-      <button class="icon-btn" onclick="histAddItem('${h.ID}')" title="Agregar elemento a esta lista">+ elemento</button>
-    </div>
-    ${filterBar}
-    ${body}
-  </div>`;
+  return groups || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
 }
-function setHistDestinoFilter(historyId, d){
-  window._histDestinoFilters = window._histDestinoFilters || {};
-  window._histDestinoFilters[historyId] = d;
-  renderChecklistBody();
+function histRowHTML(historyId,it,i){
+  return `<li>
+    <input type="checkbox" ${it.checked?'checked':''} onchange="histToggle('${historyId}',${i},this.checked)">
+    <input type="text" class="hist-item-text ${it.checked?'done':''}" value="${escAttr(it.text)}" onchange="histTextChange('${historyId}',${i},this.value)">
+    <input type="text" class="hist-note" style="max-width:90px" placeholder="destino" value="${escAttr(it.destino||'')}" onchange="histDestinoChange('${historyId}',${i},this.value)">
+    ${prioritySelectHTML(it.priority, `histPriorityChange('${historyId}',${i},this.value)`)}
+    <input type="text" class="hist-note" placeholder="nota (cuántos, estado…)" value="${escAttr(it.note||'')}" onchange="histNoteChange('${historyId}',${i},this.value)">
+    <button class="icon-btn" onclick="histDeleteItem('${historyId}',${i})">🗑️</button>
+  </li>`;
+}
+function renderHistBody(historyId){
+  const el = document.getElementById('histBody-'+historyId); if(!el) return;
+  const h = DATA.historial.find(x=>x.ID===historyId); if(!h) return;
+  el.innerHTML = histBodyHTML(h);
+}
+function setHistDestinoFilter(historyId, d){ window._histDestinoFilters=window._histDestinoFilters||{}; window._histDestinoFilters[historyId]=d; renderChecklistBody(); }
+function setHistSearch(historyId, v){ window._histSearch=window._histSearch||{}; window._histSearch[historyId]=v; renderHistBody(historyId); }
+function setHistSort(historyId, v){ window._histSort=window._histSort||{}; window._histSort[historyId]=v; renderChecklistBody(); }
+function setHistViewMode(historyId, v){ window._histViewMode=window._histViewMode||{}; window._histViewMode[historyId]=v; renderChecklistBody(); }
+function openBulkAddForHist(historyId){
+  openBulkAddModal(items=>{ histMutate(historyId, arr=>{ items.forEach(it=>arr.push(it)); }); });
 }
 function openTemplateModal(existingId){
   const existing = existingId ? DATA.plantillas.find(p=>p.ID===existingId) : null;
@@ -2953,9 +3132,9 @@ function openTemplateModal(existingId){
     <div class="modal-body">
       <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Nombre</label>
       <input type="text" id="tplNameInput" value="${existing?escAttr(existing.Nombre):''}" placeholder="ej. Viaje a la playa">
-      <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Elementos — uno por línea. Una línea que termine en ":" empieza una categoría nueva. Para marcar a dónde va cada elemento (útil en cualquier tipo de lista, no solo viajes), agrégalo al final con "|" — luego puedes filtrar por eso al llenar la lista.</label>
+      <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Elementos — uno por línea. Una línea que termine en ":" empieza una categoría nueva. "elemento | destino" para marcar a dónde va, o "elemento | destino | prioridad" (alta/media/baja) — luego puedes filtrar/ordenar por eso al llenar la lista.</label>
       <textarea id="tplItemsInput" rows="10" placeholder="documentos y dinero:
-pasaporte y visa | equipaje de mano
+pasaporte y visa | equipaje de mano | alta
 cartera | equipaje de mano
 ropa:
 camisetas | maleta documentada
@@ -2981,20 +3160,25 @@ function deleteTemplateUI(id){ if(!confirm('¿Eliminar esta plantilla?')) return
 
 /* Llenar: formulario real agrupado por categoría (no un prompt) — casillas
    y nota libre por elemento, más elementos/categorías extra solo para esta
-   vez. */
+   vez, con nombre propio para esta lista llenada. */
+let _fillDestinoFilter = '', _fillSearch = '', _fillSort = 'orig', _fillViewMode = 'list';
 function openFillModal(templateId){
   const p = DATA.plantillas.find(x=>x.ID===templateId); if(!p) return;
-  let baseItems; try{ baseItems = JSON.parse(p.ItemsJSON||'[]').map(it=>({ text: it.text!==undefined?it.text:it, checked:false, note:'', destino: it.destino||'', section: it.section||'' })); }catch(e){ baseItems=[]; }
+  let baseItems; try{ baseItems = JSON.parse(p.ItemsJSON||'[]').map(it=>({ text: it.text!==undefined?it.text:it, checked:false, note:'', destino: it.destino||'', priority: it.priority||'', section: it.section||'' })); }catch(e){ baseItems=[]; }
   window._fillItems = baseItems;
-  _fillDestinoFilter = '';
+  _fillDestinoFilter=''; _fillSearch=''; _fillSort='orig'; _fillViewMode='list';
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
     <div class="modal-head"><b>▶ Llenar: ${escHtml(p.Nombre)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <div id="fillItemsList"></div>
-      <div style="display:flex;gap:6px;margin-top:8px">
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Nombre para esta lista</label>
+      <input type="text" id="fillNombreInput" value="${escAttr(p.Nombre)}" placeholder="ej. Viaje a Cancún — marzo">
+      <div id="fillToolbar" style="margin-top:12px"></div>
+      <div id="fillItemsBody"></div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
         <button class="mini-btn" onclick="addFillRow('')">+ elemento suelto</button>
         <button class="mini-btn" onclick="addFillSection()">+ nueva categoría</button>
+        <button class="mini-btn" onclick="openBulkAddForFill()">📋 Pegar varios</button>
       </div>
       <div style="margin-top:14px"><button class="btn" onclick="saveFillModal('${templateId}', this)">Guardar</button></div>
     </div>
@@ -3002,13 +3186,42 @@ function openFillModal(templateId){
   document.body.appendChild(overlay);
   renderFillItemsList();
 }
-let _fillDestinoFilter = '';
 function setFillDestinoFilter(d){ _fillDestinoFilter = d; renderFillItemsList(); }
+function setFillSearch(v){ _fillSearch = v; renderFillItemsBody(); }
+function setFillSort(v){ _fillSort = v; renderFillItemsList(); }
+function setFillViewMode(v){ _fillViewMode = v; renderFillItemsList(); }
+function openBulkAddForFill(){
+  openBulkAddModal(items=>{ window._fillItems.push(...items); renderFillItemsList(); });
+}
 function renderFillItemsList(){
-  const el = document.getElementById('fillItemsList'); if(!el) return;
-  const filterBar = destinoFilterBarHTML(window._fillItems, _fillDestinoFilter, 'setFillDestinoFilter');
-  const filterFn = _fillDestinoFilter ? (it=>it.destino===_fillDestinoFilter) : null;
-  const groups = groupBySection(window._fillItems, filterFn).map(({sec,rows})=>{
+  const tb = document.getElementById('fillToolbar');
+  if(tb) tb.innerHTML = itemsToolbarHTML(window._fillItems, {
+    search:_fillSearch, destino:_fillDestinoFilter, sort:_fillSort, view:_fillViewMode,
+    setSearch:'setFillSearch', setDestino:'setFillDestinoFilter', setSort:'setFillSort', setView:'setFillViewMode'
+  });
+  renderFillItemsBody();
+}
+function renderFillItemsBody(){
+  const el = document.getElementById('fillItemsBody'); if(!el) return;
+  el.innerHTML = fillBodyHTML();
+}
+function fillBodyHTML(){
+  const rows = filterSortRows(window._fillItems, {search:_fillSearch, destino:_fillDestinoFilter, sort:_fillSort});
+  if(_fillViewMode==='table'){
+    return itemsTableHTML(rows, {
+      checkedExpr:i=>`window._fillItems[${i}].checked=this.checked;renderFillItemsBody()`,
+      textExpr:i=>`window._fillItems[${i}].text=this.value`,
+      sectionExpr:i=>`window._fillItems[${i}].section=this.value;renderFillItemsList()`,
+      destinoExpr:i=>`window._fillItems[${i}].destino=this.value;renderFillItemsList()`,
+      priorityExpr:i=>`window._fillItems[${i}].priority=this.value;renderFillItemsBody()`,
+      noteExpr:i=>`window._fillItems[${i}].note=this.value`,
+      delExpr:i=>`removeFillRow(${i})`
+    });
+  }
+  if(_fillSort!=='orig'){
+    return rows.length ? rows.map(({it,i})=>fillRowHTML(it,i)).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
+  }
+  const groups = groupBySection(rows).map(({sec,rows})=>{
     if(!rows.length) return '';
     return `<div class="fill-section">
       ${sec ? `<div class="fill-section-title">${escHtml(sec)}</div>` : ''}
@@ -3016,26 +3229,31 @@ function renderFillItemsList(){
       <button class="mini-btn" onclick="addFillRow('${escAttr(sec)}')">+ elemento en ${sec?escHtml(sec):'esta lista'}</button>
     </div>`;
   }).join('');
-  el.innerHTML = filterBar + groups;
+  return groups || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
 }
 function fillRowHTML(it,i){
   return `<div class="fill-row">
-    <input type="checkbox" ${it.checked?'checked':''} onchange="window._fillItems[${i}].checked=this.checked">
+    <input type="checkbox" ${it.checked?'checked':''} onchange="window._fillItems[${i}].checked=this.checked;renderFillItemsBody()">
     <input type="text" style="flex:1.3" value="${escAttr(it.text)}" placeholder="elemento" onchange="window._fillItems[${i}].text=this.value">
-    <input type="text" style="flex:.7" value="${escAttr(it.destino||'')}" placeholder="destino (opcional)" onchange="window._fillItems[${i}].destino=this.value;renderFillItemsList()">
+    <input type="text" style="flex:.6" value="${escAttr(it.destino||'')}" placeholder="destino" onchange="window._fillItems[${i}].destino=this.value;renderFillItemsList()">
+    ${prioritySelectHTML(it.priority, `window._fillItems[${i}].priority=this.value;renderFillItemsBody()`)}
     <input type="text" style="flex:1" value="${escAttr(it.note||'')}" placeholder="nota (cuántos, si hace calor…)" onchange="window._fillItems[${i}].note=this.value">
     <button class="icon-btn" onclick="removeFillRow(${i})">🗑️</button>
   </div>`;
 }
-function addFillRow(section){ window._fillItems.push({text:'',checked:false,note:'',destino:'',section:section||''}); renderFillItemsList(); }
-function addFillSection(){ const name = prompt('Nombre de la categoría (ej. Ropa):'); if(!name || !name.trim()) return; window._fillItems.push({text:'',checked:false,note:'',destino:'',section:name.trim()}); renderFillItemsList(); }
+function addFillRow(section){ window._fillItems.push({text:'',checked:false,note:'',destino:'',priority:'',section:section||''}); renderFillItemsList(); }
+function addFillSection(){ const name = prompt('Nombre de la categoría (ej. Ropa):'); if(!name || !name.trim()) return; window._fillItems.push({text:'',checked:false,note:'',destino:'',priority:'',section:name.trim()}); renderFillItemsList(); }
 function removeFillRow(i){ window._fillItems.splice(i,1); renderFillItemsList(); }
 async function saveFillModal(templateId, btn){
+  const p = DATA.plantillas.find(x=>x.ID===templateId);
+  const nombre = (document.getElementById('fillNombreInput').value||'').trim() || (p?p.Nombre:'');
   const items = window._fillItems.filter(it=>it.text && it.text.trim());
-  const row = { ID: uid(), PlantillaID: templateId, Fecha: new Date().toISOString(), ItemsJSON: JSON.stringify(items), NotaID:'' };
-  await saveEntity('HISTORIAL', row);
-  btn.closest('.modal-overlay').remove();
-  renderChecklistBody(); renderSidebar(); showToast('Guardado');
+  const row = { ID: uid(), PlantillaID: templateId, Fecha: new Date().toISOString(), ItemsJSON: JSON.stringify(items), NotaID:'', Nombre: nombre };
+  await withSavingFeedback(btn, async ()=>{
+    await saveEntity('HISTORIAL', row);
+    btn.closest('.modal-overlay').remove();
+    renderChecklistBody(); renderSidebar(); showToast('Guardado');
+  });
 }
 
 async function histMutate(historyId, mutator){
@@ -3047,12 +3265,16 @@ async function histMutate(historyId, mutator){
   renderChecklistBody();
 }
 function histToggle(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].checked = val; }); }
+function histTextChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].text = val; }); }
+function histSectionChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].section = val; }); }
 function histNoteChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].note = val; }); }
 function histDestinoChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].destino = val; }); }
+function histPriorityChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].priority = val; }); }
+function histDeleteItem(id, i){ if(!confirm('¿Quitar este elemento de la lista?')) return; histMutate(id, items=>{ items.splice(i,1); }); }
 function histAddItem(id){
   const text = prompt('Nuevo elemento para esta lista (opcional "categoría: elemento"):'); if(!text || !text.trim()) return;
   const m = text.match(/^(.+?):\s*(.+)$/);
-  histMutate(id, items=> items.push(m ? { text:m[2].trim(), checked:false, note:'', destino:'', section:m[1].trim() } : { text: text.trim(), checked:false, note:'', destino:'', section:'' }));
+  histMutate(id, items=> items.push(m ? { text:m[2].trim(), checked:false, note:'', destino:'', priority:'', section:m[1].trim() } : { text: text.trim(), checked:false, note:'', destino:'', priority:'', section:'' }));
 }
 
 /* ============ Tablas dinámicas por bloque ============

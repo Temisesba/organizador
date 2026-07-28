@@ -249,6 +249,12 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <span class="brand">🗂️ Organizador</span>
     <button class="icon-btn no-print" id="btnMenu" onclick="toggleSidebar()" title="Cuadernos y etiquetas">☰</button>
     <div class="search-wrap"><input type="search" id="searchInput" placeholder="Buscar notas, #etiquetas…" oninput="renderMain()"></div>
+    <select id="sortSelect" class="no-print" style="width:auto" onchange="sortBy(this.value)" title="Ordenar">
+      <option value="Fecha">Fecha</option>
+      <option value="Titulo">Título</option>
+      <option value="Notebook">Cuaderno</option>
+    </select>
+    <button class="icon-btn no-print" id="sortDirBtn" onclick="toggleSortDir()" title="Cambiar dirección del orden">▼</button>
     <div class="view-switch no-print">
       <button id="vwCards" onclick="setView('cards')" title="Tarjetas">🗃️</button>
       <button id="vwTable" onclick="setView('table')" title="Tabla">📊</button>
@@ -364,7 +370,11 @@ async function apiPost(action, params){
   try{ return await apiPostReal(action, params); }
   catch(e){
     if(isWriteAction(action)){ enqueue(action, params); return { ok:true, offline:true }; }
-    throw e;
+    // Para acciones de solo lectura/IA nunca se avienta el error hacia
+    // arriba sin atrapar — así una falla de red (aunque navigator.onLine
+    // diga que sí hay internet: CORS, backend caído, wifi inestable…) no
+    // puede tumbar nada, solo se reporta como resultado no-ok.
+    return { ok:false, error: e.message||'sin conexión' };
   }
 }
 let _syncing = false;
@@ -381,16 +391,17 @@ async function syncNow(manual){
         saveQueue(loadQueue().filter(x=>x._opId!==op._opId));
       }catch(e){ break; }
     }
-    const r = await apiPostReal('getAll', {});
-    if(r && r.ok){
-      DATA = normalizeData(r.data);
-      localStorage.setItem('org_data_cache', JSON.stringify(DATA));
-      // No reconstruir la nota abierta a media edición — eso le borraba el
-      // cursor/foco y se sentía como que "la nota se cierra sola". La
-      // barra lateral sí es segura de refrescar siempre.
-      renderSidebar();
-      if(!isEditingActive()) renderMain();
-      updateSyncIndicator();
+    // Con una nota abierta, ni siquiera se reemplaza DATA — solo se manda
+    // la cola pendiente (arriba) y se reintenta en el siguiente ciclo. Así
+    // no hay forma de que la sincronización de fondo pise texto que
+    // todavía no se ha guardado en el servidor.
+    if(!isEditingActive()){
+      const r = await apiPostReal('getAll', {});
+      if(r && r.ok){
+        DATA = normalizeData(r.data);
+        localStorage.setItem('org_data_cache', JSON.stringify(DATA));
+        renderAll();
+      }
     }
     if(manual) showToast(loadQueue().length ? '⚠ Aún hay cambios sin sincronizar' : '☁️ Sincronizado');
   }catch(e){ if(manual) showToast('Sin conexión'); }
@@ -689,7 +700,17 @@ function tableHTML(notes){
   }).join('');
   return `<div style="overflow:auto"><table class="org-table"><thead><tr>${head}</tr></thead><tbody>${rows||'<tr><td colspan="99" style="text-align:center;color:var(--text-dim)">Sin notas</td></tr>'}</tbody></table></div>`;
 }
-function sortBy(col){ if(sortState.col===col) sortState.dir = sortState.dir==='asc'?'desc':'asc'; else { sortState.col=col; sortState.dir='asc'; } renderMain(); }
+function sortBy(col){
+  if(sortState.col===col) sortState.dir = sortState.dir==='asc'?'desc':'asc';
+  else { sortState.col=col; sortState.dir='asc'; }
+  syncSortUI(); renderMain();
+}
+function toggleSortDir(){ sortState.dir = sortState.dir==='asc'?'desc':'asc'; syncSortUI(); renderMain(); }
+function syncSortUI(){
+  const sel = document.getElementById('sortSelect');
+  if(sel && !sortState.col.startsWith('kv:')) sel.value = sortState.col;
+  const btn = document.getElementById('sortDirBtn'); if(btn) btn.textContent = sortState.dir==='asc' ? '▲' : '▼';
+}
 
 function splitHTML(notes){
   return `<div class="split-wrap" id="splitWrap">
@@ -726,9 +747,35 @@ function newBlankNote(){
   const inherited = notebookInherited(activeNotebook);
   return { ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(), Titulo:'', Contenido:'', Tags:inherited.join(' '), Notebook:activeNotebook, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'' };
 }
+/* Si la nota que se estaba editando se queda vacía (nunca se le puso
+   título ni contenido) se descarta sola en vez de quedar como basura en
+   la lista — cubre tanto "+ Nota" seguido de cerrar sin escribir, como
+   cambiar de nota en la vista dividida a media edición. */
+function abandonEmptyDraftIfAny(){
+  if(!editingNoteId) return;
+  const note = getNote(editingNoteId);
+  if(note && !note.Titulo.trim() && !stripHtmlToText(note.Contenido).trim()){
+    DATA.notas = DATA.notas.filter(n=>n.ID!==editingNoteId);
+    cacheData();
+    apiPost('deleteRow', { table:'NOTAS', id: editingNoteId });
+  }
+}
 function openNoteEditor(id){
-  editingNoteId = id;
-  const note = id ? getNote(id) : newBlankNote();
+  if(editingNoteId && editingNoteId!==id) abandonEmptyDraftIfAny();
+  let note;
+  if(id){
+    editingNoteId = id;
+    note = getNote(id);
+  } else {
+    // Se le asigna ID y se registra localmente DE UNA VEZ (no hasta que se
+    // guarde algo) — así cualquier guardado parcial por blur/cierre de
+    // pestaña siempre apunta al mismo registro, en vez de que una
+    // condición de carrera cree dos notas (una vacía, otra con el texto).
+    note = newBlankNote();
+    note.ID = uid();
+    DATA.notas.push(note);
+    editingNoteId = note.ID;
+  }
   if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = noteDetailHTML(note); return; }
   renderNoteModal(note);
 }
@@ -760,6 +807,7 @@ function initEditorResizerOnce(){
 }
 function closeNoteEditor(){
   const ov = document.getElementById('editorOverlay'); if(ov) ov.remove();
+  abandonEmptyDraftIfAny();
   editingNoteId=null;
   renderMain();
 }
@@ -792,6 +840,15 @@ function editorInnerHTML(note, isModal){
   <div class="editor-toolbar">
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('bold')" title="Negrita"><b>B</b></button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('italic')" title="Cursiva"><i>I</i></button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('underline')" title="Subrayado"><u>S</u></button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('strikeThrough')" title="Tachado"><s>S</s></button>
+    <select class="icon-btn" style="padding:6px 4px" onmousedown="event.preventDefault()" onchange="setFontSize(this.value)" title="Tamaño de letra">
+      <option value="">Tamaño</option>
+      <option value="2">Chico</option>
+      <option value="3">Normal</option>
+      <option value="5">Grande</option>
+      <option value="7">Enorme</option>
+    </select>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','H1')" title="Título">H1</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','H2')" title="Subtítulo">H2</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','BLOCKQUOTE')" title="Cita">❝</button>
@@ -802,10 +859,11 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableAddCol()" title="+ columna">⊞▥</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableDelRow()" title="− fila">⊟▤</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableDelCol()" title="− columna">⊟▥</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V)">🖼️</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V, o insertar OCR)">🖼️</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openFieldTemplatePicker()" title="Insertar plantilla de campos (#campo + valor)">🏷️</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="sendSelectionToDic()" title="Mandar palabra/frase seleccionada al diccionario">📖</button>
     <span class="sep"></span>
-    <button class="icon-btn" id="btnMark" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark')" title="Resaltar">🖍️</button>
+    <button class="icon-btn" id="btnMark" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark')" title="Resaltar (toca de nuevo el mismo color para quitarlo)">🖍️</button>
     <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
     <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">
   </div>
@@ -882,13 +940,23 @@ let _saveDebounce=null;
 function scheduleSave(){
   const st = document.getElementById('saveStatus'); if(st) st.textContent='Guardando…';
   clearTimeout(_saveDebounce);
-  _saveDebounce = setTimeout(async ()=>{
-    const note = collectNoteFromForm();
-    note.FechaEdicion = new Date().toISOString();
-    await persistCurrentNote(note);
-    const st2 = document.getElementById('saveStatus'); if(st2) st2.textContent='Guardado';
-  }, 500);
+  _saveDebounce = setTimeout(doSaveNow, 500);
 }
+async function doSaveNow(){
+  clearTimeout(_saveDebounce);
+  if(!document.getElementById('mainArea')) return; // no hay editor abierto
+  const note = collectNoteFromForm();
+  note.FechaEdicion = new Date().toISOString();
+  await persistCurrentNote(note);
+  const st2 = document.getElementById('saveStatus'); if(st2) st2.textContent='Guardado';
+}
+/* Guarda YA (sin esperar el debounce de 500ms) cuando la pestaña se oculta,
+   se cierra, o el navegador la suspende — si no, hasta medio segundo de
+   lo último escrito se podía perder si "el tiempo" coincidía justo con el
+   apagado de la pestaña/pérdida de foco. */
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) doSaveNow(); });
+window.addEventListener('pagehide', doSaveNow);
+window.addEventListener('beforeunload', doSaveNow);
 async function persistCurrentNote(note){
   const isNew = !note.ID;
   autoRouteNotebook(note);
@@ -909,10 +977,12 @@ function bindEditorEvents(note){
     const el = document.getElementById(id); if(!el) return;
     el.addEventListener('input', scheduleSave);
     el.addEventListener('change', scheduleSave);
+    el.addEventListener('blur', doSaveNow);
   });
   const mainEl = document.getElementById('mainArea');
   if(mainEl){
     mainEl.addEventListener('input', scheduleSave);
+    mainEl.addEventListener('blur', doSaveNow);
     mainEl.addEventListener('keydown', handleRichKeydown);
     mainEl.addEventListener('change', (e)=>{
       // los checkbox dentro del editor no reflejan su "checked" en el HTML
@@ -955,7 +1025,46 @@ function runCmd(cmd, val){
   document.execCommand(cmd, false, val||null);
   scheduleSave();
 }
+/* Atajos estilo Markdown MIENTRAS escribes — el disparador (#, >, -, 1.)
+   desaparece y se convierte al formato real de una vez; no es una vista de
+   código aparte, es solo una forma rápida de dar formato al vuelo. */
 function handleRichKeydown(e){
+  if(e.key===' '){
+    const sel = window.getSelection(); if(!sel.rangeCount) return;
+    const anchor = sel.anchorNode; if(!anchor) return;
+    // El primer texto escrito en un editor vacío queda como nodo de texto
+    // suelto (sin <p> que lo envuelva) hasta que se presiona Enter — por
+    // eso no se busca un elemento "bloque" envolvente, se usa directo el
+    // texto del nodo donde está el cursor.
+    const text = anchor.textContent||'';
+    const offset = anchor.nodeType===3 ? sel.anchorOffset : text.length;
+    if(offset !== text.length) return; // solo dispara si el cursor va al final de lo tecleado
+    let tag=null, list=null;
+    if(/^#{1,3}$/.test(text)) tag = text.length===1?'h1':text.length===2?'h2':'h3';
+    else if(text==='>') tag='blockquote';
+    else if(text==='-' || text==='*') list='ul';
+    else if(/^\d+\.$/.test(text)) list='ol';
+    if(!tag && !list) return;
+    e.preventDefault();
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    range.deleteContents();
+    // formatBlock/insertUnorderedList de execCommand no hacen nada si el
+    // editor queda completamente vacío (típico al escribir "## " como lo
+    // primero de una nota nueva) — se arma el elemento directo en el DOM
+    // en vez de depender de eso.
+    let el, caretEl;
+    if(tag){ el = document.createElement(tag); el.innerHTML='<br>'; caretEl = el; }
+    else {
+      el = document.createElement(list);
+      const li = document.createElement('li'); li.innerHTML='<br>';
+      el.appendChild(li); caretEl = li;
+    }
+    range.insertNode(el);
+    placeCaretAtStart(caretEl);
+    scheduleSave();
+    return;
+  }
   if(e.key!=='Enter') return;
   const sel = window.getSelection(); if(!sel.rangeCount) return;
   let node = sel.anchorNode; if(node.nodeType===3) node = node.parentNode;
@@ -1026,6 +1135,15 @@ function tableDelCol(){
   Array.from(t.rows).forEach(row=>{ if(row.cells[idx]) row.deleteCell(idx); });
   scheduleSave();
 }
+function rgbToHex(rgb){
+  const m = rgb && rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if(!m) return null;
+  return '#'+[1,2,3].map(i=>('0'+parseInt(m[i],10).toString(16)).slice(-2)).join('');
+}
+function currentHiliteHex(){
+  try{ return rgbToHex(document.queryCommandValue('hiliteColor')) || rgbToHex(document.queryCommandValue('backColor')); }
+  catch(e){ return null; }
+}
 function toggleSwatches(kind){
   const bar = document.getElementById('swatchBar');
   if(bar.dataset.kind===kind && !bar.classList.contains('hidden')){ bar.classList.add('hidden'); return; }
@@ -1040,13 +1158,44 @@ function toggleSwatches(kind){
     sw.addEventListener('mousedown', e=>e.preventDefault());
     sw.addEventListener('click', ()=>{
       focusMainEditor();
-      document.execCommand(kind==='mark' ? 'hiliteColor' : 'foreColor', false, color);
+      if(kind==='mark'){
+        // tocar el mismo color que ya está puesto lo quita, en vez de
+        // volver a aplicarlo encima
+        const cur = currentHiliteHex();
+        document.execCommand('hiliteColor', false, (cur && cur.toLowerCase()===color.toLowerCase()) ? 'transparent' : color);
+      } else {
+        document.execCommand('foreColor', false, color);
+      }
       scheduleSave();
       bar.classList.add('hidden');
     });
     bar.appendChild(sw);
   });
   bar.classList.remove('hidden');
+}
+function setFontSize(val){
+  if(!val) return;
+  focusMainEditor();
+  document.execCommand('fontSize', false, val);
+  scheduleSave();
+}
+async function sendSelectionToDic(){
+  const sel = window.getSelection();
+  const text = sel && sel.toString().trim();
+  if(!text){ showToast('Selecciona una palabra o frase primero'); return; }
+  if(navigator.onLine){
+    showToast('Traduciendo…');
+    const looksEnglish = /^[a-zA-Z\s'-]+$/.test(text);
+    const r = await apiPost('translate', { text, direction: looksEnglish?'en->es':'es->en' });
+    if(r && r.ok){
+      await saveEntity('DICCIONARIO', { ID:uid(), Termino:text, Traduccion:r.text, Notas:'', Fecha:new Date().toISOString() });
+      showToast('📖 "'+text+'" → "'+r.text+'" guardado en el diccionario');
+      return;
+    }
+  }
+  const trad = prompt('Traducción para "'+text+'":'); if(!trad) return;
+  await saveEntity('DICCIONARIO', { ID:uid(), Termino:text, Traduccion:trad, Notas:'', Fecha:new Date().toISOString() });
+  showToast('Guardado en el diccionario');
 }
 
 /* ============ Markdown → HTML (parser propio, ligero) ============ */
@@ -1549,6 +1698,7 @@ function renderFieldTablesBody(){
       <div style="display:flex;justify-content:space-between;align-items:center">
         <b>${escHtml(bt.Nombre)}</b>
         <span style="color:var(--text-dim);font-size:12px">${bt.CampoFiltro?('#'+escHtml(bt.CampoFiltro)+(bt.ValorFiltro?' ~ "'+escHtml(bt.ValorFiltro)+'"':'')):(bt.ValorFiltro?('"'+escHtml(bt.ValorFiltro)+'" en cualquier campo'):'todas')}</span>
+        <button class="icon-btn" onclick="exportFieldTablePDF('${bt.ID}')" title="Exportar a PDF">🖨️</button>
         <button class="icon-btn" onclick="deleteEntity('BLOQUE_TABLAS','${bt.ID}').then(renderFieldTablesBody)">🗑️</button>
       </div>
       ${fieldTableRenderHTML(bt)}
@@ -1579,6 +1729,12 @@ function fieldTableRenderHTML(bt){
   const body = rows.map(e=>'<tr><td class="title-cell" onclick="openNoteEditor(\''+e.note.ID+'\')">'+escHtml(e.entity)+'</td>'
     + cols.map(c=>'<td>'+escHtml(e.fields[c]||'')+'</td>').join('') + '</tr>').join('');
   return '<div style="overflow:auto;margin-top:8px"><table class="org-table"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+}
+function exportFieldTablePDF(id){
+  const bt = DATA.bloque_tablas.find(x=>x.ID===id); if(!bt) return;
+  const area = document.getElementById('printArea');
+  area.innerHTML = '<h1>'+escHtml(bt.Nombre)+'</h1>' + fieldTableRenderHTML(bt).replace(/<button[^>]*>.*?<\/button>/g,'');
+  window.print();
 }
 function openFieldTemplateModal(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
@@ -1869,6 +2025,7 @@ function boot(){
   document.getElementById('vwCards').classList.toggle('active', currentView==='cards');
   document.getElementById('vwTable').classList.toggle('active', currentView==='table');
   document.getElementById('vwSplit').classList.toggle('active', currentView==='split');
+  syncSortUI();
   renderAll();
   syncNow(false);
   initSplitResizerOnce();

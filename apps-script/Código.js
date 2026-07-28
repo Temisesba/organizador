@@ -7,11 +7,18 @@
 //  IA: Gemini (principal) + Claude (respaldo y OCR de imágenes)
 // ============================================================
 
-// Ejecuta esta función UNA VEZ desde el editor (▶ Run) para autorizar los
-// permisos (Sheets/Drive/red) la primera vez — si no, la Web App responde
+// Ejecuta esta función UNA VEZ desde el editor (▶ Run): de paso autoriza los
+// permisos (Sheets/Drive/red) — si nunca se autorizan, la Web App responde
 // 403 a cualquiera, incluso con "acceso: cualquiera", porque Google nunca
-// le pidió permiso a la cuenta dueña del script.
-function autorizarPermisos() { return 'ok'; }
+// le pidió permiso a la cuenta dueña del script — y crea tu Google Sheet
+// de Organizador ya con las pestañas listas. El enlace queda en el registro
+// de ejecución (Ver → Registros / el panel que aparece abajo al terminar).
+function crearMiSheet() {
+  const ss = SpreadsheetApp.create('Organizador — datos');
+  Object.keys(TABLE_DEFS).forEach(t => getTable(ss, t));
+  Logger.log('Tu Google Sheet: ' + ss.getUrl());
+  return ss.getUrl();
+}
 
 // Llaves guardadas en Configuración del proyecto → Propiedades del script
 // (Project Settings → Script Properties), NO aquí — este archivo se sube

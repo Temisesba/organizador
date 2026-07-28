@@ -38,7 +38,9 @@ const TABLE_DEFS = {
   DICCIONARIO:   ['ID', 'Termino', 'Traduccion', 'Notas', 'Fecha'],
   FEEDBACK:      ['ID', 'Fecha', 'Original', 'Correccion', 'Contexto'],
   BLOQUE_TABLAS: ['ID', 'Nombre', 'TagFiltro', 'CampoFiltro', 'ValorFiltro', 'Columnas'],
-  PLANTILLAS_PROP: ['ID', 'Nombre', 'CamposJSON']
+  PLANTILLAS_PROP: ['ID', 'Nombre', 'CamposJSON'],
+  FLAGS:         ['ID', 'Nombre', 'Emoji', 'Color'],
+  BUSQUEDAS:     ['ID', 'Nombre', 'Query', 'Tags', 'Modo']
 };
 
 // ── Router GET (solo lectura ligera, ej. ping de conexión) ────

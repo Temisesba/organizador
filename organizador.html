@@ -136,26 +136,28 @@ table.org-table td.title-cell{cursor:pointer;font-weight:600}
 .swatch-row{display:flex;gap:4px;padding:4px 8px}
 .swatch{width:20px;height:20px;border-radius:50%;border:1px solid var(--border);cursor:pointer}
 .editor-body{flex:1;display:flex;min-height:0;padding:12px;gap:10px;overflow:hidden}
-#mainArea{width:100%;height:100%;border:1px solid var(--border);border-radius:8px;padding:10px;flex:1 1 50%}
-.editor-preview{flex:1 1 50%;overflow-y:auto;border:1px dashed var(--border);border-radius:8px;padding:12px;font-size:14px}
-.editor-body.no-preview .editor-preview{display:none}
-.editor-body.no-preview #mainArea{flex:1 1 100%}
-.editor-body.no-preview .cornell-editor-wrap{flex:1 1 100%}
+.rich-editor{width:100%;height:100%;border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow-y:auto;outline:none;font-size:14.5px;line-height:1.6}
+.rich-editor:empty::before{content:attr(data-placeholder);color:var(--text-dim)}
+.rich-editor p{margin:.35em 0}
+.rich-editor h1{font-size:1.5em;font-weight:800;margin:.5em 0 .2em}
+.rich-editor h2{font-size:1.25em;font-weight:800;margin:.5em 0 .2em}
+.rich-editor h3{font-size:1.1em;font-weight:700;margin:.5em 0 .2em}
+.rich-editor blockquote{border-left:3px solid var(--accent);padding-left:10px;color:var(--text-dim);margin:.4em 0}
+.rich-editor code{background:var(--bg-soft);padding:1px 5px;border-radius:4px;font-family:ui-monospace,Consolas,monospace}
+.rich-editor img{max-width:100%;border-radius:8px;margin:.4em 0;display:block;border:1px solid var(--border)}
+.rich-editor .rt-check{display:flex;align-items:flex-start;gap:6px;margin:2px 0}
+.rich-editor .rt-check input{margin-top:4px}
 .editor-bottom{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-dim)}
 
-/* cornell */
-.cornell-editor-wrap{flex:1 1 50%;overflow-y:auto;display:flex;flex-direction:column;gap:8px;min-width:0}
-.cornell-row{display:grid;grid-template-columns:1fr 2fr auto;gap:8px;align-items:start}
-.cornell-row input.cornell-cue{font-weight:700}
-.cornell-row textarea{min-height:64px;border:1px solid var(--border);border-radius:8px;padding:8px}
-.cornell-preview{display:flex;flex-direction:column}
-.cornell-prow{display:grid;grid-template-columns:1fr 2fr;gap:12px;border-bottom:1px solid var(--border);padding:8px 0}
-.cornell-pcue{font-weight:700;color:var(--accent)}
+/* tablas reales editables (también usadas por Cornell: tabla de 2 columnas) */
+table.rt-table{border-collapse:collapse;margin:.5em 0;width:100%}
+table.rt-table td,table.rt-table th{border:1px solid var(--border);padding:6px 9px;min-width:40px;vertical-align:top}
+table.rt-table tr:nth-child(even) td{background:var(--bg-soft)}
+table.rt-table td.cornell-cue-cell{font-weight:700;color:var(--accent);background:var(--accent-soft, var(--bg-soft));width:26%}
+
 @media (max-width:640px){
   .editor-body{flex-direction:column}
-  .editor-body.no-preview .editor-preview{display:none}
-  .cornell-row{grid-template-columns:1fr auto}
-  .cornell-row textarea{grid-column:1/3}
+  #editorResizeHandle{display:none}
 }
 
 /* preview markdown */
@@ -307,7 +309,7 @@ let aiLastResult = '';
 let aiLastOriginal = '';
 let aiLastMode = '';
 let splitRatio = parseFloat(localStorage.getItem('org_split_ratio')||'38');
-let showPreview = localStorage.getItem('org_show_preview')!=='0';
+let editorWidth = parseInt(localStorage.getItem('org_editor_width')||'760',10);
 
 function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(36).slice(2)); }
 function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._toastT); window._toastT=setTimeout(()=>t.classList.remove('show'),2400); }
@@ -485,13 +487,17 @@ function allDynamicKeys(){
    así no hay que sincronizar dos copias de lo mismo. ============ */
 function getNoteBlocks(note){
   const inherited = Array.from(new Set([...parseTagsText(note.Tags), ...notebookInherited(note.Notebook)]));
-  let paragraphs;
-  if(note.Cornell==='1'){
-    paragraphs = cornellPairsFromNote(note).map(p=>(p.cue?p.cue+': ':'')+(p.texto||''));
+  const html = note.Contenido||'';
+  let texts;
+  if(/^\s*<[a-z][\s\S]*>/i.test(html)){
+    const container = document.createElement('div'); container.innerHTML = html;
+    let els = Array.from(container.children);
+    if(!els.length && container.textContent.trim()) els = [container];
+    texts = els.map(el=>(el.textContent||'').trim());
   } else {
-    paragraphs = (note.Contenido||'').split(/\n\s*\n/);
+    texts = html.split(/\n\s*\n/); // nota vieja aún no migrada a HTML
   }
-  return paragraphs.map((text,i)=>{
+  return texts.map((text,i)=>{
     const own = Array.from(new Set((text.match(/#([a-zA-Z0-9_:-]+)/g)||[]).map(t=>t.slice(1))));
     return { noteId: note.ID, noteTitle: note.Titulo||'(sin título)', index:i, text: text.trim(),
       ownTags: own, effectiveTags: Array.from(new Set([...own, ...inherited])) };
@@ -628,11 +634,7 @@ function cardsHTML(notes){
 }
 function noteCardHTML(n){
   const tags = effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)}">#${escHtml(t)}</span>`).join('');
-  const snip = noteSnippetText(n)
-    .replace(/!\[.*?\]\(.*?\)/g,'🖼️')
-    .replace(/==\((?:y|g|p|b)\)(.+?)==\)/g,'$1')
-    .replace(/\{\{color:#?\w+\|(.+?)\}\}/g,'$1')
-    .replace(/[#*`>_-]/g,'').slice(0,140);
+  const snip = noteSnippetText(n).slice(0,140);
   return `<div class="note-card" onclick="openNoteEditor('${n.ID}')" style="${n.Color?('border-left:4px solid '+n.Color):''}">
     <div class="nc-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}</div>
     <div class="nc-snip">${escHtml(snip)}</div>
@@ -707,10 +709,28 @@ function openNoteEditor(id){
 function noteDetailHTML(note){ return editorInnerHTML(note, false); }
 function renderNoteModal(note){
   const overlay = document.createElement('div'); overlay.id='editorOverlay'; overlay.className='no-print';
-  overlay.innerHTML = `<div id="editorPanel">${editorInnerHTML(note, true)}</div>`;
+  overlay.innerHTML = `<div class="split-handle" id="editorResizeHandle"></div><div id="editorPanel" style="width:${editorWidth}px">${editorInnerHTML(note, true)}</div>`;
   overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) closeNoteEditor(); });
   document.body.appendChild(overlay);
   bindEditorEvents(note);
+}
+/* manija para agrandar/achicar el panel del editor — mismo patrón que el
+   separador de la vista dividida, delegado en document */
+let _editorResizing = false;
+function initEditorResizerOnce(){
+  const onMove = (clientX)=>{
+    if(!_editorResizing) return;
+    const panel = document.getElementById('editorPanel'); if(!panel) return;
+    let w = window.innerWidth - clientX;
+    w = Math.max(320, Math.min(window.innerWidth-40, w));
+    editorWidth = w; panel.style.width = w+'px';
+  };
+  document.addEventListener('mousedown', e=>{ if(e.target && e.target.id==='editorResizeHandle'){ _editorResizing=true; e.preventDefault(); } });
+  document.addEventListener('mousemove', e=>onMove(e.clientX));
+  document.addEventListener('mouseup', ()=>{ if(_editorResizing){ _editorResizing=false; localStorage.setItem('org_editor_width', editorWidth); } });
+  document.addEventListener('touchstart', e=>{ if(e.target && e.target.id==='editorResizeHandle') _editorResizing=true; }, {passive:true});
+  document.addEventListener('touchmove', e=>{ if(_editorResizing && e.touches[0]) onMove(e.touches[0].clientX); }, {passive:true});
+  document.addEventListener('touchend', ()=>{ if(_editorResizing){ _editorResizing=false; localStorage.setItem('org_editor_width', editorWidth); } });
 }
 function closeNoteEditor(){
   const ov = document.getElementById('editorOverlay'); if(ov) ov.remove();
@@ -719,12 +739,12 @@ function closeNoteEditor(){
 }
 function editorInnerHTML(note, isModal){
   editingCornell = note.Cornell==='1'||note.Cornell===1;
-  if(editingCornell) window._cornellPairs = cornellPairsFromNote(note);
+  ensureHtmlContent(note);
   const nbOptions = ['<option value="">— sin cuaderno —</option>'].concat(DATA.notebooks.map(nb=>`<option value="${escAttr(nb.Nombre)}" ${note.Notebook===nb.Nombre?'selected':''}>${escHtml(nb.Nombre)}</option>`)).join('');
   return `
   <div class="editor-top">
     <input id="noteTitle" value="${escAttr(note.Titulo)}" placeholder="Título de la nota">
-    <button class="icon-btn ${editingCornell?'active':''}" onclick="toggleCornell()" title="Plantilla Cornell">📐</button>
+    <button class="icon-btn ${editingCornell?'active':''}" onclick="toggleCornell()" title="Plantilla Cornell (tabla de 2 columnas)">📐</button>
     <button class="icon-btn" onclick="duplicateNoteUI()" title="Duplicar">📄</button>
     <button class="icon-btn" onclick="copyNoteUI()" title="Copiar texto">📋</button>
     <button class="icon-btn" onclick="exportNotePDF(editingNoteId)" title="Exportar PDF">🖨️</button>
@@ -744,27 +764,27 @@ function editorInnerHTML(note, isModal){
   </div>
   <div class="editor-meta" id="fileChipWrap" style="flex-wrap:wrap">${linksChipsHTML(getNoteLinks(note))}</div>
   <div class="editor-toolbar">
-    <button class="icon-btn" onclick="wrapSel('**','**')" title="Negrita"><b>B</b></button>
-    <button class="icon-btn" onclick="wrapSel('*','*')" title="Cursiva"><i>I</i></button>
-    <button class="icon-btn" onclick="wrapSel('\`','\`')" title="Código">{ }</button>
-    <button class="icon-btn" onclick="linePrefix('> ')" title="Cita">❝</button>
-    <button class="icon-btn" onclick="linePrefix('# ')" title="Título">H1</button>
-    <button class="icon-btn" onclick="linePrefix('## ')" title="Subtítulo">H2</button>
-    <button class="icon-btn" onclick="linePrefix('- ')" title="Viñeta">•</button>
-    <button class="icon-btn" onclick="linePrefix('- [ ] ')" title="Casilla">☑</button>
-    <button class="icon-btn" onclick="insertTable()" title="Tabla">▦</button>
-    <button class="icon-btn" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V)">🖼️</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('bold')" title="Negrita"><b>B</b></button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('italic')" title="Cursiva"><i>I</i></button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','H1')" title="Título">H1</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','H2')" title="Subtítulo">H2</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','BLOCKQUOTE')" title="Cita">❝</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('insertUnorderedList')" title="Viñeta">•</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertChecklistItem()" title="Casilla">☑</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertRichTable()" title="Tabla — agrega/quita filas y columnas con los botones ⊞">▦</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableAddRow()" title="+ fila (con el cursor dentro de una tabla)">⊞▤</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableAddCol()" title="+ columna">⊞▥</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableDelRow()" title="− fila">⊟▤</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="tableDelCol()" title="− columna">⊟▥</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V)">🖼️</button>
     <span class="sep"></span>
-    <button class="icon-btn" id="btnMark" onclick="toggleSwatches('mark')" title="Resaltar">🖍️</button>
-    <button class="icon-btn" id="btnColor" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
-    <span class="sep"></span>
-    <button class="icon-btn ${showPreview?'active':''}" id="btnPreview" onclick="togglePreviewPane()" title="Vista previa">👁️</button>
+    <button class="icon-btn" id="btnMark" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark')" title="Resaltar">🖍️</button>
+    <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
     <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">
   </div>
   <div id="swatchBar" class="swatch-row hidden"></div>
-  <div class="editor-body ${showPreview?'':'no-preview'}" id="editorBody">
-    ${editingCornell ? cornellEditorHTML() : `<textarea id="mainArea" placeholder="Escribe aquí… (Markdown: **negrita**, *cursiva*, # título, - [ ] tarea)">${escHtml(note.Contenido)}</textarea>`}
-    <div id="previewPane" class="editor-preview"></div>
+  <div class="editor-body" id="editorBody">
+    <div id="mainArea" class="rich-editor" contenteditable="true" data-placeholder="Escribe aquí…">${note.Contenido||''}</div>
   </div>
   <div class="editor-bottom">
     <span id="saveStatus">Guardado</span>
@@ -779,12 +799,20 @@ function togglePin(){
 }
 function toggleCornell(){
   const note = collectNoteFromForm();
+  const mainEl = document.getElementById('mainArea');
+  const currentHTML = mainEl ? mainEl.innerHTML : (note.Contenido||'');
   if(editingCornell){
-    const pairs = window._cornellPairs || [];
-    note.Contenido = pairs.filter(p=>p.cue||p.texto).map(p=> (p.cue?('**'+p.cue+':** '):'') + (p.texto||'') ).join('\n\n');
-    note.Cornell=''; note.CornellCue='';
+    const rows = Array.from(mainEl ? mainEl.querySelectorAll('table.cornell-table tr') : []);
+    note.Contenido = rows.map(r=>{
+      const cells = r.querySelectorAll('td');
+      const cue = cells[0] ? cells[0].innerHTML.trim() : '';
+      const texto = cells[1] ? cells[1].innerHTML : '';
+      const cueClean = cue.replace(/^(<br\s*\/?>)+$/i,'');
+      return (cueClean ? '<p><b>'+cueClean+':</b></p>' : '') + texto;
+    }).join('') || currentHTML;
+    note.Cornell='';
   } else {
-    window._cornellPairs = [{ cue:'', texto: note.Contenido||'' }];
+    note.Contenido = '<table class="rt-table cornell-table"><tr><td class="cornell-cue-cell"><br></td><td>'+(currentHTML||'<br>')+'</td></tr></table>';
     note.Cornell='1';
   }
   persistCurrentNote(note);
@@ -794,6 +822,20 @@ function reopenEditorFor(note){
   if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = editorInnerHTML(note,false); bindEditorEvents(note); return; }
   const panel = document.getElementById('editorPanel');
   if(panel){ panel.innerHTML = editorInnerHTML(note,true); bindEditorEvents(note); }
+}
+/* Migra notas viejas guardadas como Markdown/texto plano a HTML la primera
+   vez que se abren — la app ahora edita y guarda HTML directamente. */
+function ensureHtmlContent(note){
+  const c = note.Contenido||'';
+  if(c && !/^\s*<[a-z][\s\S]*>/i.test(c)){
+    if(note.Cornell==='1'){
+      note.Contenido = '<table class="rt-table cornell-table"><tr><td class="cornell-cue-cell">'+escHtml(note.CornellCue||'')+'</td><td>'+mdToHtml(c)+'</td></tr></table>';
+    } else {
+      note.Contenido = mdToHtml(c);
+    }
+    note.CornellCue = '';
+  }
+  return note;
 }
 function collectNoteFromForm(){
   const base = editingNoteId ? Object.assign({}, getNote(editingNoteId)) : newBlankNote();
@@ -805,13 +847,8 @@ function collectNoteFromForm(){
   if(tagsEl) base.Tags = tagsEl.value;
   const colorEl = document.getElementById('noteColor');
   if(colorEl) base.Color = colorEl.value;
-  if(editingCornell){
-    base.Contenido = JSON.stringify((window._cornellPairs||[]).filter(p=>p.cue||p.texto));
-    base.CornellCue = '';
-  } else {
-    const mainEl = document.getElementById('mainArea');
-    if(mainEl) base.Contenido = mainEl.value;
-  }
+  const mainEl = document.getElementById('mainArea');
+  if(mainEl) base.Contenido = mainEl.innerHTML;
   return base;
 }
 let _saveDebounce=null;
@@ -848,13 +885,20 @@ function bindEditorEvents(note){
   });
   const mainEl = document.getElementById('mainArea');
   if(mainEl){
-    mainEl.addEventListener('keydown', handleMdKeydown);
-    mainEl.addEventListener('input', ()=>{ scheduleSave(); schedulePreview(); });
+    mainEl.addEventListener('input', scheduleSave);
+    mainEl.addEventListener('keydown', handleRichKeydown);
+    mainEl.addEventListener('change', (e)=>{
+      // los checkbox dentro del editor no reflejan su "checked" en el HTML
+      // serializado a menos que se ponga el atributo a mano al cambiar
+      if(e.target && e.target.type==='checkbox'){
+        if(e.target.checked) e.target.setAttribute('checked',''); else e.target.removeAttribute('checked');
+        scheduleSave();
+      }
+    });
     bindPasteImages(mainEl);
   }
   const tagsEl = document.getElementById('noteTags');
   if(tagsEl){ tagsEl.addEventListener('input', showTagSuggest); tagsEl.addEventListener('blur', ()=>setTimeout(hideTagSuggest,150)); }
-  updatePreview();
 }
 function showTagSuggest(){
   const el = document.getElementById('noteTags'); const box = document.getElementById('tagSuggest');
@@ -872,77 +916,88 @@ function pickTagSuggest(tag){
   hideTagSuggest(); el.focus(); scheduleSave();
 }
 
-/* markdown auto-continue de listas */
-function handleMdKeydown(e){
+/* ============ Editor WYSIWYG: comandos de formato reales, tablas
+   editables de verdad (agregar/quitar filas y columnas) y checklists ==== */
+function focusMainEditor(){
+  const el = document.getElementById('mainArea'); if(!el) return null;
+  el.focus();
+  return el;
+}
+function runCmd(cmd, val){
+  focusMainEditor();
+  document.execCommand(cmd, false, val||null);
+  scheduleSave();
+}
+function handleRichKeydown(e){
   if(e.key!=='Enter') return;
-  const ta = e.target; const val = ta.value; const pos = ta.selectionStart;
-  const lineStart = val.lastIndexOf('\n', pos-1)+1;
-  const line = val.slice(lineStart, pos);
-  const bullet = line.match(/^(\s*)- \[( |x)\] /) || line.match(/^(\s*)- /) || line.match(/^(\s*)(\d+)\. /);
-  if(!bullet) return;
+  const sel = window.getSelection(); if(!sel.rangeCount) return;
+  let node = sel.anchorNode; if(node.nodeType===3) node = node.parentNode;
+  const check = node.closest && node.closest('.rt-check');
+  if(!check) return;
   e.preventDefault();
-  if(line.trim()==='-' || line.trim()==='- [ ]' || /^\d+\.\s*$/.test(line.trim())){
-    ta.value = val.slice(0,lineStart) + val.slice(pos);
-    ta.selectionStart = ta.selectionEnd = lineStart;
+  const span = check.querySelector('span');
+  if(span && span.textContent.trim()===''){
+    // renglón de checklist vacío + Enter: sale de la lista
+    const p = document.createElement('p'); p.innerHTML='<br>';
+    check.replaceWith(p);
+    placeCaretAtStart(p);
   } else {
-    let prefix;
-    if(line.match(/^(\s*)- \[/)) prefix = line.match(/^(\s*)/)[1] + '- [ ] ';
-    else if(line.match(/^(\s*)\d+\./)) prefix = line.match(/^(\s*)/)[1] + (parseInt(line.match(/(\d+)\./)[1])+1) + '. ';
-    else prefix = line.match(/^(\s*)/)[1] + '- ';
-    const insert = '\n'+prefix;
-    ta.value = val.slice(0,pos)+insert+val.slice(pos);
-    ta.selectionStart = ta.selectionEnd = pos+insert.length;
+    insertChecklistItem();
   }
-  scheduleSave(); schedulePreview();
 }
-function activeTextarea(){
-  if(editingCornell){
-    const af = window._activeCornellField;
-    const el = af && document.getElementById('cornell'+(af.field==='cue'?'Cue':'Texto')+'-'+af.i);
-    return el || document.getElementById('cornellTexto-0');
+function placeCaretAtStart(el){
+  const range = document.createRange(); range.selectNodeContents(el); range.collapse(true);
+  const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+}
+function insertChecklistItem(){
+  focusMainEditor();
+  document.execCommand('insertHTML', false, '<div class="rt-check"><input type="checkbox"><span> </span></div>');
+  scheduleSave();
+}
+function insertRichTable(){
+  focusMainEditor();
+  document.execCommand('insertHTML', false, '<table class="rt-table"><tr><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td></tr></table><p><br></p>');
+  scheduleSave();
+}
+function currentTableFromSelection(){
+  const sel = window.getSelection(); if(!sel.rangeCount) return null;
+  let node = sel.anchorNode; if(node && node.nodeType===3) node = node.parentNode;
+  return node && node.closest ? node.closest('table.rt-table') : null;
+}
+function currentCellFromSelection(){
+  const sel = window.getSelection(); if(!sel.rangeCount) return null;
+  let node = sel.anchorNode; if(node && node.nodeType===3) node = node.parentNode;
+  return node && node.closest ? node.closest('td,th') : null;
+}
+function tableAddRow(){
+  const t = currentTableFromSelection(); if(!t){ showToast('Pon el cursor dentro de una tabla'); return; }
+  const cols = t.rows[0] ? t.rows[0].cells.length : 1;
+  const row = t.insertRow(-1);
+  for(let i=0;i<cols;i++){
+    const c = row.insertCell(-1); c.innerHTML='<br>';
+    if(t.classList.contains('cornell-table') && i===0) c.className='cornell-cue-cell';
   }
-  return document.getElementById('mainArea');
+  scheduleSave();
 }
-function syncCornellFromTextarea(ta){
-  if(!editingCornell || !ta || !ta.id) return;
-  const m = ta.id.match(/^cornell(Cue|Texto)-(\d+)$/);
-  if(!m) return;
-  const field = m[1]==='Cue' ? 'cue' : 'texto';
-  const i = parseInt(m[2],10);
-  if(window._cornellPairs[i]) window._cornellPairs[i][field] = ta.value;
+function tableAddCol(){
+  const t = currentTableFromSelection(); if(!t){ showToast('Pon el cursor dentro de una tabla'); return; }
+  Array.from(t.rows).forEach(row=>{ const c=row.insertCell(-1); c.innerHTML='<br>'; });
+  scheduleSave();
 }
-function wrapSel(pre,post){
-  const ta = activeTextarea(); if(!ta) return;
-  const s=ta.selectionStart, e=ta.selectionEnd; const val=ta.value;
-  const sel = val.slice(s,e) || 'texto';
-  // Estos envoltorios (negrita, resaltar, color…) se procesan línea por
-  // línea en la vista previa — si la selección cruza varias líneas hay que
-  // envolver cada línea por separado, si no el cierre "==)" queda solo en
-  // la última línea y ninguna línea individual hace match al renderizar.
-  let wrapped;
-  if(sel.indexOf('\n')>=0){
-    wrapped = sel.split('\n').map(line=> line.trim() ? (pre+line+post) : line).join('\n');
-  } else {
-    wrapped = pre+sel+post;
-  }
-  ta.value = val.slice(0,s)+wrapped+val.slice(e);
-  ta.selectionStart = s; ta.selectionEnd = s+wrapped.length;
-  ta.focus(); syncCornellFromTextarea(ta); scheduleSave(); updatePreview();
+function tableDelRow(){
+  const t = currentTableFromSelection(); if(!t){ showToast('Pon el cursor dentro de una tabla'); return; }
+  if(t.rows.length<=1) return;
+  const cell = currentCellFromSelection(); const tr = cell && cell.closest('tr');
+  if(tr) tr.remove();
+  scheduleSave();
 }
-function linePrefix(prefix){
-  const ta = activeTextarea(); if(!ta) return;
-  const s = ta.selectionStart; const val = ta.value;
-  const lineStart = val.lastIndexOf('\n', s-1)+1;
-  ta.value = val.slice(0,lineStart)+prefix+val.slice(lineStart);
-  ta.selectionStart = ta.selectionEnd = s+prefix.length;
-  ta.focus(); syncCornellFromTextarea(ta); scheduleSave(); updatePreview();
-}
-function insertTable(){
-  const tpl = '\n| Col 1 | Col 2 |\n| --- | --- |\n| a | b |\n';
-  const ta = activeTextarea(); if(!ta) return;
-  const s=ta.selectionStart; const val=ta.value;
-  ta.value = val.slice(0,s)+tpl+val.slice(s); ta.focus();
-  syncCornellFromTextarea(ta); scheduleSave(); updatePreview();
+function tableDelCol(){
+  const t = currentTableFromSelection(); if(!t){ showToast('Pon el cursor dentro de una tabla'); return; }
+  const cell = currentCellFromSelection(); if(!cell) return;
+  const idx = Array.from(cell.parentNode.children).indexOf(cell);
+  if(t.rows[0].cells.length<=1) return;
+  Array.from(t.rows).forEach(row=>{ if(row.cells[idx]) row.deleteCell(idx); });
+  scheduleSave();
 }
 function toggleSwatches(kind){
   const bar = document.getElementById('swatchBar');
@@ -950,47 +1005,21 @@ function toggleSwatches(kind){
   bar.dataset.kind = kind;
   bar.innerHTML = '';
   const options = kind==='mark'
-    ? [['y','#fbe28a'],['g','#bfe3b0'],['p','#f0bcd8'],['b','#b9d8f2']]
-    : [['#8a5a3b','#8a5a3b'],['#b3432b','#b3432b'],['#3d7a4f','#3d7a4f'],['#4a6fa5','#4a6fa5'],['#7d5ba6','#7d5ba6']];
+    ? [['#fbe28a','#fbe28a'],['#bfe3b0','#bfe3b0'],['#f0bcd8','#f0bcd8'],['#b9d8f2','#b9d8f2']]
+    : [['#26241f','#26241f'],['#8a5a3b','#8a5a3b'],['#b3432b','#b3432b'],['#3d7a4f','#3d7a4f'],['#4a6fa5','#4a6fa5'],['#7d5ba6','#7d5ba6']];
   options.forEach(([code,color])=>{
     const sw = document.createElement('span');
     sw.className='swatch'; sw.style.background=color;
+    sw.addEventListener('mousedown', e=>e.preventDefault());
     sw.addEventListener('click', ()=>{
-      if(kind==='mark') applyMark(code); else applyTextColor(color);
+      focusMainEditor();
+      document.execCommand(kind==='mark' ? 'hiliteColor' : 'foreColor', false, color);
+      scheduleSave();
       bar.classList.add('hidden');
     });
     bar.appendChild(sw);
   });
   bar.classList.remove('hidden');
-}
-function applyMark(code){ wrapSel('==('+code+')', '==)'); }
-function applyTextColor(hex){ wrapSel('{{color:'+hex+'|', '}}'); }
-function togglePreviewPane(){
-  showPreview = !showPreview;
-  localStorage.setItem('org_show_preview', showPreview?'1':'0');
-  const body = document.getElementById('editorBody'); if(body) body.classList.toggle('no-preview', !showPreview);
-  const btn = document.getElementById('btnPreview'); if(btn) btn.classList.toggle('active', showPreview);
-  if(showPreview) updatePreview();
-}
-let _previewDebounce=null;
-function schedulePreview(){ clearTimeout(_previewDebounce); _previewDebounce = setTimeout(updatePreview, 120); }
-function updatePreview(){
-  const pane = document.getElementById('previewPane'); if(!pane) return;
-  if(editingCornell){
-    pane.innerHTML = mdToHtmlCornell(window._cornellPairs||[]);
-  } else {
-    const mainEl = document.getElementById('mainArea');
-    pane.innerHTML = mdToHtml(mainEl ? mainEl.value : '');
-    pane.querySelectorAll('input[type=checkbox]').forEach((cb,i)=>{
-      cb.addEventListener('change', ()=>toggleChecklistInText(i));
-    });
-  }
-}
-function toggleChecklistInText(index){
-  const ta = document.getElementById('mainArea'); if(!ta) return;
-  let count=-1;
-  ta.value = ta.value.replace(/- \[( |x)\]/g, m=>{ count++; if(count===index) return m===('- [ ]')?'- [x]':'- [ ]'; return m; });
-  scheduleSave(); updatePreview();
 }
 
 /* ============ Markdown → HTML (parser propio, ligero) ============ */
@@ -1041,76 +1070,16 @@ function inlineMd(t){
   return t;
 }
 
-/* ============ Cornell: filas cue/texto pareadas y realmente alineadas ============ */
-function cornellPairsFromNote(note){
-  if(note.Cornell==='1'){
-    try{
-      const parsed = JSON.parse(note.Contenido||'[]');
-      if(Array.isArray(parsed) && parsed.length) return parsed;
-    }catch(e){}
-    if(note.CornellCue || note.Contenido) return [{cue:note.CornellCue||'', texto:note.Contenido||''}];
-  }
-  return [{cue:'',texto:''}];
-}
-function cornellRowHTML(p,i){
-  return `<div class="cornell-row" data-i="${i}">
-    <input type="text" class="cornell-cue" id="cornellCue-${i}" value="${escAttr(p.cue)}" placeholder="concepto clave"
-      oninput="cornellChange(${i},'cue',this.value)" onfocus="window._activeCornellField={i:${i},field:'cue'}">
-    <textarea id="cornellTexto-${i}" placeholder="desarrollo…"
-      oninput="cornellChange(${i},'texto',this.value)" onfocus="window._activeCornellField={i:${i},field:'texto'}"
-      onpaste="handleCornellPaste(event,${i})">${escHtml(p.texto)}</textarea>
-    <button class="icon-btn" onclick="removeCornellRow(${i})" title="Quitar fila">🗑️</button>
-  </div>`;
-}
-function cornellEditorHTML(){
-  return `<div class="cornell-editor-wrap">
-    <div class="cornell-rows" id="cornellRows">${(window._cornellPairs||[]).map((p,i)=>cornellRowHTML(p,i)).join('')}</div>
-    <button class="mini-btn" onclick="addCornellRow()">+ agregar fila (cue + texto)</button>
-  </div>`;
-}
-function renderCornellRows(){
-  const el = document.getElementById('cornellRows'); if(!el) return;
-  el.innerHTML = window._cornellPairs.map((p,i)=>cornellRowHTML(p,i)).join('');
-}
-function handleCornellPaste(e, i){
-  const items = e.clipboardData && e.clipboardData.items; if(!items) return;
-  for(const item of items){
-    if(item.type && item.type.indexOf('image/')===0){
-      e.preventDefault();
-      window._activeCornellField = {i, field:'texto'};
-      const file = item.getAsFile();
-      if(file) insertImage(file);
-      return;
-    }
-  }
-}
-function cornellChange(i, field, val){
-  if(!window._cornellPairs[i]) return;
-  window._cornellPairs[i][field] = val;
-  schedulePreview(); scheduleSave();
-}
-function addCornellRow(){
-  window._cornellPairs.push({cue:'',texto:''});
-  renderCornellRows(); scheduleSave();
-  const el = document.getElementById('cornellCue-'+(window._cornellPairs.length-1)); if(el) el.focus();
-}
-function removeCornellRow(i){
-  window._cornellPairs.splice(i,1);
-  if(!window._cornellPairs.length) window._cornellPairs=[{cue:'',texto:''}];
-  renderCornellRows(); scheduleSave(); updatePreview();
-}
-function mdToHtmlCornell(pairs){
-  if(!pairs || !pairs.length) return '<p style="color:var(--text-dim)">Sin contenido todavía</p>';
-  return '<div class="cornell-preview">' + pairs.map(p=>
-    `<div class="cornell-prow"><div class="cornell-pcue">${mdToHtml(p.cue||'')}</div><div class="cornell-ptexto">${mdToHtml(p.texto||'')}</div></div>`
-  ).join('') + '</div>';
+/* Cornell ahora es solo una tabla de 2 columnas (ver toggleCornell) — reusa
+   el motor de tablas de arriba, no necesita código propio. */
+function stripHtmlToText(html){
+  const d = document.createElement('div'); d.innerHTML = html||'';
+  return (d.textContent||'').replace(/\s+/g,' ').trim();
 }
 function noteSnippetText(n){
-  if(n.Cornell==='1'){
-    try{ const pairs = JSON.parse(n.Contenido||'[]'); if(Array.isArray(pairs)) return pairs.map(p=>(p.cue?p.cue+': ':'')+(p.texto||'')).join(' '); }catch(e){}
-    return '';
-  }
-  return n.Contenido||'';
+  const c = n.Contenido||'';
+  if(/^\s*<[a-z][\s\S]*>/i.test(c)) return stripHtmlToText(c);
+  return c; // nota vieja aún no migrada a HTML
 }
 
 /* ============ Acciones de nota ============ */
@@ -1134,11 +1103,11 @@ function deleteNoteUI(id){
 function exportNotePDF(id){
   const note = id ? getNote(id) : collectNoteFromForm();
   if(!note){ showToast('Nada que exportar'); return; }
+  ensureHtmlContent(note);
   const area = document.getElementById('printArea');
-  const body = note.Cornell==='1' ? mdToHtmlCornell(cornellPairsFromNote(note)) : mdToHtml(note.Contenido);
   area.innerHTML = `<h1>${escHtml(note.Titulo||'(sin título)')}</h1>
     <p style="color:#666;font-size:12px">${fmtDate(note.Fecha)} · ${escHtml(note.Notebook||'')} · ${effectiveTags(note).map(t=>'#'+t).join(' ')}</p>
-    ${body}`;
+    ${note.Contenido||''}`;
   window.print();
 }
 function exportViewPDF(){
@@ -1304,7 +1273,7 @@ function bindPasteImages(ta){
 }
 async function insertImage(file){
   if(!navigator.onLine){ showToast('Insertar imágenes necesita conexión (se suben a tu Drive)'); return; }
-  const ta = activeTextarea(); if(!ta) return;
+  const ta = focusMainEditor(); if(!ta) return;
   const base64 = await new Promise((res,rej)=>{
     const reader = new FileReader();
     reader.onload = ()=>res(reader.result.split(',')[1]); reader.onerror = rej;
@@ -1313,19 +1282,14 @@ async function insertImage(file){
   showToast('Subiendo imagen…');
   const up = await apiPost('uploadImage', { imageBase64: base64, mimeType: file.type, fileName: file.name || 'imagen' });
   if(!(up && up.ok)){ showToast('No se pudo subir la imagen'+(up&&up.error?': '+up.error:'')); return; }
-  let s = ta.selectionStart, val = ta.value;
-  const imgTxt = '\n![imagen]('+up.url+')\n';
-  ta.value = val.slice(0,s)+imgTxt+val.slice(s);
-  s += imgTxt.length;
-  ta.selectionStart = ta.selectionEnd = s;
-  syncCornellFromTextarea(ta); scheduleSave(); updatePreview();
+  document.execCommand('insertHTML', false, '<img src="'+up.url+'" alt="imagen"><p><br></p>');
+  scheduleSave();
   showToast('Leyendo texto de la imagen…');
   const ocr = await apiPost('ocrImage', { imageBase64: base64, mimeType: file.type });
   if(ocr && ocr.ok && ocr.text && !/sin texto detectado/i.test(ocr.text)){
-    val = ta.value;
-    const ocrTxt = '> 📝 '+ocr.text.replace(/\n/g,'\n> ')+'\n';
-    ta.value = val.slice(0,s)+ocrTxt+val.slice(s);
-    syncCornellFromTextarea(ta); scheduleSave(); updatePreview();
+    focusMainEditor();
+    document.execCommand('insertHTML', false, '<blockquote>📝 '+escHtml(ocr.text).replace(/\n/g,'<br>')+'</blockquote><p><br></p>');
+    scheduleSave();
     showToast('Texto de la imagen agregado');
   } else {
     showToast('Imagen insertada');
@@ -1351,69 +1315,111 @@ function renderChecklistBody(){
     return `<div class="tpl-card">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <b>${escHtml(p.Nombre)}</b>
-        <span><button class="icon-btn" onclick="openFillModal('${p.ID}')">▶ Llenar</button><button class="icon-btn" onclick="deleteTemplateUI('${p.ID}')">🗑️</button></span>
+        <span><button class="icon-btn" onclick="openFillModal('${p.ID}')">▶ Llenar</button><button class="icon-btn" onclick="openTemplateModal('${p.ID}')" title="Editar plantilla">✏️</button><button class="icon-btn" onclick="deleteTemplateUI('${p.ID}')">🗑️</button></span>
       </div>
       <div>${hist.map(h=>histEntryHTML(h)).join('') || '<p class="hint" style="color:var(--text-dim)">Sin historial aún</p>'}</div>
     </div>`;
   }).join('') || '<p style="color:var(--text-dim)">Sin plantillas — crea la primera.</p>';
 }
+
+/* Los items llevan una "section" opcional (ej. "ropa", "comida") para poder
+   agrupar el checklist en categorías, tanto en la plantilla como al llenar
+   y en el historial. */
+function groupBySection(items){
+  const order = []; const seen = new Set();
+  items.forEach(it=>{ const s=it.section||''; if(!seen.has(s)){ seen.add(s); order.push(s); } });
+  return order.map(sec=>({ sec, rows: items.map((it,i)=>({it,i})).filter(x=>(x.it.section||'')===sec) }));
+}
+function parseTemplateText(text){
+  let section = ''; const items = [];
+  (text||'').split('\n').forEach(raw=>{
+    const line = raw.trim(); if(!line) return;
+    if(/:$/.test(line)){ section = line.slice(0,-1).trim(); return; }
+    items.push({ text: line, section });
+  });
+  return items;
+}
+function templateItemsToText(items){
+  const out=[]; let last=null;
+  items.forEach(it=>{
+    const sec = it.section||'';
+    if(sec!==last){ if(out.length) out.push(''); if(sec) out.push(sec+':'); last=sec; }
+    out.push(it.text);
+  });
+  return out.join('\n');
+}
+
 function histEntryHTML(h){
   let items=[]; try{ items = JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
-  const rows = items.map((it,i)=>`
-    <li>
-      <input type="checkbox" ${it.checked?'checked':''} onchange="histToggle('${h.ID}',${i},this.checked)">
-      <span class="${it.checked?'done':''}">${escHtml(it.text)}</span>
-      <input type="text" class="hist-note" placeholder="nota (cuántos, estado…)" value="${escAttr(it.note||'')}" onchange="histNoteChange('${h.ID}',${i},this.value)">
-    </li>`).join('');
+  const body = groupBySection(items).map(({sec,rows})=>`
+    <div class="fill-section">
+      ${sec ? `<div class="fill-section-title">${escHtml(sec)}</div>` : ''}
+      <ul>${rows.map(({it,i})=>`<li>
+        <input type="checkbox" ${it.checked?'checked':''} onchange="histToggle('${h.ID}',${i},this.checked)">
+        <span class="${it.checked?'done':''}">${escHtml(it.text)}</span>
+        <input type="text" class="hist-note" placeholder="nota (cuántos, estado…)" value="${escAttr(it.note||'')}" onchange="histNoteChange('${h.ID}',${i},this.value)">
+      </li>`).join('')}</ul>
+    </div>`).join('');
   return `<div class="hist-entry">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:12px;color:var(--text-dim)">${fmtDate(h.Fecha)}</span>
       <button class="icon-btn" onclick="histAddItem('${h.ID}')" title="Agregar elemento a esta lista">+ elemento</button>
     </div>
-    <ul>${rows}</ul>
+    ${body}
   </div>`;
 }
-function openTemplateModal(){
+function openTemplateModal(existingId){
+  const existing = existingId ? DATA.plantillas.find(p=>p.ID===existingId) : null;
+  let items = []; if(existing){ try{ items = JSON.parse(existing.ItemsJSON||'[]'); }catch(e){} }
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
-    <div class="modal-head"><b>+ Nueva plantilla</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-head"><b>${existing?'✏️ Editar':'+ Nueva'} plantilla</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
       <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Nombre</label>
-      <input type="text" id="tplNameInput" placeholder="ej. Rutina de viaje">
-      <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Elementos (uno por línea)</label>
-      <textarea id="tplItemsInput" rows="8" placeholder="chamarra
-cámara
-tenis"></textarea>
-      <div style="margin-top:14px"><button class="btn" onclick="saveTemplateModal(this)">Guardar plantilla</button></div>
+      <input type="text" id="tplNameInput" value="${existing?escAttr(existing.Nombre):''}" placeholder="ej. Viaje a la playa">
+      <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Elementos — uno por línea. Una línea que termine en ":" empieza una categoría nueva.</label>
+      <textarea id="tplItemsInput" rows="10" placeholder="ropa:
+tenis
+chamarra
+
+comida:
+chicles
+dulces">${existing?escHtml(templateItemsToText(items)):''}</textarea>
+      <div style="margin-top:14px"><button class="btn" onclick="saveTemplateModal(this,'${existingId||''}')">Guardar plantilla</button></div>
     </div>
   </div>`;
   document.body.appendChild(overlay);
   document.getElementById('tplNameInput').focus();
 }
-function saveTemplateModal(btn){
+function saveTemplateModal(btn, existingId){
   const nombre = document.getElementById('tplNameInput').value.trim();
   const itemsText = document.getElementById('tplItemsInput').value;
   if(!nombre){ showToast('Ponle un nombre a la plantilla'); return; }
-  const items = itemsText.split('\n').map(s=>s.trim()).filter(Boolean).map(text=>({text}));
-  saveEntity('PLANTILLAS', { ID:uid(), Nombre:nombre, ItemsJSON: JSON.stringify(items), Tags:'' }).then(()=>{
+  const items = parseTemplateText(itemsText);
+  const row = { ID: existingId||uid(), Nombre:nombre, ItemsJSON: JSON.stringify(items), Tags:'' };
+  saveEntity('PLANTILLAS', row).then(()=>{
     btn.closest('.modal-overlay').remove();
     renderChecklistBody(); renderSidebar();
   });
 }
 function deleteTemplateUI(id){ if(!confirm('¿Eliminar esta plantilla?')) return; deleteEntity('PLANTILLAS', id).then(()=>{ renderChecklistBody(); renderSidebar(); }); }
 
-/* Llenar: formulario editable (no un prompt) — casillas + nota libre por
-   elemento, y se pueden agregar elementos extra solo para esta vez. */
+/* Llenar: formulario real agrupado por categoría (no un prompt) — casillas
+   y nota libre por elemento, más elementos/categorías extra solo para esta
+   vez. */
 function openFillModal(templateId){
   const p = DATA.plantillas.find(x=>x.ID===templateId); if(!p) return;
-  let baseItems; try{ baseItems = JSON.parse(p.ItemsJSON||'[]').map(it=>({ text: it.text!==undefined?it.text:it, checked:false, note:'' })); }catch(e){ baseItems=[]; }
+  let baseItems; try{ baseItems = JSON.parse(p.ItemsJSON||'[]').map(it=>({ text: it.text!==undefined?it.text:it, checked:false, note:'', section: it.section||'' })); }catch(e){ baseItems=[]; }
   window._fillItems = baseItems;
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
     <div class="modal-head"><b>▶ Llenar: ${escHtml(p.Nombre)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
       <div id="fillItemsList"></div>
-      <button class="mini-btn" onclick="addFillRow()">+ agregar otro elemento</button>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="mini-btn" onclick="addFillRow('')">+ elemento suelto</button>
+        <button class="mini-btn" onclick="addFillSection()">+ nueva categoría</button>
+      </div>
       <div style="margin-top:14px"><button class="btn" onclick="saveFillModal('${templateId}', this)">Guardar</button></div>
     </div>
   </div>`;
@@ -1422,15 +1428,23 @@ function openFillModal(templateId){
 }
 function renderFillItemsList(){
   const el = document.getElementById('fillItemsList'); if(!el) return;
-  el.innerHTML = window._fillItems.map((it,i)=>`
-    <div class="fill-row">
-      <input type="checkbox" ${it.checked?'checked':''} onchange="window._fillItems[${i}].checked=this.checked">
-      <input type="text" style="flex:1.3" value="${escAttr(it.text)}" placeholder="elemento" onchange="window._fillItems[${i}].text=this.value">
-      <input type="text" style="flex:1" value="${escAttr(it.note||'')}" placeholder="nota (cuántos, si hace calor…)" onchange="window._fillItems[${i}].note=this.value">
-      <button class="icon-btn" onclick="removeFillRow(${i})">🗑️</button>
+  el.innerHTML = groupBySection(window._fillItems).map(({sec,rows})=>`
+    <div class="fill-section">
+      ${sec ? `<div class="fill-section-title">${escHtml(sec)}</div>` : ''}
+      ${rows.map(({it,i})=>fillRowHTML(it,i)).join('')}
+      <button class="mini-btn" onclick="addFillRow('${escAttr(sec)}')">+ elemento en ${sec?escHtml(sec):'esta lista'}</button>
     </div>`).join('');
 }
-function addFillRow(){ window._fillItems.push({text:'',checked:false,note:''}); renderFillItemsList(); }
+function fillRowHTML(it,i){
+  return `<div class="fill-row">
+    <input type="checkbox" ${it.checked?'checked':''} onchange="window._fillItems[${i}].checked=this.checked">
+    <input type="text" style="flex:1.3" value="${escAttr(it.text)}" placeholder="elemento" onchange="window._fillItems[${i}].text=this.value">
+    <input type="text" style="flex:1" value="${escAttr(it.note||'')}" placeholder="nota (cuántos, si hace calor…)" onchange="window._fillItems[${i}].note=this.value">
+    <button class="icon-btn" onclick="removeFillRow(${i})">🗑️</button>
+  </div>`;
+}
+function addFillRow(section){ window._fillItems.push({text:'',checked:false,note:'',section:section||''}); renderFillItemsList(); }
+function addFillSection(){ const name = prompt('Nombre de la categoría (ej. Ropa):'); if(!name || !name.trim()) return; window._fillItems.push({text:'',checked:false,note:'',section:name.trim()}); renderFillItemsList(); }
 function removeFillRow(i){ window._fillItems.splice(i,1); renderFillItemsList(); }
 async function saveFillModal(templateId, btn){
   const items = window._fillItems.filter(it=>it.text && it.text.trim());
@@ -1451,8 +1465,9 @@ async function histMutate(historyId, mutator){
 function histToggle(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].checked = val; }); }
 function histNoteChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].note = val; }); }
 function histAddItem(id){
-  const text = prompt('Nuevo elemento para esta lista:'); if(!text || !text.trim()) return;
-  histMutate(id, items=> items.push({ text: text.trim(), checked:false, note:'' }));
+  const text = prompt('Nuevo elemento para esta lista (opcional "categoría: elemento"):'); if(!text || !text.trim()) return;
+  const m = text.match(/^(.+?):\s*(.+)$/);
+  histMutate(id, items=> items.push(m ? { text:m[2].trim(), checked:false, note:'', section:m[1].trim() } : { text: text.trim(), checked:false, note:'', section:'' }));
 }
 
 /* ============ Tablas dinámicas por bloque ============
@@ -1713,6 +1728,7 @@ function boot(){
   renderAll();
   syncNow(false);
   initSplitResizerOnce();
+  initEditorResizerOnce();
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
 }
 window.addEventListener('DOMContentLoaded', ()=>{

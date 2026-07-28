@@ -30,13 +30,14 @@ const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 
 const TABLE_DEFS = {
-  NOTAS:       ['ID', 'Fecha', 'FechaEdicion', 'Titulo', 'Contenido', 'Tags', 'Notebook', 'Cornell', 'CornellCue', 'Color', 'Pinned', 'Orden', 'Archivo'],
-  TAGS:        ['ID', 'Etiqueta', 'Color', 'EsComando', 'Descripcion'],
-  NOTEBOOKS:   ['ID', 'Nombre', 'TagsHeredados', 'Color'],
-  PLANTILLAS:  ['ID', 'Nombre', 'ItemsJSON', 'Tags'],
-  HISTORIAL:   ['ID', 'PlantillaID', 'Fecha', 'ItemsJSON', 'NotaID'],
-  DICCIONARIO: ['ID', 'Termino', 'Traduccion', 'Notas', 'Fecha'],
-  FEEDBACK:    ['ID', 'Fecha', 'Original', 'Correccion', 'Contexto']
+  NOTAS:         ['ID', 'Fecha', 'FechaEdicion', 'Titulo', 'Contenido', 'Tags', 'Notebook', 'Cornell', 'CornellCue', 'Color', 'Pinned', 'Orden', 'Archivo'],
+  TAGS:          ['ID', 'Etiqueta', 'Color', 'EsComando', 'Descripcion'],
+  NOTEBOOKS:     ['ID', 'Nombre', 'TagsHeredados', 'Color', 'TagAuto'],
+  PLANTILLAS:    ['ID', 'Nombre', 'ItemsJSON', 'Tags'],
+  HISTORIAL:     ['ID', 'PlantillaID', 'Fecha', 'ItemsJSON', 'NotaID'],
+  DICCIONARIO:   ['ID', 'Termino', 'Traduccion', 'Notas', 'Fecha'],
+  FEEDBACK:      ['ID', 'Fecha', 'Original', 'Correccion', 'Contexto'],
+  BLOQUE_TABLAS: ['ID', 'Nombre', 'TagFiltro']
 };
 
 // ── Router GET (solo lectura ligera, ej. ping de conexión) ────
@@ -70,9 +71,11 @@ function doPost(e) {
     else if (action === 'deleteRow')            result = deleteRow(body.sheetId, body.table, body.id);
     else if (action === 'fillTemplate')         result = fillTemplate(body.sheetId, body.plantillaId);
     else if (action === 'toggleHistorialItem')  result = toggleHistorialItem(body.sheetId, body.historialId, body.index);
+    else if (action === 'updateHistorialItems') result = updateHistorialItems(body.sheetId, body.historialId, body.items);
     else if (action === 'aiAssist')             result = aiAssist(body.mode, body.text);
     else if (action === 'translate')            result = translate(body.text, body.direction);
     else if (action === 'ocrImage')             result = ocrImage(body.imageBase64, body.mimeType);
+    else if (action === 'uploadImage')          result = uploadImage(body.sheetId, body.imageBase64, body.mimeType, body.fileName);
     else                                        result = { error: 'Acción no reconocida' };
   } catch (err) { result = { error: err.message }; }
   return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
@@ -193,6 +196,19 @@ function toggleHistorialItem(sheetId, historialId, index) {
   return { ok: true, items: items };
 }
 
+// Reemplazo completo de los items de un registro de historial — se usa al
+// editar notas por item, agregar items sueltos al llenar, o marcar/desmarcar,
+// todo en una sola operación en vez de una acción distinta por cada cosa.
+function updateHistorialItems(sheetId, historialId, items) {
+  const ss = getSS(sheetId);
+  const sh = getTable(ss, 'HISTORIAL');
+  const rowIdx = findRowIndexById(sh, historialId);
+  if (rowIdx < 0) throw new Error('Registro de historial no encontrado');
+  const colItems = TABLE_DEFS.HISTORIAL.indexOf('ItemsJSON') + 1;
+  sh.getRange(rowIdx, colItems).setValue(JSON.stringify(items || []));
+  return { ok: true, items: items };
+}
+
 // ── IA: Gemini principal + Claude de respaldo ──────────────────
 function isGeminiQuotaError(data) {
   if (!data || !data.error) return false;
@@ -256,6 +272,29 @@ function translate(text, direction) {
   const dir = direction === 'en->es' ? 'del inglés al español' : 'del español al inglés';
   const systemPrompt = 'Traduce el siguiente texto ' + dir + '. Devuelve ÚNICAMENTE la traducción, sin explicaciones ni comillas.';
   return askAI(systemPrompt, text);
+}
+
+// ── Imágenes: subir a Drive (para incrustarlas en la nota) ──────
+function getOrCreateImageFolder() {
+  const props = PropertiesService.getScriptProperties();
+  let folderId = props.getProperty('ORGANIZADOR_IMG_FOLDER_ID');
+  if (folderId) { try { return DriveApp.getFolderById(folderId); } catch (e) {} }
+  const folder = DriveApp.createFolder('Organizador — imágenes');
+  props.setProperty('ORGANIZADOR_IMG_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+function uploadImage(sheetId, imageBase64, mimeType, fileName) {
+  if (!imageBase64 || !mimeType) return { ok: false, error: 'Faltan datos de la imagen' };
+  try {
+    const folder = getOrCreateImageFolder();
+    const bytes = Utilities.base64Decode(imageBase64);
+    const blob = Utilities.newBlob(bytes, mimeType, fileName || ('imagen-' + new Date().getTime()));
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    const url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1200';
+    return { ok: true, url: url, fileId: file.getId() };
+  } catch (e) { return { ok: false, error: 'Drive: ' + e.message }; }
 }
 
 // ── OCR con Claude Visión ───────────────────────────────────────

@@ -112,9 +112,11 @@ table.org-table td.title-cell{cursor:pointer;font-weight:600}
 .col-filter{width:100%;font-size:11px;padding:2px 4px;margin-top:3px}
 
 /* split */
-.split-wrap{display:flex;gap:12px;height:100%}
-.split-left{flex:1;min-width:260px;overflow-y:auto}
-.split-right{flex:1;min-width:280px;border-left:1px solid var(--border);padding-left:12px;overflow-y:auto}
+.split-wrap{display:flex;height:100%}
+.split-left{overflow-y:auto;padding-right:10px;min-width:180px}
+.split-handle{width:7px;flex:none;cursor:col-resize;background:var(--border);border-radius:4px;margin:0 4px}
+.split-handle:hover,.split-handle:active{background:var(--accent)}
+.split-right{flex:1;min-width:220px;overflow-y:auto;padding-left:6px}
 
 /* editor */
 #editorOverlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:stretch;justify-content:flex-end;z-index:200}
@@ -133,11 +135,28 @@ table.org-table td.title-cell{cursor:pointer;font-weight:600}
 .editor-toolbar .sep{width:1px;background:var(--border);align-self:stretch;margin:0 4px}
 .swatch-row{display:flex;gap:4px;padding:4px 8px}
 .swatch{width:20px;height:20px;border-radius:50%;border:1px solid var(--border);cursor:pointer}
-.editor-body{flex:1;display:flex;min-height:0;padding:12px;gap:10px}
-.editor-body.cornell{display:grid;grid-template-columns:1fr 2fr}
-#cueArea,#mainArea{width:100%;height:100%;border:1px solid var(--border);border-radius:8px;padding:10px}
-.editor-preview{flex:1;overflow-y:auto;border:1px dashed var(--border);border-radius:8px;padding:12px;font-size:14px}
+.editor-body{flex:1;display:flex;min-height:0;padding:12px;gap:10px;overflow:hidden}
+#mainArea{width:100%;height:100%;border:1px solid var(--border);border-radius:8px;padding:10px;flex:1 1 50%}
+.editor-preview{flex:1 1 50%;overflow-y:auto;border:1px dashed var(--border);border-radius:8px;padding:12px;font-size:14px}
+.editor-body.no-preview .editor-preview{display:none}
+.editor-body.no-preview #mainArea{flex:1 1 100%}
+.editor-body.no-preview .cornell-editor-wrap{flex:1 1 100%}
 .editor-bottom{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-top:1px solid var(--border);font-size:12px;color:var(--text-dim)}
+
+/* cornell */
+.cornell-editor-wrap{flex:1 1 50%;overflow-y:auto;display:flex;flex-direction:column;gap:8px;min-width:0}
+.cornell-row{display:grid;grid-template-columns:1fr 2fr auto;gap:8px;align-items:start}
+.cornell-row input.cornell-cue{font-weight:700}
+.cornell-row textarea{min-height:64px;border:1px solid var(--border);border-radius:8px;padding:8px}
+.cornell-preview{display:flex;flex-direction:column}
+.cornell-prow{display:grid;grid-template-columns:1fr 2fr;gap:12px;border-bottom:1px solid var(--border);padding:8px 0}
+.cornell-pcue{font-weight:700;color:var(--accent)}
+@media (max-width:640px){
+  .editor-body{flex-direction:column}
+  .editor-body.no-preview .editor-preview{display:none}
+  .cornell-row{grid-template-columns:1fr auto}
+  .cornell-row textarea{grid-column:1/3}
+}
 
 /* preview markdown */
 .md-h1{font-size:1.5em;font-weight:800;margin:.5em 0 .2em}
@@ -147,8 +166,10 @@ table.org-table td.title-cell{cursor:pointer;font-weight:600}
 .md-code{background:var(--bg-soft);padding:1px 5px;border-radius:4px;font-family:ui-monospace,Consolas,monospace}
 .md-checkbox{margin-right:6px}
 mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-p{background:var(--mark-p)} mark.mk-b{background:var(--mark-b)}
-.md-table{border-collapse:collapse;margin:.4em 0}
-.md-table td,.md-table th{border:1px solid var(--border);padding:4px 8px}
+.md-table{border-collapse:collapse;margin:.4em 0;width:100%}
+.md-table td,.md-table th{border:1px solid var(--border);padding:5px 9px}
+.md-table tr:nth-child(even) td{background:var(--bg-soft)}
+.md-img{max-width:100%;border-radius:8px;margin:.4em 0;display:block;border:1px solid var(--border)}
 
 /* drawers / modals */
 .drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:300;display:flex;justify-content:flex-end}
@@ -170,8 +191,12 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .tpl-card{border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:10px;background:var(--bg-elev)}
 .hist-entry{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin:6px 0}
 .hist-entry ul{list-style:none;margin:6px 0 0;padding:0}
-.hist-entry li{padding:2px 0;display:flex;gap:6px;align-items:center;cursor:pointer}
-.hist-entry li.done{text-decoration:line-through;color:var(--text-dim)}
+.hist-entry li{padding:3px 0;display:flex;gap:6px;align-items:center}
+.hist-entry li span.done{text-decoration:line-through;color:var(--text-dim)}
+.hist-entry li span{flex:1}
+.hist-note{width:150px;font-size:12px;padding:3px 6px}
+.fill-row{display:flex;gap:6px;align-items:center;margin:6px 0}
+.fill-row input[type=text]{font-size:13px}
 
 /* toast */
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 16px;border-radius:20px;font-size:13px;z-index:999;opacity:0;pointer-events:none;transition:opacity .2s}
@@ -184,6 +209,9 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
   aside{position:fixed;left:0;top:49px;bottom:0;z-index:150;transform:translateX(-105%);transition:transform var(--transition)}
   aside.open{transform:translateX(0)}
   .split-wrap{flex-direction:column}
+  .split-left{flex:none!important;height:44vh;padding-right:0}
+  .split-handle{display:none}
+  .split-right{padding-left:0}
   #editorPanel{width:100%}
 }
 
@@ -225,6 +253,11 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
       <button id="vwSplit" onclick="setView('split')" title="Dividido">⚌</button>
     </div>
     <div class="spacer"></div>
+    <button class="icon-btn no-print" onclick="quickFlag('task')" title="Marcar/quitar #task" style="color:#4a6fa5">⚑</button>
+    <button class="icon-btn no-print" onclick="quickFlag('importante')" title="Marcar/quitar #importante" style="color:#b3432b">★</button>
+    <button class="icon-btn no-print" onclick="quickFlag('noolvidar')" title="Marcar/quitar #noolvidar" style="color:#7d5ba6">⚠</button>
+    <button class="icon-btn no-print" onclick="openHelpSheet()" title="Comandos y etiquetas (/ayuda)">❔</button>
+    <button class="icon-btn no-print" onclick="openBlockTables()" title="Tablas por bloque">🧩</button>
     <button class="icon-btn no-print" onclick="cycleTheme()" title="Cambiar tema" id="btnTheme">🌓</button>
     <button class="icon-btn no-print" onclick="openAIDrawer()" title="Asistente IA">✨</button>
     <button class="icon-btn no-print" onclick="openChecklists()" title="Checklists">☑️</button>
@@ -236,9 +269,12 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
   <div class="layout">
     <aside id="sidebar">
       <h3>Cuaderno activo</h3>
-      <div class="nb-item" id="nbNone" onclick="setActiveNotebook('')">— Sin cuaderno —</div>
+      <div class="nb-item" id="nbNone" onclick="setActiveNotebook('')">📥 Inbox <span class="cnt" id="inboxCount"></span></div>
       <div id="notebookList"></div>
       <button class="mini-btn" onclick="promptNewNotebook()">+ nuevo cuaderno</button>
+
+      <h3>Banderas rápidas</h3>
+      <div id="flagCloud"></div>
 
       <h3>Etiquetas</h3>
       <div id="tagCloud"></div>
@@ -259,17 +295,19 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 /* ============ Estado y almacenamiento ============ */
 let GAS_URL = localStorage.getItem('org_gas_url') || '';
 let SHEET_ID = localStorage.getItem('org_sheet_id') || '';
-let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[] };
+let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[] };
+const FLAG_TAGS = [['task','⚑ tarea','#4a6fa5'],['importante','★ importante','#b3432b'],['noolvidar','⚠ no olvidar','#7d5ba6']];
 let currentView = localStorage.getItem('org_view') || 'cards';
 let activeNotebook = localStorage.getItem('org_active_notebook') || '';
 let activeTagFilters = new Set();
 let sortState = { col:'Fecha', dir:'desc' };
 let editingNoteId = null;
 let editingCornell = false;
-let cursorFieldFocus = 'main'; // 'main' | 'cue'
 let aiLastResult = '';
 let aiLastOriginal = '';
 let aiLastMode = '';
+let splitRatio = parseFloat(localStorage.getItem('org_split_ratio')||'38');
+let showPreview = localStorage.getItem('org_show_preview')!=='0';
 
 function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(36).slice(2)); }
 function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._toastT); window._toastT=setTimeout(()=>t.classList.remove('show'),2400); }
@@ -345,11 +383,19 @@ async function syncNow(manual){
     if(r && r.ok){
       DATA = normalizeData(r.data);
       localStorage.setItem('org_data_cache', JSON.stringify(DATA));
-      renderAll();
+      // No reconstruir la nota abierta a media edición — eso le borraba el
+      // cursor/foco y se sentía como que "la nota se cierra sola". La
+      // barra lateral sí es segura de refrescar siempre.
+      renderSidebar();
+      if(!isEditingActive()) renderMain();
+      updateSyncIndicator();
     }
     if(manual) showToast(loadQueue().length ? '⚠ Aún hay cambios sin sincronizar' : '☁️ Sincronizado');
   }catch(e){ if(manual) showToast('Sin conexión'); }
   finally{ _syncing=false; updateSyncIndicator(); }
+}
+function isEditingActive(){
+  return !!document.getElementById('editorOverlay') || (currentView==='split' && !!editingNoteId);
 }
 function updateSyncIndicator(){
   const dot = document.getElementById('syncDot'); const lbl = document.getElementById('syncLabel');
@@ -368,12 +414,13 @@ function normalizeData(d){
   return {
     notas: d.notas||[], tags: d.tags||[], notebooks: d.notebooks||[],
     plantillas: d.plantillas||[], historial: d.historial||[],
-    diccionario: d.diccionario||[], feedback: d.feedback||[]
+    diccionario: d.diccionario||[], feedback: d.feedback||[],
+    bloque_tablas: d.bloque_tablas||[]
   };
 }
 
 /* ============ CRUD genérico local + remoto ============ */
-const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback' };
+const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas' };
 function cacheData(){ try{ localStorage.setItem('org_data_cache', JSON.stringify(DATA)); }catch(e){} }
 async function saveEntity(table, obj){
   if(!obj.ID) obj.ID = uid();
@@ -407,6 +454,8 @@ function effectiveTags(note){
   return Array.from(new Set([...own, ...inh]));
 }
 function tagColor(name){
+  const flag = FLAG_TAGS.find(f=>f[0]===name);
+  if(flag) return flag[2];
   const t = DATA.tags.find(x=>x.Etiqueta===name);
   return (t && t.Color) || '#8a5a3b';
 }
@@ -430,6 +479,44 @@ function allDynamicKeys(){
   return Array.from(keys);
 }
 
+/* ============ Bloques: cada párrafo de una nota es su propio "bloque"
+   direccionable, con sus propias etiquetas + las heredadas de la nota/
+   cuaderno — se calcula al vuelo desde el texto, no se duplica en el Sheet,
+   así no hay que sincronizar dos copias de lo mismo. ============ */
+function getNoteBlocks(note){
+  const inherited = Array.from(new Set([...parseTagsText(note.Tags), ...notebookInherited(note.Notebook)]));
+  let paragraphs;
+  if(note.Cornell==='1'){
+    paragraphs = cornellPairsFromNote(note).map(p=>(p.cue?p.cue+': ':'')+(p.texto||''));
+  } else {
+    paragraphs = (note.Contenido||'').split(/\n\s*\n/);
+  }
+  return paragraphs.map((text,i)=>{
+    const own = Array.from(new Set((text.match(/#([a-zA-Z0-9_:-]+)/g)||[]).map(t=>t.slice(1))));
+    return { noteId: note.ID, noteTitle: note.Titulo||'(sin título)', index:i, text: text.trim(),
+      ownTags: own, effectiveTags: Array.from(new Set([...own, ...inherited])) };
+  }).filter(b=>b.text);
+}
+function allBlocks(){ return DATA.notas.flatMap(n=>getNoteBlocks(n)); }
+function blockKeyValueTags(block){
+  const out = {};
+  block.effectiveTags.forEach(t=>{
+    const m = t.match(/^([a-zA-Z0-9\-]+):(.+)$/);
+    if(m) out[m[1]] = m[2];
+  });
+  return out;
+}
+
+/* ============ Inbox: notas sin cuaderno que se auto-enrutan cuando llevan
+   la etiqueta configurada como "TagAuto" de algún cuaderno. ============ */
+function autoRouteNotebook(note){
+  if(note.Notebook) return note;
+  const tags = new Set(parseTagsText(note.Tags));
+  const target = DATA.notebooks.find(nb => nb.TagAuto && tags.has(String(nb.TagAuto).replace(/^#/,'')));
+  if(target){ note.Notebook = target.Nombre; showToast('📥→📓 Se movió a "'+target.Nombre+'"'); }
+  return note;
+}
+
 /* ============ Sidebar ============ */
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); }
 function setActiveNotebook(name){
@@ -448,13 +535,22 @@ function renderSidebar(){
   nbList.innerHTML = DATA.notebooks.map(nb=>{
     const cnt = DATA.notas.filter(n=>n.Notebook===nb.Nombre).length;
     return `<div class="nb-item ${activeNotebook===nb.Nombre?'active':''}" onclick="setActiveNotebook('${escAttr(nb.Nombre)}')">
-      <span class="nb-dot" style="background:${nb.Color||'#8a5a3b'}"></span>${escHtml(nb.Nombre)}<span class="cnt">${cnt}</span>
+      <span class="nb-dot" style="background:${nb.Color||'#8a5a3b'}"></span>${escHtml(nb.Nombre)}${nb.TagAuto?' <small title="se auto-enruta desde el Inbox con #'+escAttr(nb.TagAuto)+'">🔀</small>':''}<span class="cnt">${cnt}</span>
     </div>`;
   }).join('');
   document.getElementById('nbNone').classList.toggle('active', activeNotebook==='');
+  document.getElementById('inboxCount').textContent = DATA.notas.filter(n=>!n.Notebook).length;
+
+  const fc = document.getElementById('flagCloud');
+  fc.innerHTML = FLAG_TAGS.map(([t,label,color])=>{
+    const on = activeTagFilters.has(t);
+    return `<div class="tag-chip-row" style="${on?'background:var(--bg-soft);font-weight:700':''}" onclick="toggleTagFilter('${t}')">
+      <span class="nb-dot" style="background:${color}"></span>${label}<span class="cnt">${allTagsWithCounts().find(([tg])=>tg===t)?.[1]||0}</span>
+    </div>`;
+  }).join('');
 
   const tc = document.getElementById('tagCloud');
-  tc.innerHTML = allTagsWithCounts().map(([t,c])=>{
+  tc.innerHTML = allTagsWithCounts().filter(([t])=>!FLAG_TAGS.some(f=>f[0]===t)).map(([t,c])=>{
     const on = activeTagFilters.has(t);
     return `<div class="tag-chip-row" style="${on?'background:var(--bg-soft);font-weight:700':''}" onclick="toggleTagFilter('${escAttr(t)}')">
       <span class="nb-dot" style="background:${tagColor(t)}"></span>#${escHtml(t)}<span class="cnt">${c}</span>
@@ -462,9 +558,24 @@ function renderSidebar(){
   }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin etiquetas todavía</p>';
 
   const tq = document.getElementById('tplQuickList');
-  tq.innerHTML = DATA.plantillas.slice(0,5).map(p=>`<div class="mini-btn" style="margin-bottom:4px" onclick="fillTemplateUI('${p.ID}')">▶ ${escHtml(p.Nombre)}</div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas</p>';
+  tq.innerHTML = DATA.plantillas.slice(0,5).map(p=>`<div class="mini-btn" style="margin-bottom:4px" onclick="openFillModal('${p.ID}')">▶ ${escHtml(p.Nombre)}</div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas</p>';
 }
 function toggleTagFilter(t){ activeTagFilters.has(t) ? activeTagFilters.delete(t) : activeTagFilters.add(t); renderSidebar(); renderMain(); }
+
+/* Banderas rápidas: si hay una nota abierta, marcan/quitan la etiqueta de
+   esa nota; si no hay ninguna abierta, actúan como filtro rápido lateral. */
+function quickFlag(tag){
+  const tagsEl = document.getElementById('noteTags');
+  if(tagsEl){
+    const cur = parseTagsText(tagsEl.value);
+    const has = cur.includes(tag);
+    tagsEl.value = has ? cur.filter(t=>t!==tag).join(' ') : (tagsEl.value.trim()+' #'+tag).trim();
+    scheduleSave(); showToast((has?'Quitada #':'Agregada #')+tag);
+    ensureTagsRegistered('#'+tag);
+    return;
+  }
+  toggleTagFilter(tag);
+}
 
 function escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function escAttr(s){ return escHtml(s).replace(/`/g,'&#96;'); }
@@ -481,7 +592,7 @@ function getFilteredSortedNotes(){
       for(const t of activeTagFilters) if(!et.includes(t)) return false;
     }
     if(q){
-      const hay = (n.Titulo+' '+n.Contenido+' '+n.Tags).toLowerCase();
+      const hay = (n.Titulo+' '+noteSnippetText(n)+' '+n.Tags).toLowerCase();
       if(!hay.includes(q)) return false;
     }
     return true;
@@ -517,7 +628,11 @@ function cardsHTML(notes){
 }
 function noteCardHTML(n){
   const tags = effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)}">#${escHtml(t)}</span>`).join('');
-  const snip = (n.Contenido||'').replace(/[#*`>_-]/g,'').slice(0,140);
+  const snip = noteSnippetText(n)
+    .replace(/!\[.*?\]\(.*?\)/g,'🖼️')
+    .replace(/==\((?:y|g|p|b)\)(.+?)==\)/g,'$1')
+    .replace(/\{\{color:#?\w+\|(.+?)\}\}/g,'$1')
+    .replace(/[#*`>_-]/g,'').slice(0,140);
   return `<div class="note-card" onclick="openNoteEditor('${n.ID}')" style="${n.Color?('border-left:4px solid '+n.Color):''}">
     <div class="nc-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}</div>
     <div class="nc-snip">${escHtml(snip)}</div>
@@ -549,12 +664,34 @@ function tableHTML(notes){
 function sortBy(col){ if(sortState.col===col) sortState.dir = sortState.dir==='asc'?'desc':'asc'; else { sortState.col=col; sortState.dir='asc'; } renderMain(); }
 
 function splitHTML(notes){
-  return `<div class="split-wrap">
-    <div class="split-left">${cardsHTML(notes)}</div>
+  return `<div class="split-wrap" id="splitWrap">
+    <div class="split-left" id="splitLeft" style="flex:0 0 ${splitRatio}%">${cardsHTML(notes)}</div>
+    <div class="split-handle" id="splitHandle"></div>
     <div class="split-right" id="splitDetail">${editingNoteId ? noteDetailHTML(getNote(editingNoteId)) : '<p style="color:var(--text-dim)">Selecciona una nota para editarla aquí.</p>'}</div>
   </div>`;
 }
 function getNote(id){ return DATA.notas.find(n=>n.ID===id); }
+
+/* separador arrastrable de la vista dividida — delegado en document así no
+   hay que volver a atarlo cada vez que splitHTML reconstruye el DOM */
+let _splitDragging = false;
+function initSplitResizerOnce(){
+  const onMove = (clientX)=>{
+    if(!_splitDragging) return;
+    const wrap = document.getElementById('splitWrap'); const left = document.getElementById('splitLeft');
+    if(!wrap || !left) return;
+    const rect = wrap.getBoundingClientRect();
+    let pct = ((clientX-rect.left)/rect.width)*100;
+    pct = Math.max(20, Math.min(70, pct));
+    splitRatio = pct; left.style.flex = '0 0 '+pct+'%';
+  };
+  document.addEventListener('mousedown', e=>{ if(e.target && e.target.id==='splitHandle'){ _splitDragging=true; e.preventDefault(); } });
+  document.addEventListener('mousemove', e=>onMove(e.clientX));
+  document.addEventListener('mouseup', ()=>{ if(_splitDragging){ _splitDragging=false; localStorage.setItem('org_split_ratio', splitRatio); } });
+  document.addEventListener('touchstart', e=>{ if(e.target && e.target.id==='splitHandle'){ _splitDragging=true; } }, {passive:true});
+  document.addEventListener('touchmove', e=>{ if(_splitDragging && e.touches[0]) onMove(e.touches[0].clientX); }, {passive:true});
+  document.addEventListener('touchend', ()=>{ if(_splitDragging){ _splitDragging=false; localStorage.setItem('org_split_ratio', splitRatio); } });
+}
 
 /* ============ Editor de notas ============ */
 function newBlankNote(){
@@ -582,11 +719,12 @@ function closeNoteEditor(){
 }
 function editorInnerHTML(note, isModal){
   editingCornell = note.Cornell==='1'||note.Cornell===1;
+  if(editingCornell) window._cornellPairs = cornellPairsFromNote(note);
   const nbOptions = ['<option value="">— sin cuaderno —</option>'].concat(DATA.notebooks.map(nb=>`<option value="${escAttr(nb.Nombre)}" ${note.Notebook===nb.Nombre?'selected':''}>${escHtml(nb.Nombre)}</option>`)).join('');
   return `
   <div class="editor-top">
     <input id="noteTitle" value="${escAttr(note.Titulo)}" placeholder="Título de la nota">
-    <button class="icon-btn" onclick="toggleCornell()" title="Plantilla Cornell">📐</button>
+    <button class="icon-btn ${editingCornell?'active':''}" onclick="toggleCornell()" title="Plantilla Cornell">📐</button>
     <button class="icon-btn" onclick="duplicateNoteUI()" title="Duplicar">📄</button>
     <button class="icon-btn" onclick="copyNoteUI()" title="Copiar texto">📋</button>
     <button class="icon-btn" onclick="exportNotePDF(editingNoteId)" title="Exportar PDF">🖨️</button>
@@ -601,9 +739,10 @@ function editorInnerHTML(note, isModal){
       <div id="tagSuggest" class="tag-suggest hidden"></div>
     </div>
     <input type="color" id="noteColor" value="${note.Color||'#8a5a3b'}" title="Color de la nota">
-    <button class="icon-btn" onclick="linkLocalFile()" title="Vincular archivo local (OneDrive)">📎</button>
-    <span id="fileChipWrap">${note.Archivo?`<span class="file-chip">📎 ${escHtml(note.Archivo)} <a href="#" onclick="openLinkedFile(event)">abrir</a></span>`:''}</span>
+    <button class="icon-btn" onclick="pickFilesForNote()" title="Vincular archivo(s)">📎</button>
+    <button class="icon-btn" onclick="pickFolderForNote()" title="Vincular carpeta">📁</button>
   </div>
+  <div class="editor-meta" id="fileChipWrap" style="flex-wrap:wrap">${linksChipsHTML(getNoteLinks(note))}</div>
   <div class="editor-toolbar">
     <button class="icon-btn" onclick="wrapSel('**','**')" title="Negrita"><b>B</b></button>
     <button class="icon-btn" onclick="wrapSel('*','*')" title="Cursiva"><i>I</i></button>
@@ -614,19 +753,18 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" onclick="linePrefix('- ')" title="Viñeta">•</button>
     <button class="icon-btn" onclick="linePrefix('- [ ] ')" title="Casilla">☑</button>
     <button class="icon-btn" onclick="insertTable()" title="Tabla">▦</button>
-    <button class="icon-btn" onclick="triggerImage()" title="Imagen / OCR">🖼️</button>
+    <button class="icon-btn" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V)">🖼️</button>
     <span class="sep"></span>
-    <button class="icon-btn" onclick="toggleSwatches('mark')" title="Resaltar">🖍️</button>
-    <button class="icon-btn" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
+    <button class="icon-btn" id="btnMark" onclick="toggleSwatches('mark')" title="Resaltar">🖍️</button>
+    <button class="icon-btn" id="btnColor" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
     <span class="sep"></span>
-    <button class="icon-btn" id="btnPreview" onclick="togglePreview()" title="Vista previa">👁️</button>
+    <button class="icon-btn ${showPreview?'active':''}" id="btnPreview" onclick="togglePreviewPane()" title="Vista previa">👁️</button>
     <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">
   </div>
   <div id="swatchBar" class="swatch-row hidden"></div>
-  <div class="editor-body ${editingCornell?'cornell':''}" id="editorBody">
-    ${editingCornell?`<textarea id="cueArea" placeholder="Conceptos clave…" onfocus="cursorFieldFocus='cue'">${escHtml(note.CornellCue)}</textarea>`:''}
-    <textarea id="mainArea" placeholder="Escribe aquí… (Markdown: **negrita**, *cursiva*, # título, - [ ] tarea)" onfocus="cursorFieldFocus='main'">${escHtml(note.Contenido)}</textarea>
-    <div id="previewPane" class="editor-preview hidden"></div>
+  <div class="editor-body ${showPreview?'':'no-preview'}" id="editorBody">
+    ${editingCornell ? cornellEditorHTML() : `<textarea id="mainArea" placeholder="Escribe aquí… (Markdown: **negrita**, *cursiva*, # título, - [ ] tarea)">${escHtml(note.Contenido)}</textarea>`}
+    <div id="previewPane" class="editor-preview"></div>
   </div>
   <div class="editor-bottom">
     <span id="saveStatus">Guardado</span>
@@ -641,7 +779,14 @@ function togglePin(){
 }
 function toggleCornell(){
   const note = collectNoteFromForm();
-  note.Cornell = editingCornell ? '' : '1';
+  if(editingCornell){
+    const pairs = window._cornellPairs || [];
+    note.Contenido = pairs.filter(p=>p.cue||p.texto).map(p=> (p.cue?('**'+p.cue+':** '):'') + (p.texto||'') ).join('\n\n');
+    note.Cornell=''; note.CornellCue='';
+  } else {
+    window._cornellPairs = [{ cue:'', texto: note.Contenido||'' }];
+    note.Cornell='1';
+  }
   persistCurrentNote(note);
   reopenEditorFor(note);
 }
@@ -660,10 +805,13 @@ function collectNoteFromForm(){
   if(tagsEl) base.Tags = tagsEl.value;
   const colorEl = document.getElementById('noteColor');
   if(colorEl) base.Color = colorEl.value;
-  const mainEl = document.getElementById('mainArea');
-  if(mainEl) base.Contenido = mainEl.value;
-  const cueEl = document.getElementById('cueArea');
-  if(cueEl) base.CornellCue = cueEl.value;
+  if(editingCornell){
+    base.Contenido = JSON.stringify((window._cornellPairs||[]).filter(p=>p.cue||p.texto));
+    base.CornellCue = '';
+  } else {
+    const mainEl = document.getElementById('mainArea');
+    if(mainEl) base.Contenido = mainEl.value;
+  }
   return base;
 }
 let _saveDebounce=null;
@@ -679,6 +827,7 @@ function scheduleSave(){
 }
 async function persistCurrentNote(note){
   const isNew = !note.ID;
+  autoRouteNotebook(note);
   const saved = await saveEntity('NOTAS', note);
   editingNoteId = saved.ID;
   ensureTagsRegistered(saved.Tags);
@@ -692,15 +841,20 @@ function ensureTagsRegistered(tagsStr){
   });
 }
 function bindEditorEvents(note){
-  ['noteTitle','noteNotebook','noteTags','noteColor','mainArea','cueArea'].forEach(id=>{
+  ['noteTitle','noteNotebook','noteTags','noteColor'].forEach(id=>{
     const el = document.getElementById(id); if(!el) return;
     el.addEventListener('input', scheduleSave);
     el.addEventListener('change', scheduleSave);
   });
   const mainEl = document.getElementById('mainArea');
-  if(mainEl) mainEl.addEventListener('keydown', handleMdKeydown);
+  if(mainEl){
+    mainEl.addEventListener('keydown', handleMdKeydown);
+    mainEl.addEventListener('input', ()=>{ scheduleSave(); schedulePreview(); });
+    bindPasteImages(mainEl);
+  }
   const tagsEl = document.getElementById('noteTags');
   if(tagsEl){ tagsEl.addEventListener('input', showTagSuggest); tagsEl.addEventListener('blur', ()=>setTimeout(hideTagSuggest,150)); }
+  updatePreview();
 }
 function showTagSuggest(){
   const el = document.getElementById('noteTags'); const box = document.getElementById('tagSuggest');
@@ -739,16 +893,41 @@ function handleMdKeydown(e){
     ta.value = val.slice(0,pos)+insert+val.slice(pos);
     ta.selectionStart = ta.selectionEnd = pos+insert.length;
   }
-  scheduleSave();
+  scheduleSave(); schedulePreview();
 }
-function activeTextarea(){ return document.getElementById(cursorFieldFocus==='cue'?'cueArea':'mainArea') || document.getElementById('mainArea'); }
+function activeTextarea(){
+  if(editingCornell){
+    const af = window._activeCornellField;
+    const el = af && document.getElementById('cornell'+(af.field==='cue'?'Cue':'Texto')+'-'+af.i);
+    return el || document.getElementById('cornellTexto-0');
+  }
+  return document.getElementById('mainArea');
+}
+function syncCornellFromTextarea(ta){
+  if(!editingCornell || !ta || !ta.id) return;
+  const m = ta.id.match(/^cornell(Cue|Texto)-(\d+)$/);
+  if(!m) return;
+  const field = m[1]==='Cue' ? 'cue' : 'texto';
+  const i = parseInt(m[2],10);
+  if(window._cornellPairs[i]) window._cornellPairs[i][field] = ta.value;
+}
 function wrapSel(pre,post){
   const ta = activeTextarea(); if(!ta) return;
   const s=ta.selectionStart, e=ta.selectionEnd; const val=ta.value;
   const sel = val.slice(s,e) || 'texto';
-  ta.value = val.slice(0,s)+pre+sel+post+val.slice(e);
-  ta.selectionStart = s+pre.length; ta.selectionEnd = s+pre.length+sel.length;
-  ta.focus(); scheduleSave();
+  // Estos envoltorios (negrita, resaltar, color…) se procesan línea por
+  // línea en la vista previa — si la selección cruza varias líneas hay que
+  // envolver cada línea por separado, si no el cierre "==)" queda solo en
+  // la última línea y ninguna línea individual hace match al renderizar.
+  let wrapped;
+  if(sel.indexOf('\n')>=0){
+    wrapped = sel.split('\n').map(line=> line.trim() ? (pre+line+post) : line).join('\n');
+  } else {
+    wrapped = pre+sel+post;
+  }
+  ta.value = val.slice(0,s)+wrapped+val.slice(e);
+  ta.selectionStart = s; ta.selectionEnd = s+wrapped.length;
+  ta.focus(); syncCornellFromTextarea(ta); scheduleSave(); updatePreview();
 }
 function linePrefix(prefix){
   const ta = activeTextarea(); if(!ta) return;
@@ -756,28 +935,52 @@ function linePrefix(prefix){
   const lineStart = val.lastIndexOf('\n', s-1)+1;
   ta.value = val.slice(0,lineStart)+prefix+val.slice(lineStart);
   ta.selectionStart = ta.selectionEnd = s+prefix.length;
-  ta.focus(); scheduleSave();
+  ta.focus(); syncCornellFromTextarea(ta); scheduleSave(); updatePreview();
 }
 function insertTable(){
   const tpl = '\n| Col 1 | Col 2 |\n| --- | --- |\n| a | b |\n';
-  const ta = activeTextarea(); const s=ta.selectionStart; const val=ta.value;
-  ta.value = val.slice(0,s)+tpl+val.slice(s); ta.focus(); scheduleSave();
+  const ta = activeTextarea(); if(!ta) return;
+  const s=ta.selectionStart; const val=ta.value;
+  ta.value = val.slice(0,s)+tpl+val.slice(s); ta.focus();
+  syncCornellFromTextarea(ta); scheduleSave(); updatePreview();
 }
 function toggleSwatches(kind){
   const bar = document.getElementById('swatchBar');
-  const marks = kind==='mark' ? [['y','#fbe28a'],['g','#bfe3b0'],['p','#f0bcd8'],['b','#b9d8f2']] : [['#8a5a3b'],['#b3432b'],['#3d7a4f'],['#4a6fa5'],['#7d5ba6']];
-  bar.innerHTML = marks.map(m=>`<span class="swatch" style="background:${kind==='mark'?m[1]:m[0]}" onclick="${kind==='mark'?`applyMark('${m[0]}')`:`wrapSel('{{color:${m[0]}|','}}')`}"></span>`).join('');
-  bar.classList.toggle('hidden');
+  if(bar.dataset.kind===kind && !bar.classList.contains('hidden')){ bar.classList.add('hidden'); return; }
+  bar.dataset.kind = kind;
+  bar.innerHTML = '';
+  const options = kind==='mark'
+    ? [['y','#fbe28a'],['g','#bfe3b0'],['p','#f0bcd8'],['b','#b9d8f2']]
+    : [['#8a5a3b','#8a5a3b'],['#b3432b','#b3432b'],['#3d7a4f','#3d7a4f'],['#4a6fa5','#4a6fa5'],['#7d5ba6','#7d5ba6']];
+  options.forEach(([code,color])=>{
+    const sw = document.createElement('span');
+    sw.className='swatch'; sw.style.background=color;
+    sw.addEventListener('click', ()=>{
+      if(kind==='mark') applyMark(code); else applyTextColor(color);
+      bar.classList.add('hidden');
+    });
+    bar.appendChild(sw);
+  });
+  bar.classList.remove('hidden');
 }
-function applyMark(code){ wrapSel('==('+code+')', '==)'); document.getElementById('swatchBar').classList.add('hidden'); }
-function togglePreview(){
-  const pane = document.getElementById('previewPane'); const main = document.getElementById('mainArea'); const cue = document.getElementById('cueArea');
-  const showing = !pane.classList.contains('hidden');
-  if(showing){ pane.classList.add('hidden'); if(main) main.classList.remove('hidden'); if(cue) cue.classList.remove('hidden'); }
-  else{
-    const note = collectNoteFromForm();
-    pane.innerHTML = mdToHtml(note.Contenido) + (editingCornell? ('<hr><b>Conceptos clave</b>'+mdToHtml(note.CornellCue)) : '');
-    pane.classList.remove('hidden'); if(main) main.classList.add('hidden'); if(cue) cue.classList.add('hidden');
+function applyMark(code){ wrapSel('==('+code+')', '==)'); }
+function applyTextColor(hex){ wrapSel('{{color:'+hex+'|', '}}'); }
+function togglePreviewPane(){
+  showPreview = !showPreview;
+  localStorage.setItem('org_show_preview', showPreview?'1':'0');
+  const body = document.getElementById('editorBody'); if(body) body.classList.toggle('no-preview', !showPreview);
+  const btn = document.getElementById('btnPreview'); if(btn) btn.classList.toggle('active', showPreview);
+  if(showPreview) updatePreview();
+}
+let _previewDebounce=null;
+function schedulePreview(){ clearTimeout(_previewDebounce); _previewDebounce = setTimeout(updatePreview, 120); }
+function updatePreview(){
+  const pane = document.getElementById('previewPane'); if(!pane) return;
+  if(editingCornell){
+    pane.innerHTML = mdToHtmlCornell(window._cornellPairs||[]);
+  } else {
+    const mainEl = document.getElementById('mainArea');
+    pane.innerHTML = mdToHtml(mainEl ? mainEl.value : '');
     pane.querySelectorAll('input[type=checkbox]').forEach((cb,i)=>{
       cb.addEventListener('change', ()=>toggleChecklistInText(i));
     });
@@ -787,7 +990,7 @@ function toggleChecklistInText(index){
   const ta = document.getElementById('mainArea'); if(!ta) return;
   let count=-1;
   ta.value = ta.value.replace(/- \[( |x)\]/g, m=>{ count++; if(count===index) return m===('- [ ]')?'- [x]':'- [ ]'; return m; });
-  scheduleSave(); togglePreview(); togglePreview();
+  scheduleSave(); updatePreview();
 }
 
 /* ============ Markdown → HTML (parser propio, ligero) ============ */
@@ -809,6 +1012,8 @@ function mdToHtml(src){
     const line = raw;
     if(/^\s*\|.*\|\s*$/.test(line)){ inTable=true; tableRows.push(line.trim()); continue; }
     else if(inTable) flushTable();
+    const img = line.match(/^!\[(.*?)\]\((\S+?)\)\s*$/);
+    if(img){ html+='<img class="md-img" src="'+escHtml(img[2])+'" alt="'+escHtml(img[1])+'">'; continue; }
     if(/^# (.*)/.test(line)){ html+='<div class="md-h1">'+inlineMd(line.replace(/^# /,''))+'</div>'; continue; }
     if(/^## (.*)/.test(line)){ html+='<div class="md-h2">'+inlineMd(line.replace(/^## /,''))+'</div>'; continue; }
     if(/^### (.*)/.test(line)){ html+='<div class="md-h3">'+inlineMd(line.replace(/^### /,''))+'</div>'; continue; }
@@ -836,6 +1041,78 @@ function inlineMd(t){
   return t;
 }
 
+/* ============ Cornell: filas cue/texto pareadas y realmente alineadas ============ */
+function cornellPairsFromNote(note){
+  if(note.Cornell==='1'){
+    try{
+      const parsed = JSON.parse(note.Contenido||'[]');
+      if(Array.isArray(parsed) && parsed.length) return parsed;
+    }catch(e){}
+    if(note.CornellCue || note.Contenido) return [{cue:note.CornellCue||'', texto:note.Contenido||''}];
+  }
+  return [{cue:'',texto:''}];
+}
+function cornellRowHTML(p,i){
+  return `<div class="cornell-row" data-i="${i}">
+    <input type="text" class="cornell-cue" id="cornellCue-${i}" value="${escAttr(p.cue)}" placeholder="concepto clave"
+      oninput="cornellChange(${i},'cue',this.value)" onfocus="window._activeCornellField={i:${i},field:'cue'}">
+    <textarea id="cornellTexto-${i}" placeholder="desarrollo…"
+      oninput="cornellChange(${i},'texto',this.value)" onfocus="window._activeCornellField={i:${i},field:'texto'}"
+      onpaste="handleCornellPaste(event,${i})">${escHtml(p.texto)}</textarea>
+    <button class="icon-btn" onclick="removeCornellRow(${i})" title="Quitar fila">🗑️</button>
+  </div>`;
+}
+function cornellEditorHTML(){
+  return `<div class="cornell-editor-wrap">
+    <div class="cornell-rows" id="cornellRows">${(window._cornellPairs||[]).map((p,i)=>cornellRowHTML(p,i)).join('')}</div>
+    <button class="mini-btn" onclick="addCornellRow()">+ agregar fila (cue + texto)</button>
+  </div>`;
+}
+function renderCornellRows(){
+  const el = document.getElementById('cornellRows'); if(!el) return;
+  el.innerHTML = window._cornellPairs.map((p,i)=>cornellRowHTML(p,i)).join('');
+}
+function handleCornellPaste(e, i){
+  const items = e.clipboardData && e.clipboardData.items; if(!items) return;
+  for(const item of items){
+    if(item.type && item.type.indexOf('image/')===0){
+      e.preventDefault();
+      window._activeCornellField = {i, field:'texto'};
+      const file = item.getAsFile();
+      if(file) insertImage(file);
+      return;
+    }
+  }
+}
+function cornellChange(i, field, val){
+  if(!window._cornellPairs[i]) return;
+  window._cornellPairs[i][field] = val;
+  schedulePreview(); scheduleSave();
+}
+function addCornellRow(){
+  window._cornellPairs.push({cue:'',texto:''});
+  renderCornellRows(); scheduleSave();
+  const el = document.getElementById('cornellCue-'+(window._cornellPairs.length-1)); if(el) el.focus();
+}
+function removeCornellRow(i){
+  window._cornellPairs.splice(i,1);
+  if(!window._cornellPairs.length) window._cornellPairs=[{cue:'',texto:''}];
+  renderCornellRows(); scheduleSave(); updatePreview();
+}
+function mdToHtmlCornell(pairs){
+  if(!pairs || !pairs.length) return '<p style="color:var(--text-dim)">Sin contenido todavía</p>';
+  return '<div class="cornell-preview">' + pairs.map(p=>
+    `<div class="cornell-prow"><div class="cornell-pcue">${mdToHtml(p.cue||'')}</div><div class="cornell-ptexto">${mdToHtml(p.texto||'')}</div></div>`
+  ).join('') + '</div>';
+}
+function noteSnippetText(n){
+  if(n.Cornell==='1'){
+    try{ const pairs = JSON.parse(n.Contenido||'[]'); if(Array.isArray(pairs)) return pairs.map(p=>(p.cue?p.cue+': ':'')+(p.texto||'')).join(' '); }catch(e){}
+    return '';
+  }
+  return n.Contenido||'';
+}
+
 /* ============ Acciones de nota ============ */
 function duplicateNoteUI(){
   const note = collectNoteFromForm();
@@ -858,9 +1135,10 @@ function exportNotePDF(id){
   const note = id ? getNote(id) : collectNoteFromForm();
   if(!note){ showToast('Nada que exportar'); return; }
   const area = document.getElementById('printArea');
+  const body = note.Cornell==='1' ? mdToHtmlCornell(cornellPairsFromNote(note)) : mdToHtml(note.Contenido);
   area.innerHTML = `<h1>${escHtml(note.Titulo||'(sin título)')}</h1>
     <p style="color:#666;font-size:12px">${fmtDate(note.Fecha)} · ${escHtml(note.Notebook||'')} · ${effectiveTags(note).map(t=>'#'+t).join(' ')}</p>
-    ${note.Cornell==='1' ? `<div style="display:grid;grid-template-columns:1fr 2fr;gap:16px"><div style="border-right:1px solid #999;padding-right:10px">${mdToHtml(note.CornellCue)}</div><div>${mdToHtml(note.Contenido)}</div></div>` : mdToHtml(note.Contenido)}`;
+    ${body}`;
   window.print();
 }
 function exportViewPDF(){
@@ -870,7 +1148,10 @@ function exportViewPDF(){
   window.print();
 }
 
-/* ============ Vinculación de archivos locales (File System Access API) ============ */
+/* ============ Vinculación de archivos/carpetas locales (File System Access API) ============
+   Límite real del navegador: no se puede "ver toda la computadora" — solo
+   los archivos/carpetas que tú elijas explícitamente cada vez que Windows
+   pierde el permiso (por seguridad, ningún sitio web puede saltarse esto). */
 function idbOpen(){
   return new Promise((res,rej)=>{
     const r = indexedDB.open('OrganizadorFiles', 1);
@@ -880,50 +1161,175 @@ function idbOpen(){
 }
 async function idbSet(key, val){ const db=await idbOpen(); return new Promise((res,rej)=>{ const tx=db.transaction('handles','readwrite'); tx.objectStore('handles').put(val,key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
 async function idbGet(key){ const db=await idbOpen(); return new Promise((res,rej)=>{ const tx=db.transaction('handles','readonly'); const rq=tx.objectStore('handles').get(key); rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error); }); }
+async function idbDel(key){ const db=await idbOpen(); return new Promise((res,rej)=>{ const tx=db.transaction('handles','readwrite'); tx.objectStore('handles').delete(key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
 
-async function linkLocalFile(){
-  if(!editingNoteId){ const note = collectNoteFromForm(); const saved = await saveEntity('NOTAS', note); editingNoteId = saved.ID; }
+function getNoteLinks(note){
+  if(!note || !note.Archivo) return [];
+  try{ const parsed = JSON.parse(note.Archivo); if(Array.isArray(parsed)) return parsed; }catch(e){}
+  return [{ name: note.Archivo, kind: 'file' }]; // dato viejo de una sola liga en texto plano
+}
+function linksChipsHTML(links){
+  return links.map((l,i)=>`<span class="file-chip">${l.kind==='folder'?'📁':'📎'} ${escHtml(l.name)}
+    <a href="#" onclick="event.preventDefault();openNoteLink(${i})">${l.kind==='folder'?'explorar':'abrir'}</a>
+    <a href="#" onclick="event.preventDefault();removeNoteLink(${i})">✕</a></span>`).join('');
+}
+async function ensureEditingNoteSaved(){
+  if(editingNoteId) return editingNoteId;
+  const note = collectNoteFromForm();
+  const saved = await saveEntity('NOTAS', note);
+  editingNoteId = saved.ID;
+  return editingNoteId;
+}
+async function saveNoteLinks(links){
+  const note = Object.assign({}, getNote(editingNoteId), { Archivo: JSON.stringify(links) });
+  await saveEntity('NOTAS', note);
+  const wrap = document.getElementById('fileChipWrap'); if(wrap) wrap.innerHTML = linksChipsHTML(links);
+}
+async function pickFilesForNote(){
+  await ensureEditingNoteSaved();
   if(!window.showOpenFilePicker){
-    const path = prompt('Tu navegador no permite abrir archivos directamente. Escribe el nombre/ruta del archivo en tu carpeta de OneDrive para dejarlo como referencia:');
+    const path = prompt('Tu navegador no permite abrir archivos directamente. Escribe el nombre/ruta del archivo (de tu carpeta de OneDrive) para dejarlo como referencia:');
     if(!path) return;
-    const note = Object.assign({}, getNote(editingNoteId), { Archivo: path });
-    await saveEntity('NOTAS', note);
-    reopenEditorFor(note); return;
+    const links = getNoteLinks(getNote(editingNoteId)); links.push({name:path, kind:'file'});
+    await saveNoteLinks(links); return;
   }
   try{
-    const [handle] = await window.showOpenFilePicker();
-    await idbSet('file-'+editingNoteId, handle);
-    const note = Object.assign({}, getNote(editingNoteId), { Archivo: handle.name });
-    await saveEntity('NOTAS', note);
-    reopenEditorFor(note); showToast('Archivo vinculado: '+handle.name);
+    const handles = await window.showOpenFilePicker({ multiple:true });
+    const links = getNoteLinks(getNote(editingNoteId));
+    for(const h of handles){ await idbSet('link-'+editingNoteId+'-'+links.length, h); links.push({name:h.name, kind:'file'}); }
+    await saveNoteLinks(links); showToast(handles.length>1 ? 'Archivos vinculados' : 'Archivo vinculado');
   }catch(e){ /* usuario canceló */ }
 }
-async function openLinkedFile(e){
-  e.preventDefault();
+async function pickFolderForNote(){
+  await ensureEditingNoteSaved();
+  if(!window.showDirectoryPicker){ showToast('Tu navegador no permite vincular carpetas completas (usa Chrome/Edge de escritorio)'); return; }
   try{
-    const handle = await idbGet('file-'+editingNoteId);
-    if(!handle){ showToast('Este archivo se vinculó en otro dispositivo/navegador — vuelve a vincularlo aquí con 📎'); return; }
+    const handle = await window.showDirectoryPicker();
+    const links = getNoteLinks(getNote(editingNoteId));
+    await idbSet('link-'+editingNoteId+'-'+links.length, handle);
+    links.push({name:handle.name, kind:'folder'});
+    await saveNoteLinks(links); showToast('Carpeta vinculada: '+handle.name);
+  }catch(e){ /* usuario canceló */ }
+}
+async function removeNoteLink(idx){
+  const links = getNoteLinks(getNote(editingNoteId));
+  links.splice(idx,1);
+  await idbDel('link-'+editingNoteId+'-'+idx);
+  await saveNoteLinks(links);
+}
+async function openNoteLink(idx){
+  try{
+    const handle = await idbGet('link-'+editingNoteId+'-'+idx);
+    if(!handle){ showToast('Se vinculó desde otro dispositivo/navegador — vincúlalo de nuevo aquí'); return; }
+    if(handle.kind==='directory'){ openExplorer(handle, handle.name); return; }
     if((await handle.queryPermission({mode:'read'}))!=='granted'){
       if((await handle.requestPermission({mode:'read'}))!=='granted') return;
     }
     const file = await handle.getFile();
     window.open(URL.createObjectURL(file), '_blank');
-  }catch(e){ showToast('No se pudo abrir el archivo'); }
+  }catch(e){ showToast('No se pudo abrir'); }
 }
+
+/* ---- Explorador: navegar, etiquetar (local) y buscar dentro de una carpeta vinculada ---- */
+function getFileTags(key){ try{ return (JSON.parse(localStorage.getItem('org_filetags')||'{}')[key])||[]; }catch(e){ return []; } }
+function setFileTags(key, tags){
+  let all={}; try{ all=JSON.parse(localStorage.getItem('org_filetags')||'{}'); }catch(e){}
+  all[key]=tags; localStorage.setItem('org_filetags', JSON.stringify(all));
+}
+async function openExplorer(folderHandle, label){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(720px,100%)">
+    <div class="modal-head"><b>📁 ${escHtml(label)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <input type="text" id="explorerSearch" placeholder="Buscar archivo…" oninput="renderExplorerList()">
+      <div id="explorerList" style="margin-top:10px">Cargando…</div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  window._explorerFolderKey = label;
+  window._explorerEntries = [];
+  try{
+    for await (const [name, handle] of folderHandle.entries()) window._explorerEntries.push({name, handle, kind: handle.kind});
+  }catch(e){ showToast('No se pudo leer la carpeta'); }
+  renderExplorerList();
+}
+function renderExplorerList(){
+  const list = document.getElementById('explorerList'); if(!list) return;
+  const q = (document.getElementById('explorerSearch').value||'').toLowerCase();
+  const entries = window._explorerEntries.filter(e=>e.name.toLowerCase().includes(q));
+  list.innerHTML = entries.map((e,i)=>{
+    const key = window._explorerFolderKey+'/'+e.name;
+    const tags = getFileTags(key);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+      <span>${e.kind==='directory'?'📁':'📄'}</span>
+      <span style="flex:1">${escHtml(e.name)}</span>
+      <input type="text" value="${escAttr(tags.join(' '))}" placeholder="#etiquetas" style="width:140px;font-size:12px"
+        onchange="setFileTags('${escAttr(key)}', this.value.split(/\\s+/).filter(Boolean))">
+      <button class="icon-btn" onclick="openExplorerEntry(${i})">${e.kind==='directory'?'Abrir':'Ver'}</button>
+    </div>`;
+  }).join('') || '<p style="color:var(--text-dim)">Vacío</p>';
+}
+async function openExplorerEntry(i){
+  const entry = window._explorerEntries[i]; if(!entry) return;
+  if(entry.kind==='directory'){ openExplorer(entry.handle, window._explorerFolderKey+'/'+entry.name); return; }
+  try{
+    if((await entry.handle.queryPermission({mode:'read'}))!=='granted'){
+      if((await entry.handle.requestPermission({mode:'read'}))!=='granted') return;
+    }
+    const file = await entry.handle.getFile();
+    window.open(URL.createObjectURL(file), '_blank');
+  }catch(e){ showToast('No se pudo abrir'); }
+}
+
+/* ============ Imágenes: insertar embebidas (picker o pegar) + OCR automático ============ */
 function triggerImage(){ document.getElementById('imgFileInput').click(); }
 function handleImageFile(e){
   const file = e.target.files[0]; if(!file) return;
-  const reader = new FileReader();
-  reader.onload = async ()=>{
-    const base64 = reader.result.split(',')[1];
-    showToast('Leyendo texto de la imagen…');
-    const r = await apiPost('ocrImage', { imageBase64: base64, mimeType: file.type });
-    if(r && r.ok && r.text){
-      const ta = activeTextarea(); const s=ta.selectionStart; const val=ta.value;
-      ta.value = val.slice(0,s)+r.text+val.slice(s); scheduleSave(); showToast('Texto insertado');
-    } else showToast('No se pudo leer la imagen'+(r&&r.error?': '+r.error:''));
-  };
-  reader.readAsDataURL(file);
+  insertImage(file);
+  e.target.value = '';
+}
+function bindPasteImages(ta){
+  if(!ta) return;
+  ta.addEventListener('paste', (e)=>{
+    const items = e.clipboardData && e.clipboardData.items; if(!items) return;
+    for(const item of items){
+      if(item.type && item.type.indexOf('image/')===0){
+        e.preventDefault();
+        const file = item.getAsFile();
+        if(file) insertImage(file);
+        return;
+      }
+    }
+  });
+}
+async function insertImage(file){
+  if(!navigator.onLine){ showToast('Insertar imágenes necesita conexión (se suben a tu Drive)'); return; }
+  const ta = activeTextarea(); if(!ta) return;
+  const base64 = await new Promise((res,rej)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>res(reader.result.split(',')[1]); reader.onerror = rej;
+    reader.readAsDataURL(file);
+  });
+  showToast('Subiendo imagen…');
+  const up = await apiPost('uploadImage', { imageBase64: base64, mimeType: file.type, fileName: file.name || 'imagen' });
+  if(!(up && up.ok)){ showToast('No se pudo subir la imagen'+(up&&up.error?': '+up.error:'')); return; }
+  let s = ta.selectionStart, val = ta.value;
+  const imgTxt = '\n![imagen]('+up.url+')\n';
+  ta.value = val.slice(0,s)+imgTxt+val.slice(s);
+  s += imgTxt.length;
+  ta.selectionStart = ta.selectionEnd = s;
+  syncCornellFromTextarea(ta); scheduleSave(); updatePreview();
+  showToast('Leyendo texto de la imagen…');
+  const ocr = await apiPost('ocrImage', { imageBase64: base64, mimeType: file.type });
+  if(ocr && ocr.ok && ocr.text && !/sin texto detectado/i.test(ocr.text)){
+    val = ta.value;
+    const ocrTxt = '> 📝 '+ocr.text.replace(/\n/g,'\n> ')+'\n';
+    ta.value = val.slice(0,s)+ocrTxt+val.slice(s);
+    syncCornellFromTextarea(ta); scheduleSave(); updatePreview();
+    showToast('Texto de la imagen agregado');
+  } else {
+    showToast('Imagen insertada');
+  }
 }
 
 /* ============ Checklists: plantillas + historial ============ */
@@ -939,13 +1345,13 @@ function openChecklists(){
 }
 function renderChecklistBody(){
   const body = document.getElementById('checklistBody'); if(!body) return;
-  body.innerHTML = `<button class="btn secondary" onclick="promptNewTemplate()">+ Nueva plantilla</button><div id="tplList" style="margin-top:10px"></div>`;
+  body.innerHTML = `<button class="btn secondary" onclick="openTemplateModal()">+ Nueva plantilla</button><div id="tplList" style="margin-top:10px"></div>`;
   document.getElementById('tplList').innerHTML = DATA.plantillas.map(p=>{
     const hist = DATA.historial.filter(h=>h.PlantillaID===p.ID).sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha)));
     return `<div class="tpl-card">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <b>${escHtml(p.Nombre)}</b>
-        <span><button class="icon-btn" onclick="fillTemplateUI('${p.ID}')">▶ Llenar</button><button class="icon-btn" onclick="deleteTemplateUI('${p.ID}')">🗑️</button></span>
+        <span><button class="icon-btn" onclick="openFillModal('${p.ID}')">▶ Llenar</button><button class="icon-btn" onclick="deleteTemplateUI('${p.ID}')">🗑️</button></span>
       </div>
       <div>${hist.map(h=>histEntryHTML(h)).join('') || '<p class="hint" style="color:var(--text-dim)">Sin historial aún</p>'}</div>
     </div>`;
@@ -953,32 +1359,178 @@ function renderChecklistBody(){
 }
 function histEntryHTML(h){
   let items=[]; try{ items = JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
-  return `<div class="hist-entry"><div style="font-size:12px;color:var(--text-dim)">${fmtDate(h.Fecha)}</div>
-    <ul>${items.map((it,i)=>`<li class="${it.checked?'done':''}" onclick="toggleHistItemUI('${h.ID}',${i})"><input type="checkbox" ${it.checked?'checked':''} onclick="event.stopPropagation()" onchange="toggleHistItemUI('${h.ID}',${i})"> ${escHtml(it.text)}</li>`).join('')}</ul></div>`;
+  const rows = items.map((it,i)=>`
+    <li>
+      <input type="checkbox" ${it.checked?'checked':''} onchange="histToggle('${h.ID}',${i},this.checked)">
+      <span class="${it.checked?'done':''}">${escHtml(it.text)}</span>
+      <input type="text" class="hist-note" placeholder="nota (cuántos, estado…)" value="${escAttr(it.note||'')}" onchange="histNoteChange('${h.ID}',${i},this.value)">
+    </li>`).join('');
+  return `<div class="hist-entry">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:12px;color:var(--text-dim)">${fmtDate(h.Fecha)}</span>
+      <button class="icon-btn" onclick="histAddItem('${h.ID}')" title="Agregar elemento a esta lista">+ elemento</button>
+    </div>
+    <ul>${rows}</ul>
+  </div>`;
 }
-function promptNewTemplate(){
-  const nombre = prompt('Nombre de la plantilla (ej. "Rutina de viaje"):'); if(!nombre) return;
-  const itemsText = prompt('Un elemento por línea:'); if(itemsText===null) return;
+function openTemplateModal(){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-head"><b>+ Nueva plantilla</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Nombre</label>
+      <input type="text" id="tplNameInput" placeholder="ej. Rutina de viaje">
+      <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Elementos (uno por línea)</label>
+      <textarea id="tplItemsInput" rows="8" placeholder="chamarra
+cámara
+tenis"></textarea>
+      <div style="margin-top:14px"><button class="btn" onclick="saveTemplateModal(this)">Guardar plantilla</button></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('tplNameInput').focus();
+}
+function saveTemplateModal(btn){
+  const nombre = document.getElementById('tplNameInput').value.trim();
+  const itemsText = document.getElementById('tplItemsInput').value;
+  if(!nombre){ showToast('Ponle un nombre a la plantilla'); return; }
   const items = itemsText.split('\n').map(s=>s.trim()).filter(Boolean).map(text=>({text}));
-  saveEntity('PLANTILLAS', { ID:uid(), Nombre:nombre.trim(), ItemsJSON: JSON.stringify(items), Tags:'' }).then(()=>renderChecklistBody());
+  saveEntity('PLANTILLAS', { ID:uid(), Nombre:nombre, ItemsJSON: JSON.stringify(items), Tags:'' }).then(()=>{
+    btn.closest('.modal-overlay').remove();
+    renderChecklistBody(); renderSidebar();
+  });
 }
 function deleteTemplateUI(id){ if(!confirm('¿Eliminar esta plantilla?')) return; deleteEntity('PLANTILLAS', id).then(()=>{ renderChecklistBody(); renderSidebar(); }); }
-async function fillTemplateUI(id){
-  const r = await apiPost('fillTemplate', { plantillaId:id });
-  if(r && r.ok && r.row){ DATA.historial.push(r.row); cacheData(); }
-  else if(r && r.offline){
-    const p = DATA.plantillas.find(x=>x.ID===id); let items=[]; try{items=JSON.parse(p.ItemsJSON||'[]');}catch(e){}
-    DATA.historial.push({ ID:uid(), PlantillaID:id, Fecha:new Date().toISOString(), ItemsJSON: JSON.stringify(items.map(it=>({text:it.text,checked:false}))), NotaID:'' }); cacheData();
-  }
-  renderChecklistBody(); renderSidebar(); showToast('Plantilla llenada');
+
+/* Llenar: formulario editable (no un prompt) — casillas + nota libre por
+   elemento, y se pueden agregar elementos extra solo para esta vez. */
+function openFillModal(templateId){
+  const p = DATA.plantillas.find(x=>x.ID===templateId); if(!p) return;
+  let baseItems; try{ baseItems = JSON.parse(p.ItemsJSON||'[]').map(it=>({ text: it.text!==undefined?it.text:it, checked:false, note:'' })); }catch(e){ baseItems=[]; }
+  window._fillItems = baseItems;
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-head"><b>▶ Llenar: ${escHtml(p.Nombre)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <div id="fillItemsList"></div>
+      <button class="mini-btn" onclick="addFillRow()">+ agregar otro elemento</button>
+      <div style="margin-top:14px"><button class="btn" onclick="saveFillModal('${templateId}', this)">Guardar</button></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  renderFillItemsList();
 }
-async function toggleHistItemUI(historialId, idx){
-  const h = DATA.historial.find(x=>x.ID===historialId); if(!h) return;
-  let items=[]; try{items=JSON.parse(h.ItemsJSON||'[]');}catch(e){}
-  if(items[idx]) items[idx].checked = !items[idx].checked;
+function renderFillItemsList(){
+  const el = document.getElementById('fillItemsList'); if(!el) return;
+  el.innerHTML = window._fillItems.map((it,i)=>`
+    <div class="fill-row">
+      <input type="checkbox" ${it.checked?'checked':''} onchange="window._fillItems[${i}].checked=this.checked">
+      <input type="text" style="flex:1.3" value="${escAttr(it.text)}" placeholder="elemento" onchange="window._fillItems[${i}].text=this.value">
+      <input type="text" style="flex:1" value="${escAttr(it.note||'')}" placeholder="nota (cuántos, si hace calor…)" onchange="window._fillItems[${i}].note=this.value">
+      <button class="icon-btn" onclick="removeFillRow(${i})">🗑️</button>
+    </div>`).join('');
+}
+function addFillRow(){ window._fillItems.push({text:'',checked:false,note:''}); renderFillItemsList(); }
+function removeFillRow(i){ window._fillItems.splice(i,1); renderFillItemsList(); }
+async function saveFillModal(templateId, btn){
+  const items = window._fillItems.filter(it=>it.text && it.text.trim());
+  const row = { ID: uid(), PlantillaID: templateId, Fecha: new Date().toISOString(), ItemsJSON: JSON.stringify(items), NotaID:'' };
+  await saveEntity('HISTORIAL', row);
+  btn.closest('.modal-overlay').remove();
+  renderChecklistBody(); renderSidebar(); showToast('Guardado');
+}
+
+async function histMutate(historyId, mutator){
+  const h = DATA.historial.find(x=>x.ID===historyId); if(!h) return;
+  let items=[]; try{ items=JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
+  mutator(items);
   h.ItemsJSON = JSON.stringify(items); cacheData();
-  await apiPost('toggleHistorialItem', { historialId, index: idx });
+  await apiPost('updateHistorialItems', { historialId: historyId, items });
   renderChecklistBody();
+}
+function histToggle(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].checked = val; }); }
+function histNoteChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].note = val; }); }
+function histAddItem(id){
+  const text = prompt('Nuevo elemento para esta lista:'); if(!text || !text.trim()) return;
+  histMutate(id, items=> items.push({ text: text.trim(), checked:false, note:'' }));
+}
+
+/* ============ Tablas dinámicas por bloque ============
+   No busca notas enteras — busca párrafos/bloques (de cualquier nota) que
+   lleven una etiqueta, y saca las demás etiquetas #clave:valor de ESE
+   mismo bloque como columnas. */
+function openBlockTables(){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(900px,100%)">
+    <div class="modal-head"><b>🧩 Tablas por bloque</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body" id="blockTablesBody"></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  renderBlockTablesBody();
+}
+function renderBlockTablesBody(){
+  const body = document.getElementById('blockTablesBody'); if(!body) return;
+  body.innerHTML = `
+    <div style="display:flex;gap:6px;margin-bottom:14px">
+      <input type="text" id="btNombre" placeholder="Nombre de la tabla (ej. Macrólidos)">
+      <input type="text" id="btTag" placeholder="Etiqueta a buscar (ej. macrolido, sin #)">
+      <button class="btn" onclick="saveBlockTable()">+ Crear</button>
+    </div>
+    <div id="blockTablesList"></div>`;
+  document.getElementById('blockTablesList').innerHTML = DATA.bloque_tablas.map(bt=>`
+    <div class="tpl-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b>${escHtml(bt.Nombre)}</b> <span style="color:var(--text-dim);font-size:12px">#${escHtml(bt.TagFiltro)}</span>
+        <button class="icon-btn" onclick="deleteEntity('BLOQUE_TABLAS','${bt.ID}').then(renderBlockTablesBody)">🗑️</button>
+      </div>
+      ${blockTableRenderHTML(bt.TagFiltro)}
+    </div>`).join('') || '<p style="color:var(--text-dim)">Sin tablas todavía — crea una arriba.</p>';
+}
+function saveBlockTable(){
+  const nombre = document.getElementById('btNombre').value.trim();
+  const tag = document.getElementById('btTag').value.trim().replace(/^#/,'');
+  if(!nombre || !tag){ showToast('Ponle nombre y etiqueta'); return; }
+  saveEntity('BLOQUE_TABLAS', { ID:uid(), Nombre:nombre, TagFiltro:tag }).then(renderBlockTablesBody);
+}
+function blockTableRenderHTML(tagFiltro){
+  const blocks = allBlocks().filter(b=>b.effectiveTags.includes(tagFiltro));
+  if(!blocks.length) return '<p style="color:var(--text-dim);font-size:13px;margin-top:8px">Sin bloques con #'+escHtml(tagFiltro)+' todavía.</p>';
+  const extraKeys = new Set();
+  blocks.forEach(b=>Object.keys(blockKeyValueTags(b)).forEach(k=>extraKeys.add(k)));
+  const keys = Array.from(extraKeys);
+  const head = '<th>Nota</th><th>Texto</th>' + keys.map(k=>'<th>'+escHtml(k)+'</th>').join('') + '<th>Etiquetas</th>';
+  const rows = blocks.map(b=>{
+    const kv = blockKeyValueTags(b);
+    return '<tr><td class="title-cell" onclick="openNoteEditor(\''+b.noteId+'\')">'+escHtml(b.noteTitle)+'</td><td>'+escHtml(b.text.slice(0,140))+'</td>'
+      + keys.map(k=>'<td>'+escHtml(kv[k]||'')+'</td>').join('')
+      + '<td>'+b.effectiveTags.filter(t=>t!==tagFiltro).map(t=>'#'+escHtml(t)).join(' ')+'</td></tr>';
+  }).join('');
+  return '<div style="overflow:auto;margin-top:8px"><table class="org-table"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+}
+
+/* ============ /ayuda — diccionario de comandos y etiquetas ============ */
+function openHelpSheet(){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  const comandos = DATA.tags.filter(t=>t.EsComando);
+  const etiquetas = DATA.tags.filter(t=>!t.EsComando);
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-head"><b>❔ Comandos y etiquetas</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <details open>
+        <summary style="font-weight:700;cursor:pointer;margin-bottom:6px">🚩 Banderas rápidas</summary>
+        ${FLAG_TAGS.map(([t,label,color])=>`<div class="settings-row"><span class="nb-dot" style="background:${color}"></span> #${t} — ${escHtml(label)}</div>`).join('')}
+      </details>
+      <details open style="margin-top:10px">
+        <summary style="font-weight:700;cursor:pointer;margin-bottom:6px">/ Comandos (${comandos.length})</summary>
+        ${comandos.map(t=>`<div class="settings-row"><span class="nb-dot" style="background:${t.Color||'#8a5a3b'}"></span> #${escHtml(t.Etiqueta)} — ${escHtml(t.Descripcion||'')}</div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Marca una etiqueta como "comando" en ⚙️ Configuración → Etiquetas</p>'}
+      </details>
+      <details open style="margin-top:10px">
+        <summary style="font-weight:700;cursor:pointer;margin-bottom:6px"># Etiquetas (${etiquetas.length})</summary>
+        ${etiquetas.map(t=>`<div class="settings-row"><span class="nb-dot" style="background:${t.Color||'#8a5a3b'}"></span> #${escHtml(t.Etiqueta)} ${t.Descripcion?('— '+escHtml(t.Descripcion)):''}</div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Sin etiquetas todavía</p>'}
+      </details>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
 }
 
 /* ============ Panel de IA / traducción / feedback ============ */
@@ -1114,6 +1666,7 @@ function renderSettingsNotebooks(){
       <input type="color" value="${nb.Color||'#8a5a3b'}" onchange="updateNbField('${nb.ID}','Color',this.value)">
       <input type="text" value="${escAttr(nb.Nombre)}" onchange="updateNbField('${nb.ID}','Nombre',this.value)">
       <input type="text" value="${escAttr(nb.TagsHeredados)}" placeholder="etiquetas heredadas" onchange="updateNbField('${nb.ID}','TagsHeredados',this.value)">
+      <input type="text" value="${escAttr(nb.TagAuto||'')}" placeholder="auto-ruteo desde Inbox (ej. musica)" title="Si una nota del Inbox lleva esta etiqueta, se mueve sola a este cuaderno" onchange="updateNbField('${nb.ID}','TagAuto',this.value.replace(/^#/,''))">
       <button class="icon-btn" onclick="deleteEntity('NOTEBOOKS','${nb.ID}').then(()=>{renderSettingsNotebooks();renderSidebar();})">🗑️</button>
     </div>`).join('') || '<p style="color:var(--text-dim)">Sin cuadernos todavía</p>';
 }
@@ -1159,6 +1712,7 @@ function boot(){
   document.getElementById('vwSplit').classList.toggle('active', currentView==='split');
   renderAll();
   syncNow(false);
+  initSplitResizerOnce();
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
 }
 window.addEventListener('DOMContentLoaded', ()=>{

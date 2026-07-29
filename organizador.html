@@ -453,7 +453,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Salar de Atacama';
+const BUILD_VERSION = 'Machu Picchu';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3002,7 +3002,7 @@ function openCreateMenu(){
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openFieldTemplatePicker()">🏷️ Plantilla</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openChecklists()">☑️ Checklist</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openTimeLogModal()">⏱ Registro de tiempo</button>
-      <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openHabitCapture()">✅ Registrar hábito</button>
+      <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openHabitCapture()">✅ Registrar hábito o medicamento</button>
     </div>
   </div>`;
   overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
@@ -3039,6 +3039,38 @@ function normalizeHoraValue(val){
     if(!isNaN(d.getTime())) return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
   }
   return '';
+}
+/* Un hábito/medicamento de varias veces al día puede tener horarios
+   ESPECÍFICOS por toma (ej. medicamento a las 8:00/14:00/20:00), no
+   solo un contador — se guardan como lista en HorasJSON. Los hábitos
+   viejos (o los de una sola vez) siguen usando el campo Hora suelto;
+   esta función unifica ambos casos en una sola lista para mostrar. */
+function habitHorasList(h){
+  if(!h) return [];
+  if(h.HorasJSON){
+    try{ const arr = JSON.parse(h.HorasJSON); if(Array.isArray(arr)) return arr.filter(Boolean); }catch(e){}
+  }
+  const single = normalizeHoraValue(h.Hora);
+  return single ? [single] : [];
+}
+/* Generador rápido de horarios "cada N horas, evitando la noche" —
+   pensado para medicamentos (ej. "cada 8 horas, evita 22:00–7:00").
+   Es solo un punto de partida: arma la lista y el usuario la puede
+   ajustar a mano después (quitar/agregar horas sueltas), no queda
+   guardado como un "modo" aparte — HorasJSON siempre es una lista
+   plana simple. */
+function generateHorasEveryN(everyHours, avoidNight){
+  const avoidStart = 22*60, avoidEnd = 7*60; // 22:00–07:00, ventana fija de "noche"
+  const step = Math.max(1, parseInt(everyHours,10)||8) * 60;
+  const inAvoid = (t) => { const m=((t%1440)+1440)%1440; return avoidStart>avoidEnd ? (m>=avoidStart || m<avoidEnd) : (m>=avoidStart && m<avoidEnd); };
+  const anchor = avoidNight ? avoidEnd : 0;
+  const out = [];
+  for(let t=anchor; t<anchor+1440; t+=step){
+    if(avoidNight && inAvoid(t)) continue;
+    const m = ((t%1440)+1440)%1440;
+    out.push(String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'));
+  }
+  return out;
 }
 function habitCountOnDate(habitoId, dateStr){
   return DATA.habito_log.filter(l=>l.HabitoID===habitoId && new Date(l.Fecha).toDateString()===dateStr).length;
@@ -3092,12 +3124,12 @@ function decrementHabitToday(habitoId){
 function openHabitCapture(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
-    <div class="modal-head"><b>✅ Hábitos de hoy</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-head"><b>✅ Hábitos y medicamentos de hoy</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
       <div id="habitCaptureList"></div>
       <details style="margin-top:14px">
         <summary style="cursor:pointer;font-weight:600;font-size:13px">+ Agregar hábitos nuevos</summary>
-        <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0">Hora, veces/día y frecuencia son opcionales. Pon "veces/día" para hábitos de varias veces (ej. 8 para tomar agua) — te muestro un contador en vez de una sola casilla. Si pones frecuencia, te lo recuerdo arriba cuando toque (⏰ Pendiente).</p>
+        <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0">Hora, veces/día y frecuencia son opcionales. Pon "veces/día" para hábitos de varias veces (ej. 8 para tomar agua, o 3 para un medicamento) — te muestro un contador en vez de una sola casilla. Si pones frecuencia, te lo recuerdo arriba cuando toque (⏰ Pendiente). Después toca ✏️ para agregar horarios por toma, dosis, fecha de inicio/término y observaciones (útil para medicamentos).</p>
         <div id="habitAddRows" style="margin-top:4px"></div>
         <div style="display:flex;gap:6px;margin-top:8px">
           <button class="btn secondary" onclick="addHabitFormRow()">+ otra fila</button>
@@ -3117,7 +3149,8 @@ function renderHabitCaptureList(){
   el.innerHTML = activos.map(h=>{
     const goal = habitGoal(h);
     const streak = habitStreak(h.ID);
-    const horaShown = normalizeHoraValue(h.Hora);
+    const horasList = habitHorasList(h);
+    const horaShown = horasList.join(', ');
     const nameSpan = `<span style="flex:1">${h.Emoji||'✅'} ${escHtml(h.Nombre)}${horaShown?` <span style="color:var(--text-dim);font-size:11px">⏰ ${escHtml(horaShown)}</span>`:''}</span>`;
     if(goal>1){
       const count = habitCountOnDate(h.ID, new Date().toDateString());
@@ -3209,12 +3242,60 @@ function deleteHabitUI(id){
   const logs = DATA.habito_log.filter(l=>l.HabitoID===id);
   Promise.all(logs.map(l=>deleteEntity('HABITO_LOG', l.ID))).then(()=>deleteEntity('HABITOS', id)).then(renderHabitCaptureList);
 }
+/* La lista de horarios (una toma/vez cada una) vive en memoria mientras
+   se edita, igual que las filas del alta rápida — se pinta aparte con
+   renderHabitEditHoras() y solo se guarda de verdad al tocar "Guardar";
+   así agregar/quitar una hora no reconstruye el resto del formulario
+   (no se pierde lo ya escrito en Dosis/Observaciones/etc). */
+function renderHabitEditHoras(){
+  const el = document.getElementById('habitEditHorasList'); if(!el) return;
+  const list = window._habitEditHoras || [];
+  el.innerHTML = list.map((t,i)=>`<span class="tag-badge" style="cursor:default">⏰ ${escHtml(t)} <span style="cursor:pointer" onclick="removeHabitEditHora(${i})" title="Quitar">✕</span></span>`).join('')
+    || '<span class="hint" style="color:var(--text-dim);font-size:12px">Sin horarios — agrega uno o usa el generador de abajo</span>';
+}
+function addHabitEditHora(){
+  const inp = document.getElementById('habitEditHoraNew'); if(!inp || !inp.value) return;
+  window._habitEditHoras = window._habitEditHoras || [];
+  if(!window._habitEditHoras.includes(inp.value)) window._habitEditHoras.push(inp.value);
+  window._habitEditHoras.sort();
+  inp.value = '';
+  renderHabitEditHoras();
+}
+function removeHabitEditHora(i){
+  if(!window._habitEditHoras) return;
+  window._habitEditHoras.splice(i,1);
+  renderHabitEditHoras();
+}
+function generateHabitEditHoras(){
+  const n = document.getElementById('habitEditGenN').value;
+  const avoid = document.getElementById('habitEditGenAvoid').checked;
+  window._habitEditHoras = generateHorasEveryN(n, avoid);
+  renderHabitEditHoras();
+  showToast('Horarios generados — ajústalos a mano si hace falta');
+}
+/* En el alta rápida (habitFormRowHTML) "veces/día">1 esconde la hora
+   suelta porque ahí no tiene caso un horario detallado (es para agregar
+   varios hábitos de un jalón). En el editor SÍ tiene caso — un hábito
+   o medicamento de varias veces al día casi siempre necesita SUS horas
+   específicas (ej. medicamento a las 8/14/20), así que aquí "veces/día"
+   > 1 cambia la hora suelta por la lista de horarios + generador. */
+function toggleHabitEditMetaSections(metaValue){
+  const multi = parseInt(metaValue,10) > 1;
+  const horaWrap = document.getElementById('habitEditHoraWrap');
+  const horasSection = document.getElementById('habitEditHorasSection');
+  if(horaWrap) horaWrap.style.display = multi ? 'none' : '';
+  if(horasSection) horasSection.style.display = multi ? '' : 'none';
+}
 function openHabitEditModal(id){
   const h = DATA.habitos.find(x=>x.ID===id); if(!h) return;
+  const goal = habitGoal(h);
+  window._habitEditHoras = habitHorasList(h).slice();
+  const lastLog = lastHabitLog(id);
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  overlay.innerHTML = `<div class="modal" style="width:min(420px,100%)">
-    <div class="modal-head"><b>✏️ Editar hábito</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+  overlay.innerHTML = `<div class="modal" style="width:min(440px,100%)">
+    <div class="modal-head"><b>✏️ Editar hábito o medicamento</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
+      ${lastLog?`<p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Último cumplimiento: ${fmtDate(lastLog.toISOString())}</p>`:''}
       <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Nombre</label>
       <input type="text" id="habitEditName" value="${escAttr(h.Nombre)}">
       <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
@@ -3224,41 +3305,78 @@ function openHabitEditModal(id){
         </div>
         <div style="flex:1;min-width:90px">
           <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Veces/día</label>
-          <input type="number" id="habitEditMeta" min="1" placeholder="ej. 8" value="${escAttr(h.Meta||'')}" oninput="toggleHabitHoraVisibility('habitEditHoraWrap','habitEditHora',this.value)">
+          <input type="number" id="habitEditMeta" min="1" placeholder="ej. 8" value="${escAttr(h.Meta||'')}" oninput="toggleHabitEditMetaSections(this.value)">
         </div>
-        <div id="habitEditHoraWrap" style="flex:1;min-width:100px;${habitGoal(h)>1?'display:none':''}">
+        <div id="habitEditHoraWrap" style="flex:1;min-width:100px;${goal>1?'display:none':''}">
           <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Hora habitual</label>
           <input type="time" id="habitEditHora" value="${escAttr(normalizeHoraValue(h.Hora))}">
         </div>
       </div>
-      <p class="hint" style="color:var(--text-dim);font-size:11px;margin:4px 0 0">La hora solo aplica a hábitos de una vez al día — si pones más de 1 en "veces/día" se esconde, porque una sola hora no representa un hábito que pasa varias veces.</p>
-      <p class="hint" style="color:var(--text-dim);font-size:11px;margin:4px 0 0">Si cambias "veces/día" el conteo de hoy no se borra — solo cambia cuánto necesitas para que cuente como cumplido.</p>
+      <div id="habitEditHorasSection" style="margin-top:10px;${goal>1?'':'display:none'}">
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Horarios (uno por cada toma/vez)</label>
+        <div id="habitEditHorasList" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <input type="time" id="habitEditHoraNew" style="width:110px">
+          <button class="btn secondary" onclick="addHabitEditHora()">+ agregar hora</button>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)">
+          <span style="font-size:12px;color:var(--text-dim)">Generar cada</span>
+          <input type="number" id="habitEditGenN" value="8" min="1" max="24" style="width:56px">
+          <span style="font-size:12px;color:var(--text-dim)">horas</span>
+          <label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="habitEditGenAvoid" checked> evitar 22:00–07:00</label>
+          <button class="btn secondary" onclick="generateHabitEditHoras()">Generar</button>
+        </div>
+      </div>
+      <p class="hint" style="color:var(--text-dim);font-size:11px;margin:8px 0 0">Si cambias "veces/día" el conteo de hoy no se borra — solo cambia cuánto necesitas para que cuente como cumplido.</p>
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;font-weight:600;font-size:13px">+ más detalles (útil para medicamentos)</summary>
+        <div style="margin-top:8px">
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Dosis</label>
+          <input type="text" id="habitEditDosis" value="${escAttr(h.Dosis||'')}" placeholder="ej. 1 tableta, 500mg">
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <div style="flex:1"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Fecha inicio</label><input type="date" id="habitEditFechaInicio" value="${escAttr(h.FechaInicio||'')}"></div>
+            <div style="flex:1"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Fecha término</label><input type="date" id="habitEditFechaFin" value="${escAttr(h.FechaFin||'')}"></div>
+          </div>
+          <label style="font-size:12px;font-weight:600;display:block;margin-top:8px;margin-bottom:4px">Observaciones</label>
+          <textarea id="habitEditObs" rows="2" style="width:100%">${escHtml(h.Observaciones||'')}</textarea>
+        </div>
+      </details>
       <label style="font-size:12px;font-weight:600;display:block;margin-top:10px">Avísame si no lo he hecho</label>
       ${recordatorioSelectHTML('habitEditFx', h.Recordatorio||'')}
       <div style="margin-top:14px"><button class="btn" onclick="saveHabitEdit('${id}')">Guardar</button></div>
     </div>
   </div>`;
   document.body.appendChild(overlay);
+  renderHabitEditHoras();
   document.getElementById('habitEditName').focus();
 }
 async function saveHabitEdit(id){
   const h = DATA.habitos.find(x=>x.ID===id); if(!h) return;
   const nombre = (document.getElementById('habitEditName').value||'').trim();
   if(!nombre){ showToast('Ponle un nombre'); return; }
+  const meta = document.getElementById('habitEditMeta').value || '';
+  const goal = parseInt(meta,10)>0 ? parseInt(meta,10) : 1;
+  const horas = goal>1 ? (window._habitEditHoras||[]) : [];
   const row = Object.assign({}, h, {
     Nombre: nombre,
     Emoji: (document.getElementById('habitEditEmoji').value||'').trim() || '✅',
-    Meta: document.getElementById('habitEditMeta').value || '',
-    Hora: document.getElementById('habitEditHora').value || '',
-    Recordatorio: document.getElementById('habitEditFx').value || ''
+    Meta: meta,
+    Hora: goal>1 ? '' : (document.getElementById('habitEditHora').value || ''),
+    HorasJSON: horas.length ? JSON.stringify(horas) : '',
+    Recordatorio: document.getElementById('habitEditFx').value || '',
+    Dosis: (document.getElementById('habitEditDosis').value||'').trim(),
+    FechaInicio: document.getElementById('habitEditFechaInicio').value || '',
+    FechaFin: document.getElementById('habitEditFechaFin').value || '',
+    Observaciones: (document.getElementById('habitEditObs').value||'').trim()
   });
   await saveEntity('HABITOS', row);
+  window._habitEditHoras = null;
   document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#habitEditName')) o.remove(); });
   renderHabitCaptureList();
   renderReminderBanner();
   showToast('Hábito actualizado');
 }
-/* Estadísticas de hábitos, pestaña "✅ Hábitos" en 🧩 Tablas — mismo
+/* Estadísticas de hábitos, pestaña "✅ Hábitos y medicamentos" en 🧩 Tablas — mismo
    look que el de checklists (cuadrícula de calendario + racha), pero
    solo dos estados (hubo registro ese día / no lo hubo), porque acá no
    existe un "llenado pero sin marcar" — la fila en HABITO_LOG SOLO
@@ -3266,7 +3384,7 @@ async function saveHabitEdit(id){
 function renderHabitStatsTab(){
   const body = document.getElementById('blockTablesBody'); if(!body) return;
   const activos = DATA.habitos.filter(h=>h.Activo!=='0');
-  if(!activos.length){ body.innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:13px">Sin hábitos todavía — agrégalos desde "+" → Registrar hábito.</p>'; return; }
+  if(!activos.length){ body.innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:13px">Sin hábitos ni medicamentos todavía — agrégalos desde "+" → Registrar hábito o medicamento.</p>'; return; }
   const rows = activos.map(h=>{
     const goal = habitGoal(h);
     const doneDates = habitDoneDates(h.ID);
@@ -3279,9 +3397,17 @@ function renderHabitStatsTab(){
       best = Math.max(best, run); prev = d;
     });
     const totalDays = days.length;
+    const horas = habitHorasList(h);
+    const medBits = [];
+    if(h.Dosis) medBits.push('💊 '+escHtml(h.Dosis));
+    if(horas.length) medBits.push('⏰ '+escHtml(horas.join(', ')));
+    if(h.FechaInicio || h.FechaFin) medBits.push('📅 '+escHtml(h.FechaInicio||'?')+' → '+escHtml(h.FechaFin||'…'));
+    const medLine = medBits.length ? `<div class="habit-row-sub">${medBits.join(' · ')}</div>` : '';
+    const obsLine = h.Observaciones ? `<div class="habit-row-sub" style="font-style:italic">${escHtml(h.Observaciones)}</div>` : '';
     return `<div class="habit-row">
       <div class="habit-row-head"><b>${h.Emoji||'✅'} ${escHtml(h.Nombre)}${goal>1?` <span style="font-weight:400;font-size:12px;color:var(--text-dim)">(meta ${goal}/día)</span>`:''}</b><span class="habit-streak-badge">🔥 ${streak}</span></div>
       <div class="habit-row-sub">${totalDays} día${totalDays===1?'':'s'} completado${totalDays===1?'':'s'}${best>streak?(' · mejor racha '+best):''}</div>
+      ${medLine}${obsLine}
       ${habitCalendarGridHTML(byDate)}
     </div>`;
   }).join('');
@@ -4713,7 +4839,7 @@ function openBlockTables(){
       <button class="active" onclick="blockTablesTab(this,'tpl')">Plantillas</button>
       <button onclick="blockTablesTab(this,'custom')">Personalizadas</button>
       <button onclick="blockTablesTab(this,'bloque')">Por etiqueta de bloque</button>
-      <button onclick="blockTablesTab(this,'habitos')">✅ Hábitos</button>
+      <button onclick="blockTablesTab(this,'habitos')">✅ Hábitos y medicamentos</button>
     </div>
     <div class="modal-body" id="blockTablesBody"></div>
   </div>`;

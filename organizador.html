@@ -136,6 +136,9 @@ main:fullscreen{background:var(--bg);padding:20px}
 
 /* table */
 table.org-table{border-collapse:collapse;width:100%;background:var(--bg-elev);font-size:13px}
+table.org-table th, table.items-table th{position:relative}
+.col-resize-handle{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;user-select:none;z-index:1}
+.col-resize-handle:hover, .col-resize-handle.resizing{background:var(--accent)}
 table.org-table th,table.org-table td{border:1px solid var(--border);padding:6px 8px;text-align:left}
 table.org-table th{background:var(--bg-soft);cursor:pointer;white-space:nowrap;position:sticky;top:0}
 table.org-table tr:hover td{background:var(--bg-soft)}
@@ -416,13 +419,6 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
         </div>
       </div>
 
-      <div class="sb-section" data-sb="checklists">
-        <h3 onclick="toggleSbSection('checklists')">Checklists <span class="sb-arrow">▾</span></h3>
-        <div class="sb-content">
-          <div id="tplQuickList"></div>
-          <button class="mini-btn" onclick="openChecklists()">Ver todos →</button>
-        </div>
-      </div>
     </aside>
 
     <main id="viewArea"></main>
@@ -439,7 +435,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Cataratas del Iguazú';
+const BUILD_VERSION = 'Monte Fuji';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1154,7 +1150,7 @@ function autoRouteNotebook(note){
    secciones son <div> fijos en el HTML (no se recrean en cada
    renderSidebar(), solo su contenido interno) así que basta aplicar el
    estado guardado UNA vez al arrancar. */
-const SB_SECTIONS = ['cuaderno','banderas','etiquetas','busquedas','checklists'];
+const SB_SECTIONS = ['cuaderno','banderas','etiquetas','busquedas'];
 let sbCollapsed = new Set(SB_SECTIONS); // plegadas por defecto la primera vez
 try{
   const saved = localStorage.getItem('org_sb_collapsed');
@@ -1222,9 +1218,6 @@ function renderSidebar(){
       <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();openTagCompendium('${escAttr(t)}')" title="Ver todo lo etiquetado con #${escAttr(t)}">👁</button>
     </div>`;
   }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin etiquetas todavía</p>';
-
-  const tq = document.getElementById('tplQuickList');
-  tq.innerHTML = DATA.plantillas.slice(0,5).map(p=>`<div class="mini-btn" style="margin-bottom:4px" onclick="openFillModal('${p.ID}')">▶ ${escHtml(p.Nombre)}</div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas</p>';
 
   renderSavedSearches();
 }
@@ -1424,7 +1417,7 @@ function pendingRemindersToday(){
     const last = lastFilledFieldTemplate(pt.ID);
     if(isReminderDue(last, pt.Recordatorio)) pending.push({ type:'plantilla_prop', id:pt.ID, nombre:pt.Nombre });
   });
-  DATA.plantillas.forEach(p=>{
+  activeTemplates().forEach(p=>{
     const last = lastFilledChecklist(p.ID);
     if(isReminderDue(last, p.Recordatorio)) pending.push({ type:'plantilla', id:p.ID, nombre:p.Nombre });
   });
@@ -1654,23 +1647,30 @@ function chapterGroupHTML(n, pairs, highlight){
    puntual; clic en el título del capítulo abre el Registro de tiempo
    de ese día completo. */
 function timeLogChapterHTML(dateObj, dayNotes, highlight, q, activeTags){
-  let entries = dayNotes.slice().sort((a,b)=>new Date(a.Fecha)-new Date(b.Fecha));
+  // dayNotes solo se usa para saber que este día tiene algo que mostrar —
+  // el rango real se recalcula con timeLogRangesForDate para que se vea
+  // IGUAL que en el modal de Registro de tiempo (mismo cálculo, una sola
+  // función, en vez de repetir la lógica dos veces y arriesgar que se
+  // desincronicen).
+  let ranges = timeLogRangesForDate(dateObj).filter(r=>r.note);
   if(q || (activeTags && activeTags.length)){
-    entries = entries.filter(n=>{
+    ranges = ranges.filter(r=>{
+      const n = r.note;
       const textoL = stripHtmlToText(n.Contenido||'').toLowerCase();
       const tagL = (n.Tags||'').toLowerCase();
       if(q && (textoL.includes(q) || tagL.includes(q))) return true;
       return activeTags.some(t => tagL===t || textoL.includes('#'+t));
     });
-    if(!entries.length) return '';
+    if(!ranges.length) return '';
   }
-  const miniCards = entries.map(n=>{
-    const time = fmtHM(new Date(n.Fecha));
+  const miniCards = ranges.map(r=>{
+    const n = r.note;
+    const rangeLabel = r.start.getTime()===r.end.getTime() ? fmtHM(r.end) : (fmtHM(r.start)+'–'+fmtHM(r.end));
     const text = stripHtmlToText(n.Contenido||'').slice(0,90);
     const tagName = n.Tags||'';
     const hit = tagName && highlight.includes(tagName.toLowerCase());
     const innerTags = tagName ? `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(tagName)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(tagName)}')" title="Filtrar por #${escAttr(tagName)}">#${escHtml(tagName)}</span>` : '';
-    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}')"><div class="field-card-tag">${escHtml(time)}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
+    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}')"><div class="field-card-tag">${escHtml(rangeLabel)}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
   }).join('');
   const isToday = dateObj.toDateString()===new Date().toDateString();
   const label = isToday ? 'Hoy' : dateObj.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
@@ -2813,19 +2813,26 @@ function deleteNoteUI(id){
 function trashedNotes(){ return DATA.notas.filter(n=>n.Papelera).sort((a,b)=>String(b.Papelera).localeCompare(String(a.Papelera))); }
 function renderSettingsTrash(){
   const body = document.getElementById('settingsBody'); if(!body) return;
-  body.innerHTML = `<p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Las notas eliminadas quedan aquí 30 días antes de borrarse solas para siempre.</p>
+  body.innerHTML = `<p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Notas y plantillas de checklist eliminadas quedan aquí 30 días antes de borrarse solas para siempre.</p>
     <button class="btn secondary" onclick="emptyTrashUI()" style="margin-bottom:10px">🧹 Vaciar papelera</button>
     <div id="trashBody"></div>`;
   renderTrashList();
 }
 function renderTrashList(){
   const body = document.getElementById('trashBody'); if(!body) return;
-  const items = trashedNotes();
-  body.innerHTML = items.map(n=>`<div class="settings-row">
-      <span style="flex:1;font-size:13px">${escHtml(n.Titulo||'(sin título)')}<br><span style="color:var(--text-dim);font-size:11px">eliminada ${fmtDate(n.Papelera)}</span></span>
+  const notes = trashedNotes();
+  const templates = trashedTemplates();
+  const noteRows = notes.map(n=>`<div class="settings-row">
+      <span style="flex:1;font-size:13px">📝 ${escHtml(n.Titulo||'(sin título)')}<br><span style="color:var(--text-dim);font-size:11px">eliminada ${fmtDate(n.Papelera)}</span></span>
       <button class="icon-btn" onclick="restoreNoteUI('${n.ID}')" title="Restaurar">↩️</button>
       <button class="icon-btn" onclick="permanentlyDeleteNoteUI('${n.ID}')" title="Eliminar definitivamente">🗑️</button>
-    </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">La papelera está vacía</p>';
+    </div>`).join('');
+  const templateRows = templates.map(p=>`<div class="settings-row">
+      <span style="flex:1;font-size:13px">☑️ ${escHtml(p.Nombre)}<br><span style="color:var(--text-dim);font-size:11px">eliminada ${fmtDate(p.Papelera)}</span></span>
+      <button class="icon-btn" onclick="restoreTemplateUI('${p.ID}')" title="Restaurar">↩️</button>
+      <button class="icon-btn" onclick="permanentlyDeleteTemplateUI('${p.ID}')" title="Eliminar definitivamente">🗑️</button>
+    </div>`).join('');
+  body.innerHTML = (noteRows+templateRows) || '<p class="hint" style="color:var(--text-dim);font-size:12px">La papelera está vacía</p>';
 }
 function restoreNoteUI(id){
   const note = getNote(id); if(!note) return;
@@ -2837,16 +2844,25 @@ function permanentlyDeleteNoteUI(id){
   deleteEntity('NOTAS', id).then(()=>{ renderTrashList(); showToast('Eliminada para siempre'); });
 }
 function emptyTrashUI(){
-  const items = trashedNotes(); if(!items.length) return;
-  if(!confirm('¿Eliminar definitivamente las '+items.length+' notas de la papelera? Esto ya no se puede deshacer.')) return;
-  Promise.all(items.map(n=>deleteEntity('NOTAS', n.ID))).then(()=>{ renderTrashList(); showToast('Papelera vacía'); });
+  const notes = trashedNotes(); const templates = trashedTemplates();
+  const total = notes.length + templates.length; if(!total) return;
+  if(!confirm('¿Eliminar definitivamente los '+total+' elementos de la papelera (notas y plantillas)? Esto ya no se puede deshacer.')) return;
+  Promise.all([
+    ...notes.map(n=>deleteEntity('NOTAS', n.ID)),
+    ...templates.map(p=>DATA.historial.filter(h=>h.PlantillaID===p.ID).map(h=>deleteEntity('HISTORIAL', h.ID)).concat([deleteEntity('PLANTILLAS', p.ID)])).flat()
+  ]).then(()=>{ renderTrashList(); showToast('Papelera vacía'); });
 }
 /* Limpieza automática — igual que Gmail/Drive, 30 días en la papelera y
    se borran solas para siempre; se corre una vez al arrancar. */
 function autoPurgeOldTrash(){
   const cutoff = Date.now() - 30*24*60*60*1000;
-  const old = DATA.notas.filter(n=>n.Papelera && new Date(n.Papelera).getTime() < cutoff);
-  old.forEach(n=>deleteEntity('NOTAS', n.ID));
+  const oldNotes = DATA.notas.filter(n=>n.Papelera && new Date(n.Papelera).getTime() < cutoff);
+  oldNotes.forEach(n=>deleteEntity('NOTAS', n.ID));
+  const oldTemplates = DATA.plantillas.filter(p=>p.Papelera && new Date(p.Papelera).getTime() < cutoff);
+  oldTemplates.forEach(p=>{
+    DATA.historial.filter(h=>h.PlantillaID===p.ID).forEach(h=>deleteEntity('HISTORIAL', h.ID));
+    deleteEntity('PLANTILLAS', p.ID);
+  });
 }
 
 /* Un solo botón "+" en el encabezado en vez de cuatro por separado
@@ -2859,6 +2875,7 @@ function openCreateMenu(){
     <div class="modal-body" style="display:flex;flex-direction:column;gap:8px">
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openQuickDatoModal()">⚡ Dato general</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openFieldTemplatePicker()">🏷️ Plantilla</button>
+      <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openChecklists()">☑️ Checklist</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openTimeLogModal()">⏱ Registro de tiempo</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openHabitCapture()">✅ Registrar hábito</button>
     </div>
@@ -3230,6 +3247,36 @@ function timeLogEntriesForDate(dateObj){
   return activeNotes().filter(n=>n.PlantillaPropID===TIMELOG_MARKER && new Date(n.Fecha).toDateString()===dayStr)
     .sort((a,b)=>String(a.Fecha).localeCompare(String(b.Fecha)));
 }
+/* Cada registro describe la actividad que TERMINÓ justo cuando se
+   guardó, no la que arranca ahí — "hice X" se escribe DESPUÉS de
+   hacerlo, no antes de empezar (reporte del usuario: "lo pone como si
+   fuera de ahora en adelante, cuando es lo que ya hice hasta ahora").
+   Por eso el rango de cada bloque va del registro ANTERIOR hasta éste,
+   no de éste hasta el siguiente (como estaba antes). El primer
+   registro del día usa la medianoche como ancla (tiene sentido para un
+   registro que también lleva sueño — "dormí" suele ser lo primero del
+   día). Si es hoy y ya pasó al menos un minuto desde el último
+   registro, se agrega un tramo final sin etiquetar ("ahora mismo, sin
+   registrar todavía") para no hacer parecer que ese tiempo desapareció.
+   Función compartida por el modal (renderTimeLogView) y la tarjeta de
+   capítulo en Cards (timeLogChapterHTML) para que ambas vistas
+   muestren exactamente el mismo rango. */
+function timeLogRangesForDate(dateObj){
+  const entries = timeLogEntriesForDate(dateObj);
+  const isToday = dateObj.toDateString()===new Date().toDateString();
+  const dayStart = new Date(dateObj); dayStart.setHours(0,0,0,0);
+  const ranges = entries.map((n,i)=>{
+    const end = new Date(n.Fecha);
+    const start = i>0 ? new Date(entries[i-1].Fecha) : dayStart;
+    return { note:n, start, end, durMs: Math.max(0, end-start) };
+  });
+  if(isToday && entries.length){
+    const lastEnd = new Date(entries[entries.length-1].Fecha);
+    const now = new Date();
+    if(now-lastEnd > 60000) ranges.push({ note:null, start:lastEnd, end:now, durMs:now-lastEnd, ongoing:true });
+  }
+  return ranges;
+}
 /* Migración de una sola vez: si de una sesión anterior queda un
    cuaderno "Registro de tiempo" con notas propias, se mueven a
    Registro Personal (con el marcador puesto) y se borra el cuaderno
@@ -3345,22 +3392,28 @@ function renderTimeLogView(){
   const label = document.getElementById('timeLogDateLabel'); if(!label) return;
   const isToday = _timeLogViewDate.toDateString()===new Date().toDateString();
   label.textContent = isToday ? 'Hoy' : _timeLogViewDate.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
-  const entries = timeLogEntriesForDate(_timeLogViewDate);
+  const ranges = timeLogRangesForDate(_timeLogViewDate);
   const totals = {};
-  const rows = entries.map((n,i)=>{
-    const start = new Date(n.Fecha);
-    const end = i+1<entries.length ? new Date(entries[i+1].Fecha) : (isToday ? new Date() : start);
-    const durMs = Math.max(0, end-start);
-    const long = durMs > 2*60*60*1000;
+  const rows = ranges.map((r,i)=>{
+    const n = r.note;
+    if(!n){
+      return `<div class="settings-row" style="align-items:flex-start;opacity:.7">
+        <span style="flex:1">
+          <b>${fmtHM(r.start)}–ahora</b> <span style="color:var(--text-dim);font-size:12px">(${fmtDuration(r.durMs)})</span><br>
+          <span class="hint" style="color:var(--text-dim)">Sin registrar todavía — anota qué hiciste en cuanto termines</span>
+        </span>
+      </div>`;
+    }
+    const long = r.durMs > 2*60*60*1000;
     const tagKey = n.Tags || '(sin etiqueta)';
-    totals[tagKey] = (totals[tagKey]||0) + durMs;
+    totals[tagKey] = (totals[tagKey]||0) + r.durMs;
     const tagBadge = n.Tags ? `<span class="tag-badge" style="border-color:${tagColor(n.Tags)}">#${escHtml(n.Tags)}</span>` : '';
-    const endLabel = (i+1<entries.length || !isToday) ? fmtHM(end) : 'ahora';
+    const rangeLabel = r.start.getTime()===r.end.getTime() ? fmtHM(r.end) : (fmtHM(r.start)+'–'+fmtHM(r.end));
     return `<div class="settings-row" style="align-items:flex-start${long?';background:rgba(211,124,60,.12)':''}">
       <span style="flex:1">
-        <b>${fmtHM(start)}–${endLabel}</b> <span style="color:var(--text-dim);font-size:12px">(${fmtDuration(durMs)})</span><br>
+        <b>${rangeLabel}</b> <span style="color:var(--text-dim);font-size:12px">(${fmtDuration(r.durMs)})</span><br>
         ${escHtml(n.Titulo)} ${tagBadge}
-        ${long?`<div style="margin-top:4px"><button class="mini-btn" onclick="splitTimeLogEntry('${n.ID}','${entries[i+1]?entries[i+1].ID:''}')">✂️ Dividir — ¿de verdad duró tanto?</button></div>`:''}
+        ${(long && i>0)?`<div style="margin-top:4px"><button class="mini-btn" onclick="splitTimeLogEntry('${ranges[i-1].note.ID}','${n.ID}')">✂️ Dividir — ¿de verdad duró tanto?</button></div>`:''}
       </span>
       <button class="icon-btn" onclick="openNoteEditor('${n.ID}')" title="Editar texto">✏️</button>
       <button class="icon-btn" onclick="deleteTimeLogEntryUI('${n.ID}')" title="Borrar">🗑️</button>
@@ -3371,7 +3424,7 @@ function renderTimeLogView(){
   const summaryHTML = Object.entries(totals).sort((a,b)=>b[1]-a[1]).map(([tag,ms])=>
     `<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>${tag==='(sin etiqueta)'?tag:'#'+escHtml(tag)}</span><b>${fmtDuration(ms)}</b></div>`
   ).join('');
-  document.getElementById('timeLogSummary').innerHTML = entries.length ? `<b style="font-size:12px;color:var(--text-dim)">RESUMEN DEL DÍA</b>${summaryHTML}` : '';
+  document.getElementById('timeLogSummary').innerHTML = ranges.length ? `<b style="font-size:12px;color:var(--text-dim)">RESUMEN DEL DÍA</b>${summaryHTML}` : '';
 }
 /* "Dividir" un bloque largo: pregunta a qué hora cambiaste de actividad y
    qué empezaste a hacer, e inserta un registro nuevo justo ahí — el
@@ -3805,17 +3858,30 @@ function openChecklists(){
   document.body.appendChild(overlay);
   renderChecklistBody();
 }
+/* Cada tarjeta de plantilla se puede plegar entera (no solo cada fill
+   individual dentro de ella, que ya se plegaba) — empieza plegada
+   (solo título+botones) para no ser desgastante de ver con varias
+   plantillas cada una con su historial largo; se expande con un clic.
+   El estado no se guarda entre sesiones a propósito (simple, como el
+   resto de colapsos "por ahora" de esta vista). */
+window._tplCardCollapsed = window._tplCardCollapsed || {};
+function isTplCardCollapsed(id){ return window._tplCardCollapsed.hasOwnProperty(id) ? window._tplCardCollapsed[id] : true; }
+function toggleTplCardCollapsed(id){ window._tplCardCollapsed[id] = !isTplCardCollapsed(id); renderChecklistBody(); }
 function renderChecklistBody(){
   const body = document.getElementById('checklistBody'); if(!body) return;
-  body.innerHTML = `<button class="btn secondary" onclick="openTemplateModal()">+ Nueva plantilla</button><div id="tplList" style="margin-top:10px"></div>`;
-  document.getElementById('tplList').innerHTML = DATA.plantillas.map(p=>{
+  body.innerHTML = `<button class="btn secondary" onclick="openTemplateModal()">+ Nueva plantilla de Checklist</button><div id="tplList" style="margin-top:10px"></div>`;
+  document.getElementById('tplList').innerHTML = activeTemplates().map(p=>{
     const hist = DATA.historial.filter(h=>h.PlantillaID===p.ID).sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha)));
+    const collapsed = isTplCardCollapsed(p.ID);
     return `<div class="tpl-card">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <span><b>${escHtml(p.Nombre)}</b> ${p.Recordatorio?`<span class="tag-badge" title="${escAttr(RECORDATORIO_LABELS[p.Recordatorio]||'')}">⏰</span>`:''}<br><span style="color:var(--text-dim);font-size:11px">${lastFilledLabel(hist[0]?new Date(hist[0].Fecha):null)}</span></span>
+        <span style="cursor:pointer;display:flex;align-items:center;gap:6px" onclick="toggleTplCardCollapsed('${p.ID}')">
+          <span style="flex:none">${collapsed?'▸':'▾'}</span>
+          <span><b>${escHtml(p.Nombre)}</b> ${p.Recordatorio?`<span class="tag-badge" title="${escAttr(RECORDATORIO_LABELS[p.Recordatorio]||'')}">⏰</span>`:''}<br><span style="color:var(--text-dim);font-size:11px">${lastFilledLabel(hist[0]?new Date(hist[0].Fecha):null)}</span></span>
+        </span>
         <span><button class="icon-btn" onclick="openFillModal('${p.ID}')">▶ Llenar</button><button class="icon-btn" onclick="openChecklistStatsModal('${p.ID}')" title="Ver estadísticas (rachas y cumplimiento)">📊</button><button class="icon-btn" onclick="openTemplateModal('${p.ID}')" title="Editar plantilla">✏️</button><button class="icon-btn" onclick="deleteTemplateUI('${p.ID}')">🗑️</button></span>
       </div>
-      <div>${hist.map((h,idx)=>histEntryHTML(h, idx===0)).join('') || '<p class="hint" style="color:var(--text-dim)">Sin historial aún</p>'}</div>
+      ${collapsed ? '' : `<div>${hist.map((h,idx)=>histEntryHTML(h, idx===0)).join('') || '<p class="hint" style="color:var(--text-dim)">Sin historial aún</p>'}</div>`}
     </div>`;
   }).join('') || '<p style="color:var(--text-dim)">Sin plantillas — crea la primera.</p>';
 }
@@ -4006,6 +4072,7 @@ function histEntryHTML(h, isNewest){
         <button class="icon-btn" onclick="event.stopPropagation();startHistNameEdit('${h.ID}',this)" title="Renombrar esta lista">✏️</button>
         <button class="icon-btn" onclick="event.stopPropagation();openBulkAddForHist('${h.ID}')" title="Pegar varios elementos">📋</button>
         <button class="icon-btn" onclick="event.stopPropagation();histAddItem('${h.ID}')" title="Agregar elemento a esta lista">+ elemento</button>
+        <button class="icon-btn" onclick="event.stopPropagation();histDeleteEntry('${h.ID}')" title="Eliminar este llenado completo (no la plantilla)">🗑️</button>
       </span>
     </div>
     ${collapsed ? '' : `
@@ -4219,7 +4286,34 @@ function saveTemplateModal(btn, existingId){
     renderChecklistBody(); renderSidebar(); renderReminderBanner(); renderSettingsPlantillas();
   });
 }
-function deleteTemplateUI(id){ if(!confirm('¿Eliminar esta plantilla?')) return; deleteEntity('PLANTILLAS', id).then(()=>{ renderChecklistBody(); renderSidebar(); renderSettingsPlantillas(); }); }
+/* Igual que las notas: borrar una plantilla de checklist ya NO la quita
+   del Sheet de una — la manda a la papelera (Papelera=fecha) y se
+   puede restaurar, con purga automática a los 30 días. Antes era un
+   deleteEntity directo (sin vuelta atrás) y encima dejaba su historial
+   huérfano (invisible, sin plantilla a la que aparecer debajo) — real
+   susto de datos que un usuario reportó. activeTemplates() la esconde
+   de todas las listas normales; los lookups por ID puntuales (editar
+   una plantilla específica, resolver columnas de un historial) NO se
+   filtran, para que el historial de una plantilla ya borrada se siga
+   viendo bien mientras esté en camino a la papelera/restaurada. */
+function activeTemplates(){ return DATA.plantillas.filter(p=>!p.Papelera); }
+function trashedTemplates(){ return DATA.plantillas.filter(p=>p.Papelera).sort((a,b)=>String(b.Papelera).localeCompare(String(a.Papelera))); }
+function deleteTemplateUI(id){
+  if(!confirm('¿Mover esta plantilla a la papelera? Se puede recuperar desde ahí, junto con su historial.')) return;
+  const p = DATA.plantillas.find(x=>x.ID===id); if(!p) return;
+  p.Papelera = new Date().toISOString();
+  saveEntity('PLANTILLAS', p).then(()=>{ renderChecklistBody(); renderSidebar(); renderSettingsPlantillas(); showToast('🗑️ Movida a la papelera'); });
+}
+function restoreTemplateUI(id){
+  const p = DATA.plantillas.find(x=>x.ID===id); if(!p) return;
+  p.Papelera = '';
+  saveEntity('PLANTILLAS', p).then(()=>{ renderTrashList(); renderChecklistBody(); renderSidebar(); showToast('Plantilla restaurada'); });
+}
+function permanentlyDeleteTemplateUI(id){
+  if(!confirm('¿Eliminar definitivamente? Esto borra también su historial y ya no se puede deshacer.')) return;
+  const hist = DATA.historial.filter(h=>h.PlantillaID===id);
+  Promise.all(hist.map(h=>deleteEntity('HISTORIAL', h.ID))).then(()=>deleteEntity('PLANTILLAS', id)).then(()=>{ renderTrashList(); showToast('Eliminada para siempre'); });
+}
 
 /* Llenar: formulario real agrupado por categoría (no un prompt) — casillas
    y nota libre por elemento, más elementos/categorías extra solo para esta
@@ -4350,6 +4444,18 @@ function histExtraChange(historyId, i, colIndex, val){
   histMutate(historyId, items=>{ if(items[i]){ items[i].extra = items[i].extra||{}; items[i].extra[col] = val; } });
 }
 function histDeleteItem(id, i){ if(!confirm('¿Quitar este elemento de la lista?')) return; histMutate(id, items=>{ items.splice(i,1); }); }
+/* Borra un llenado COMPLETO (una fila de HISTORIAL — ej. "Viaje a
+   Cancún, marzo") sin tocar la plantilla ni los demás llenados. Pedido
+   explícito del usuario: no había forma de quitar un llenado
+   específico, solo elementos sueltos dentro de uno (histDeleteItem) o
+   la plantilla entera (que además ahora es papelera, no borrado
+   directo). Este sí es directo/sin papelera — es un registro histórico
+   puntual, no algo que valga la pena poder "restaurar" como una nota o
+   una plantilla completa. */
+function histDeleteEntry(historyId){
+  if(!confirm('¿Eliminar este llenado completo? (no la plantilla, solo este registro)')) return;
+  deleteEntity('HISTORIAL', historyId).then(()=>{ renderChecklistBody(); });
+}
 function histAddItem(id){
   const text = prompt('Nuevo elemento para esta lista (opcional "categoría: elemento"):'); if(!text || !text.trim()) return;
   const m = text.match(/^(.+?):\s*(.+)$/);
@@ -5249,7 +5355,7 @@ function settingsTab(btn, tab){
    reutiliza los mismos modales de edición que ya existían. */
 function renderSettingsPlantillas(){
   const body = document.getElementById('settingsBody'); if(!body) return;
-  const checklistRows = DATA.plantillas.map(p=>`
+  const checklistRows = activeTemplates().map(p=>`
     <div class="settings-row">
       <span style="flex:1">☑️ ${escHtml(p.Nombre)} ${p.Recordatorio?`<span class="tag-badge" title="${escAttr(RECORDATORIO_LABELS[p.Recordatorio]||'')}">⏰</span>`:''}<br><span style="color:var(--text-dim);font-size:12px">${lastFilledLabel(lastFilledChecklist(p.ID))}</span></span>
       <button class="icon-btn" onclick="openTemplateModal('${p.ID}')" title="Editar">✏️</button>
@@ -5275,9 +5381,11 @@ function renderSettingsPlantillas(){
     <button class="btn secondary" style="margin-bottom:8px" onclick="promptNewPersona()">+ nueva persona</button>
     ${personaRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin personas todavía.</p>'}
     <p style="font-weight:700;margin:16px 0 6px">☑️ Checklists</p>
-    ${checklistRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin checklists — créalos desde ☑️ en el panel lateral.</p>'}
+    <button class="btn secondary" style="margin-bottom:8px" onclick="openTemplateModal()">+ Nueva plantilla de Checklist</button>
+    ${checklistRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin checklists todavía.</p>'}
     <p style="font-weight:700;margin:16px 0 6px">🏷️ Plantillas de campos</p>
-    ${fieldRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas de campos — créalas desde "+" → Plantilla.</p>'}`;
+    <button class="btn secondary" style="margin-bottom:8px" onclick="openFieldTemplateModal()">+ Nueva plantilla de campos</button>
+    ${fieldRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas de campos todavía.</p>'}`;
 }
 function deleteFieldTemplateUI(id){
   if(!confirm('¿Eliminar esta plantilla de campos? Las notas que ya creaste con ella no se borran, solo la plantilla.')) return;
@@ -5694,7 +5802,69 @@ function boot(){
   syncNow(false).then(migrateLocalFlagsAndSearchesOnce).then(autoPurgeOldTrash).then(migrateTimeLogToRegistroPersonal).then(ensurePersonasTemplate).then(renderAll);
   initSplitResizerOnce();
   initEditorResizerOnce();
+  initResizableTablesObserver();
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+}
+/* Columnas de tabla que se pueden hacer más anchas jalando el borde
+   derecho de su encabezado — pedido general para "todas las tablas"
+   (Lista de viaje en vista tabla, las de 🧩 Tablas). En vez de tener
+   que acordarse de llamar a esto en cada uno de los ~8 lugares que
+   arman/reconstruyen estas tablas (buscar en vivo, ordenar, cambiar de
+   pestaña…), un solo MutationObserver detecta cualquier table.items-table
+   o table.org-table que aparezca en el DOM, sin importar de dónde
+   vino. El ancho elegido se guarda en localStorage por "firma" de
+   columnas (sus nombres, unidos) — así sobrevive a que la tabla se
+   reconstruya entera (typing en un buscador, por ejemplo). */
+function initResizableTablesObserver(){
+  const observer = new MutationObserver((mutations)=>{
+    mutations.forEach(m=>{
+      m.addedNodes.forEach(node=>{
+        if(node.nodeType!==1) return;
+        if(node.matches && (node.matches('table.items-table')||node.matches('table.org-table'))) makeTableColumnsResizable(node);
+        if(node.querySelectorAll) node.querySelectorAll('table.items-table, table.org-table').forEach(makeTableColumnsResizable);
+      });
+    });
+  });
+  observer.observe(document.body, { childList:true, subtree:true });
+}
+function tableColWidthsKey(table){
+  const ths = Array.from(table.querySelectorAll('thead th, tr:first-child th'));
+  return 'org_colw_' + ths.map(th=>th.textContent.trim()).join('|');
+}
+function makeTableColumnsResizable(table){
+  const headerRow = table.querySelector('thead tr') || table.querySelector('tr'); if(!headerRow) return;
+  const ths = Array.from(headerRow.children); if(!ths.length) return;
+  const key = tableColWidthsKey(table);
+  let saved = {}; try{ saved = JSON.parse(localStorage.getItem(key)||'{}'); }catch(e){}
+  table.style.tableLayout = 'fixed';
+  let colgroup = table.querySelector('colgroup');
+  if(!colgroup){ colgroup = document.createElement('colgroup'); table.insertBefore(colgroup, table.firstChild); }
+  colgroup.innerHTML = '';
+  ths.forEach((th,i)=>{
+    const col = document.createElement('col');
+    col.style.width = (saved[i] || Math.max(60, th.getBoundingClientRect().width)) + 'px';
+    colgroup.appendChild(col);
+    if(th.querySelector('.col-resize-handle')) return;
+    const handle = document.createElement('span');
+    handle.className = 'col-resize-handle';
+    handle.addEventListener('mousedown', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      handle.classList.add('resizing');
+      const startX = e.clientX;
+      const startW = parseInt(colgroup.children[i].style.width, 10) || th.getBoundingClientRect().width;
+      const onMove = (ev)=>{ colgroup.children[i].style.width = Math.max(40, startW + (ev.clientX-startX)) + 'px'; };
+      const onUp = ()=>{
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        handle.classList.remove('resizing');
+        const widths = {}; Array.from(colgroup.children).forEach((c,ci)=>{ widths[ci] = parseInt(c.style.width, 10); });
+        localStorage.setItem(key, JSON.stringify(widths));
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    th.appendChild(handle);
+  });
 }
 /* El sync con Google Sheets (getAll/saveRow) es solo para los DATOS —
    esto es aparte: fuerza que se vuelva a pedir el HTML/JS de la app en

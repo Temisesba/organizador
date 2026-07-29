@@ -446,7 +446,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Gran Cañón';
+const BUILD_VERSION = 'Bahía Bioluminiscente';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1507,13 +1507,26 @@ async function syncFieldDateToCalendar(noteId, fieldName){
   const note = getNote(noteId); if(!note) return;
   if(!googleAccessToken){ showToast('Conecta Google Calendar primero, en Configuración → Conexión'); return; }
   const dateVal = getNoteFields(note)[fieldName];
-  if(!dateVal || !/^\d{4}-\d{2}-\d{2}$/.test(dateVal)){ showToast('Ese campo no tiene una fecha válida todavía'); return; }
-  const recurrente = confirm('¿Se repite cada año (como un cumpleaños)?\n\nAceptar = sí, cada año.\nCancelar = evento de una sola vez.');
-  const [y,m,d] = dateVal.split('-').map(s=>parseInt(s,10));
   const pad = n=>String(n).padStart(2,'0');
-  const start = new Date(y,m-1,d);
-  const end = new Date(start); end.setDate(end.getDate()+1);
   const dstr = dd => dd.getFullYear()+'-'+pad(dd.getMonth()+1)+'-'+pad(dd.getDate());
+  let start, recurrente;
+  if(dateVal && /^\d{2}-\d{2}$/.test(dateVal)){
+    // campo "fecha-anual" (día/mes sin año, ej. cumpleaños): siempre se
+    // repite cada año — mismo criterio que syncBirthdayToCalendar, la
+    // próxima ocurrencia se calcula rodando al año que sigue si ya pasó.
+    const [mm,dd] = dateVal.split('-').map(s=>parseInt(s,10));
+    const todayMid = new Date(); todayMid.setHours(0,0,0,0);
+    start = new Date(todayMid.getFullYear(), mm-1, dd);
+    if(start < todayMid) start = new Date(todayMid.getFullYear()+1, mm-1, dd);
+    recurrente = true;
+  } else if(dateVal && /^\d{4}-\d{2}-\d{2}$/.test(dateVal)){
+    const [y,m,d] = dateVal.split('-').map(s=>parseInt(s,10));
+    start = new Date(y,m-1,d);
+    recurrente = confirm('¿Se repite cada año (como un cumpleaños)?\n\nAceptar = sí, cada año.\nCancelar = evento de una sola vez.');
+  } else {
+    showToast('Ese campo no tiene una fecha válida todavía'); return;
+  }
+  const end = new Date(start); end.setDate(end.getDate()+1);
   let camposGCal = {}; try{ camposGCal = JSON.parse(note.CamposGCalJSON||'{}'); }catch(e){}
   const existingEventId = camposGCal[fieldName];
   const body = { summary: (note.Titulo||'Recordatorio')+' — '+prettyFieldLabel(fieldName), start:{date:dstr(start)}, end:{date:dstr(end)} };
@@ -1639,9 +1652,10 @@ function chapterGroupHTML(n, pairs, highlight){
       const hit = highlight.includes(t.toLowerCase());
       return `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(t)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`;
     }).join('');
-    const isDateField = isField && tipos[fieldName]==='fecha';
+    const isDateField = isField && (tipos[fieldName]==='fecha' || tipos[fieldName]==='fecha_anual');
     const dateVal = isDateField ? stripHtmlToText(p.texto).trim() : '';
-    const syncBtn = (isDateField && /^\d{4}-\d{2}-\d{2}$/.test(dateVal)) ? `<button class="icon-btn" style="padding:0 3px" onclick="event.stopPropagation();syncFieldDateToCalendar('${n.ID}','${fieldName}')" title="Sincronizar esta fecha con Google Calendar">📅</button>` : '';
+    const dateValLooksValid = /^\d{4}-\d{2}-\d{2}$/.test(dateVal) || /^\d{2}-\d{2}$/.test(dateVal);
+    const syncBtn = (isDateField && dateValLooksValid) ? `<button class="icon-btn" style="padding:0 3px" onclick="event.stopPropagation();syncFieldDateToCalendar('${n.ID}','${fieldName}')" title="Sincronizar esta fecha con Google Calendar">📅</button>` : '';
     return `<div class="field-card"><div class="field-card-tag">${escHtml(label)}${syncBtn}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
   }).join('');
   return `<div class="chapter-group" onclick="openNoteEditor('${n.ID}')" style="${n.Color?('border-left:4px solid '+n.Color):''}">
@@ -3322,15 +3336,20 @@ async function migrateTimeLogToRegistroPersonal(){
    arriesgar lo que ya funciona ahí. Idempotente: si ya existe una
    plantilla llamada "Personas" no la toca ni duplica. */
 async function ensurePersonasTemplate(){
-  const tipos = { cumpleanos:'fecha', fecha_ultimo_contacto:'fecha', proximo_contacto:'fecha' };
+  // cumpleaños es día+mes SIN año (nadie tiene por qué compartirlo) y
+  // siempre se repite cada año — por eso 'fecha_anual', no 'fecha' a
+  // secas (que pide día/mes/año como cualquier fecha normal, ej. la
+  // última vez que hablaste con alguien).
+  const tipos = { cumpleanos:'fecha_anual', fecha_ultimo_contacto:'fecha', proximo_contacto:'fecha' };
   const existing = DATA.plantillas_prop.find(p=>p.Nombre==='Personas');
   if(existing){
     // la plantilla se creó antes de que existiera el sistema de "tipo de
-    // campo" — se completa aquí mismo (sin duplicar) para que
+    // campo" (o antes de que existiera 'fecha_anual' específicamente) —
+    // se completa/corrige aquí mismo (sin duplicar) para que
     // cumpleaños/fechas ganen su botón de sync a Calendar sin que el
     // usuario tenga que editar la plantilla a mano.
     const currentTipos = templateFieldTypes(existing);
-    if(!currentTipos.cumpleanos){
+    if(currentTipos.cumpleanos!=='fecha_anual'){
       await saveEntity('PLANTILLAS_PROP', Object.assign({}, existing, { TiposJSON: JSON.stringify(Object.assign({}, currentTipos, tipos)) }));
     }
     return;
@@ -4872,17 +4891,18 @@ function openFieldTemplateModal(existingId){
   const existing = existingId ? DATA.plantillas_prop.find(p=>p.ID===existingId) : null;
   let campos = []; if(existing){ try{ campos = JSON.parse(existing.CamposJSON||'[]'); }catch(e){} }
   const tipos = templateFieldTypes(existing);
-  const camposText = campos.map(c => tipos[c]==='fecha' ? (c+' | fecha') : c).join('\n');
+  const tipoSuffix = { fecha:' | fecha', fecha_anual:' | fecha-anual' };
+  const camposText = campos.map(c => c + (tipoSuffix[tipos[c]]||'')).join('\n');
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
     <div class="modal-head"><b>${existing?'✏️ Editar':'+'} Plantilla de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Esta misma lista de campos la puedes insertar después como texto (#campo debajo del otro), como columna izquierda de una tabla Cornell, o llenarla directo con el formulario rápido (⚡) — eliges al momento de usarla. Agrega " | fecha" al final de un campo (ej. "cumpleanos | fecha") para poder sincronizarlo con Google Calendar más tarde.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Esta misma lista de campos la puedes insertar después como texto (#campo debajo del otro), como columna izquierda de una tabla Cornell, o llenarla directo con el formulario rápido (⚡) — eliges al momento de usarla. Agrega " | fecha" (día/mes/año, ej. vencimiento de un documento) o " | fecha-anual" (solo día y mes, se repite cada año — para cumpleaños y cosas así) al final de un campo para poder sincronizarlo con Google Calendar más tarde.</p>
       <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Nombre</label>
       <input type="text" id="ftplNombre" value="${existing?escAttr(existing.Nombre):''}" placeholder="ej. Enfermedad">
       <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Campos (uno por línea, sin #)</label>
       <textarea id="ftplCampos" rows="6" placeholder="nombre enfermedad
-cumpleanos | fecha
+cumpleanos | fecha-anual
 morfo
 tx
 dx">${existing?escHtml(camposText):''}</textarea>
@@ -4909,7 +4929,9 @@ function saveFieldTemplate(btn, existingId){
     const parts = line.split('|').map(s=>s.trim());
     const slug = parts[0].toLowerCase().replace(/\s+/g,'_'); if(!slug) return;
     campos.push(slug);
-    if(parts[1] && parts[1].toLowerCase()==='fecha') tipos[slug] = 'fecha';
+    const tipoTxt = parts[1] ? parts[1].toLowerCase().replace(/\s+/g,'-') : '';
+    if(tipoTxt==='fecha') tipos[slug] = 'fecha';
+    else if(tipoTxt==='fecha-anual') tipos[slug] = 'fecha_anual';
   });
   const usaPersona = document.getElementById('ftplUsaPersona').checked ? '1' : '';
   const recordatorio = document.getElementById('ftplRecordatorio').value;
@@ -5001,8 +5023,8 @@ function openQuickFieldFill(id){
       <label style="font-size:12px;font-weight:600;display:block;margin:12px 0 4px">Título de esta nota</label>
       <input type="text" id="qffTitle" value="${escAttr(pt.Nombre+' — '+fmtDate(new Date().toISOString()))}">
       ${campos.map((c,i)=>`
-        <label style="font-size:12px;font-weight:600;display:block;margin:12px 0 4px">${escHtml(prettyFieldLabel(c))}</label>
-        ${tipos[c]==='fecha' ? `<input type="date" id="qffField${i}">` : `<textarea id="qffField${i}" rows="2" style="width:100%;resize:vertical"></textarea>`}`).join('')}
+        <label style="font-size:12px;font-weight:600;display:block;margin:12px 0 4px">${escHtml(prettyFieldLabel(c))}${tipos[c]==='fecha_anual'?' <span style="font-weight:400;color:var(--text-dim);font-size:11px">(solo día y mes, se repite cada año)</span>':''}</label>
+        ${tipos[c]==='fecha' ? `<input type="date" id="qffField${i}">` : tipos[c]==='fecha_anual' ? fechaAnualSelectHTML(i) : `<textarea id="qffField${i}" rows="2" style="width:100%;resize:vertical"></textarea>`}`).join('')}
       <div style="margin-top:14px"><button class="btn" id="qffSaveBtn">Guardar</button></div>
     </div>
   </div>`;
@@ -5010,6 +5032,19 @@ function openQuickFieldFill(id){
   if(usaPersona) document.getElementById('qffPersona').focus();
   else { document.getElementById('qffTitle').focus(); document.getElementById('qffTitle').select(); }
   document.getElementById('qffSaveBtn').addEventListener('click', ()=> saveQuickFieldFill(pt, campos, overlay));
+}
+/* Un campo "fecha-anual" (ej. cumpleaños) es día+mes SIN año — nadie
+   tiene por qué compartir en qué año nació, y además así se puede
+   sincronizar como evento recurrente cada año en Google Calendar sin
+   ambigüedad. Mismo criterio que ya usaba la entidad ligera Personas
+   (birthdaySelectHTML) — aquí genérico para cualquier plantilla. */
+function fechaAnualSelectHTML(i){
+  const dayOpts = ['<option value="">Día</option>'].concat(Array.from({length:31},(_,d)=>d+1).map(d=>`<option value="${d}">${d}</option>`)).join('');
+  const monthOpts = ['<option value="">Mes</option>'].concat(MESES_NOMBRES.map((m,mi)=>`<option value="${mi+1}">${m}</option>`)).join('');
+  return `<div style="display:flex;gap:6px">
+    <select id="qffField${i}_day" style="width:auto">${dayOpts}</select>
+    <select id="qffField${i}_month" style="width:auto">${monthOpts}</select>
+  </div>`;
 }
 async function handleQffPersonaChange(sel){
   if(sel.value==='__new__'){
@@ -5031,13 +5066,21 @@ function updateQffTitleFromPersona(sel){
 async function saveQuickFieldFill(pt, campos, overlay){
   const btn = overlay.querySelector('#qffSaveBtn');
   const personaSel = overlay.querySelector('#qffPersona');
+  const tipos = templateFieldTypes(pt);
   if(pt.UsaPersona && (!personaSel || !personaSel.value || personaSel.value==='__new__')){ showToast('Elige o agrega una persona'); return; }
   await withSavingFeedback(btn, async ()=>{
     const titulo = (document.getElementById('qffTitle').value||'').trim() || 'Sin título';
     const personaName = pt.UsaPersona ? ((DATA.personas.find(p=>p.ID===personaSel.value)||{}).Nombre||'') : '';
     let trs = pt.UsaPersona ? ('<tr><td class="cornell-cue-cell">#persona</td><td><p>'+escHtml(personaName)+'</p></td></tr>') : '';
     trs += campos.map((c,i)=>{
-      const val = (document.getElementById('qffField'+i).value||'').trim();
+      let val;
+      if(tipos[c]==='fecha_anual'){
+        const day = document.getElementById('qffField'+i+'_day').value;
+        const month = document.getElementById('qffField'+i+'_month').value;
+        val = (day && month) ? (String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0')) : '';
+      } else {
+        val = (document.getElementById('qffField'+i).value||'').trim();
+      }
       return '<tr><td class="cornell-cue-cell">#'+escHtml(c)+'</td><td>'+(val?'<p>'+escHtml(val).replace(/\n/g,'</p><p>')+'</p>':'<br>')+'</td></tr>';
     }).join('');
     const nb = (pt.Notebook && DATA.notebooks.find(n=>n.Nombre===pt.Notebook)) || await ensureRegistroPersonalNotebook();

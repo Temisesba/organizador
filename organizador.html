@@ -237,8 +237,8 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
    como otro hijo flex más, sin fondo oscuro propio — así la nota que
    ya tienes abierta a su izquierda se queda totalmente interactiva
    mientras el panel escucha. */
-.transcribe-side-panel{background:var(--bg-elev);width:320px;flex:none;height:100%;box-shadow:var(--shadow);display:flex;flex-direction:column;border-left:1px solid var(--border)}
-@media (max-width:820px){ .transcribe-side-panel{width:100%;position:fixed;inset:0;z-index:210} }
+.transcribe-side-panel{background:var(--bg-elev);width:320px;height:100vh;position:fixed;top:0;right:0;box-shadow:var(--shadow);display:flex;flex-direction:column;border-left:1px solid var(--border);z-index:210}
+@media (max-width:820px){ .transcribe-side-panel{width:100%;inset:0} }
 .transcribe-min-chip{position:fixed;right:20px;bottom:20px;z-index:250;background:var(--accent);color:var(--accent-text);border:none;border-radius:20px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:var(--shadow);cursor:pointer}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px}
 .modal{background:var(--bg-elev);border-radius:var(--radius);box-shadow:var(--shadow);width:min(640px,100%);max-height:90vh;display:flex;flex-direction:column}
@@ -439,7 +439,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Salar de Uyuni';
+const BUILD_VERSION = 'Cataratas del Iguazú';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1489,6 +1489,40 @@ async function syncBirthdayToCalendar(personaId){
   showToast('📅 Cumpleaños de '+p.Nombre+' en tu Google Calendar (se repite cada año)');
   renderSettingsPlantillas();
 }
+/* Igual que syncBirthdayToCalendar, pero genérico: cualquier campo
+   marcado "| fecha" en cualquier plantilla, en cualquier nota, se
+   puede sincronizar así (botón 📅 en su tarjetita de capítulo). Una
+   nota puede tener VARIOS campos de fecha a la vez (ej. cumpleaños Y
+   próximo_contacto en la plantilla Personas) — por eso el ID del
+   evento de Calendar no vive en una sola columna como en NOTAS
+   original, sino en NOTAS.CamposGCalJSON = {nombreCampo: eventId},
+   uno por campo. Pregunta si se repite cada año (como un cumpleaños)
+   o es de una sola vez (ej. vencimiento de un documento) — eso no se
+   define al crear la plantilla, se decide cada vez que sincronizas. */
+async function syncFieldDateToCalendar(noteId, fieldName){
+  const note = getNote(noteId); if(!note) return;
+  if(!googleAccessToken){ showToast('Conecta Google Calendar primero, en Configuración → Conexión'); return; }
+  const dateVal = getNoteFields(note)[fieldName];
+  if(!dateVal || !/^\d{4}-\d{2}-\d{2}$/.test(dateVal)){ showToast('Ese campo no tiene una fecha válida todavía'); return; }
+  const recurrente = confirm('¿Se repite cada año (como un cumpleaños)?\n\nAceptar = sí, cada año.\nCancelar = evento de una sola vez.');
+  const [y,m,d] = dateVal.split('-').map(s=>parseInt(s,10));
+  const pad = n=>String(n).padStart(2,'0');
+  const start = new Date(y,m-1,d);
+  const end = new Date(start); end.setDate(end.getDate()+1);
+  const dstr = dd => dd.getFullYear()+'-'+pad(dd.getMonth()+1)+'-'+pad(dd.getDate());
+  let camposGCal = {}; try{ camposGCal = JSON.parse(note.CamposGCalJSON||'{}'); }catch(e){}
+  const existingEventId = camposGCal[fieldName];
+  const body = { summary: (note.Titulo||'Recordatorio')+' — '+prettyFieldLabel(fieldName), start:{date:dstr(start)}, end:{date:dstr(end)} };
+  if(recurrente) body.recurrence = ['RRULE:FREQ=YEARLY'];
+  const url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'+(existingEventId?'/'+existingEventId:'');
+  const res = await fetch(url, { method: existingEventId?'PATCH':'POST', headers:{ Authorization:'Bearer '+googleAccessToken, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  if(!res.ok){ showToast('No se pudo sincronizar con Calendar ('+res.status+')'); return; }
+  const data = await res.json();
+  camposGCal[fieldName] = data.id;
+  note.CamposGCalJSON = JSON.stringify(camposGCal);
+  await saveEntity('NOTAS', note);
+  showToast('📅 "'+prettyFieldLabel(fieldName)+'" en tu Google Calendar'+(recurrente?' (se repite cada año)':''));
+}
 function renderReminderBanner(){
   const el = document.getElementById('reminderBanner'); if(!el) return;
   const dismissed = dismissedReminderIds();
@@ -1589,17 +1623,22 @@ function tagsInText(html){
    "circulitos" pegados a esa tarjetita nada más. */
 function chapterGroupHTML(n, pairs, highlight){
   highlight = highlight || [];
+  const tipos = n.PlantillaPropID ? templateFieldTypes(DATA.plantillas_prop.find(pt=>pt.ID===n.PlantillaPropID)) : {};
   const nbTags = notebookInherited(n.Notebook).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`).join('');
   const miniCards = pairs.map(p=>{
     const isField = /^#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+$/.test(p.cue);
     const label = isField ? p.cue : (p.cue || '—');
+    const fieldName = isField ? p.cue.slice(1).toLowerCase() : '';
     const text = stripHtmlToText(p.texto).slice(0,90);
     const cellTagNames = Array.from(new Set([...(p.extraTags||[]), ...tagsInText(p.texto)]));
     const innerTags = cellTagNames.map(t=>{
       const hit = highlight.includes(t.toLowerCase());
       return `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(t)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`;
     }).join('');
-    return `<div class="field-card"><div class="field-card-tag">${escHtml(label)}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
+    const isDateField = isField && tipos[fieldName]==='fecha';
+    const dateVal = isDateField ? stripHtmlToText(p.texto).trim() : '';
+    const syncBtn = (isDateField && /^\d{4}-\d{2}-\d{2}$/.test(dateVal)) ? `<button class="icon-btn" style="padding:0 3px" onclick="event.stopPropagation();syncFieldDateToCalendar('${n.ID}','${fieldName}')" title="Sincronizar esta fecha con Google Calendar">📅</button>` : '';
+    return `<div class="field-card"><div class="field-card-tag">${escHtml(label)}${syncBtn}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
   }).join('');
   return `<div class="chapter-group" onclick="openNoteEditor('${n.ID}')" style="${n.Color?('border-left:4px solid '+n.Color):''}">
     <div class="chapter-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}<span class="chapter-meta">${n.Notebook?(escHtml(n.Notebook)+' · '):''}${fmtDate(n.Fecha)}</span></div>
@@ -1782,7 +1821,9 @@ function initEditorResizerOnce(){
   document.addEventListener('touchend', ()=>{ if(_editorResizing){ _editorResizing=false; localStorage.setItem('org_editor_width', editorWidth); } });
 }
 async function closeNoteEditor(){
-  if(document.getElementById('transcribePanel')) await closeTranscribePanel();
+  // OJO: cerrar la nota ya NO cierra el panel de transcripción (vive
+  // aparte, ver openOrRestoreTranscribePanel) — sigue grabando hacia
+  // _transcribeTargetNoteId hasta que le des ✕ a ese panel directamente.
   const ov = document.getElementById('editorOverlay'); if(ov) ov.remove();
   abandonEmptyDraftIfAny();
   editingNoteId=null;
@@ -1803,38 +1844,50 @@ async function closeNoteEditor(){
 let _speechRecognition = null;
 let _transcribing = false;
 let _transcribeFinalText = ''; // vive fuera de startTranscription() para poder vaciarla desde cutTranscriptSegment() sin tener que parar/reiniciar el reconocimiento
-function toggleTranscription(){
-  if(_transcribing){ stopTranscription(); return; }
-  const editorOverlay = document.getElementById('editorOverlay');
-  if(!editorOverlay){ showToast('Abre o crea una nota primero'); return; }
+let _transcribeTargetNoteId = null; // la nota donde se guarda — sigue siendo esa aunque la cierres y abras/navegues a otras
+/* El panel vive suelto en document.body (posición fija, no dentro de
+   #editorOverlay) precisamente para que cerrar la nota NO se lo lleve
+   consigo — puedes cerrar la nota donde empezaste a dictar, abrir o
+   navegar a cualquier otra, y sigue escuchando/grabando hacia la MISMA
+   nota original hasta que tú cierres el panel con ✕. Este botón del
+   toolbar solo abre uno nuevo si no existe ya uno corriendo; si ya hay
+   uno (de esta nota o de otra que cerraste), lo restaura en vez de
+   tocar el "escuchar/detener" — así no se detiene sin querer una
+   transcripción en curso solo por abrir otra nota y tocar el ícono. */
+function openOrRestoreTranscribePanel(){
   let panel = document.getElementById('transcribePanel');
-  if(!panel){
-    panel = document.createElement('div');
-    panel.id = 'transcribePanel'; panel.className = 'transcribe-side-panel';
-    panel.innerHTML = `
-      <div class="drawer-head"><b>🎙️ Transcribir</b><span><button class="icon-btn" onclick="minimizeTranscribePanel()" title="Minimizar — sigue escuchando aunque no lo veas">➖</button><button class="icon-btn" onclick="closeTranscribePanel()">✕</button></span></div>
-      <div style="padding:10px;overflow-y:auto;flex:1;display:flex;flex-direction:column;min-height:0">
-        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Idioma</label>
-        <select id="transcribeLangSelect">
-          <option value="es-MX">Español (México)</option>
-          <option value="es-ES">Español (España)</option>
-          <option value="en-US">English (US)</option>
-          <option value="en-GB">English (UK)</option>
-          <option value="pt-BR">Português (Brasil)</option>
-          <option value="fr-FR">Français</option>
-        </select>
-        <p class="hint" style="color:var(--text-dim);font-size:11px;margin:4px 0 8px">El navegador no detecta el idioma solo — elígelo antes de darle a escuchar.</p>
-        <div id="transcribeCaptureArea" contenteditable="true" style="flex:1;min-height:0;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:10px"></div>
-        <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0 0">Se agrega a esta misma nota (como #transcripcion) al cerrar este panel, o de una vez con "✂️ Cortar" — mientras tanto sigue escribiendo tus apuntes en la nota, a la izquierda.</p>
-        <div style="display:flex;gap:6px;margin-top:8px">
-          <button class="btn" id="transcribeToggleBtn" style="flex:1" onclick="toggleTranscription()">🎙️ Empezar a escuchar</button>
-          <button class="btn secondary" onclick="cutTranscriptSegment()" title="Guarda lo transcrito hasta aquí en la nota y sigue escuchando desde cero — para ir usando el texto por partes, en vez de esperar hasta cerrar el panel">✂️ Cortar</button>
-        </div>
-      </div>`;
-    editorOverlay.appendChild(panel);
-    return; // el panel recién se abre — que elija idioma antes de empezar a escuchar
+  if(panel){
+    if(panel.style.display==='none') restoreTranscribePanel();
+    return;
   }
-  startTranscription();
+  if(!editingNoteId) return;
+  panel = document.createElement('div');
+  panel.id = 'transcribePanel'; panel.className = 'transcribe-side-panel';
+  panel.innerHTML = `
+    <div class="drawer-head"><b>🎙️ Transcribir</b><span><button class="icon-btn" onclick="minimizeTranscribePanel()" title="Minimizar — sigue escuchando aunque no lo veas">➖</button><button class="icon-btn" onclick="closeTranscribePanel()">✕</button></span></div>
+    <div style="padding:10px;overflow-y:auto;flex:1;display:flex;flex-direction:column;min-height:0">
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Idioma</label>
+      <select id="transcribeLangSelect">
+        <option value="es-MX">Español (México)</option>
+        <option value="es-ES">Español (España)</option>
+        <option value="en-US">English (US)</option>
+        <option value="en-GB">English (UK)</option>
+        <option value="pt-BR">Português (Brasil)</option>
+        <option value="fr-FR">Français</option>
+      </select>
+      <p class="hint" style="color:var(--text-dim);font-size:11px;margin:4px 0 8px">El navegador no detecta el idioma solo — elígelo antes de darle a escuchar.</p>
+      <div id="transcribeCaptureArea" contenteditable="true" style="flex:1;min-height:0;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:10px"></div>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0 0">Se agrega a la nota donde le diste clic a 🎙️ (como #transcripcion) al cerrar este panel, o de una vez con "✂️ Cortar" — aunque cierres esa nota o abras otra, sigue grabando hacia la misma hasta que le des ✕ aquí.</p>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn" id="transcribeToggleBtn" style="flex:1" onclick="toggleTranscription()">🎙️ Empezar a escuchar</button>
+        <button class="btn secondary" onclick="cutTranscriptSegment()" title="Guarda lo transcrito hasta aquí en la nota y sigue escuchando desde cero — para ir usando el texto por partes, en vez de esperar hasta cerrar el panel">✂️ Cortar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(panel);
+  _transcribeTargetNoteId = editingNoteId;
+}
+function toggleTranscription(){
+  if(_transcribing){ stopTranscription(); } else { startTranscription(); }
 }
 let _closingTranscribePanel = false;
 async function closeTranscribePanel(){
@@ -1851,6 +1904,7 @@ async function closeTranscribePanel(){
     await saveTranscriptionIntoCurrentNote();
     const panel = document.getElementById('transcribePanel'); if(panel) panel.remove();
     const chip = document.getElementById('transcribeMinChip'); if(chip) chip.remove();
+    _transcribeTargetNoteId = null;
   } finally {
     _closingTranscribePanel = false;
   }
@@ -1877,21 +1931,35 @@ function restoreTranscribePanel(){
   const panel = document.getElementById('transcribePanel'); if(panel) panel.style.display = '';
   const chip = document.getElementById('transcribeMinChip'); if(chip) chip.remove();
 }
-/* Guarda YA (doSaveNow directo, no el scheduleSave con debounce de
-   500ms) — si se usara el debounce y justo después alguien cierra la
-   nota completa, #mainArea desaparece antes de que el guardado
-   pendiente alcance a correr y la transcripción se perdía en
-   silencio (mismo tipo de carrera que ya mordió a esta app con el
-   guardado en blur, ver bug_pattern_flush_on_blur_race). */
+/* Guarda hacia _transcribeTargetNoteId, sin importar si esa nota sigue
+   abierta ahorita mismo. Si SÍ sigue abierta (la misma nota, no otra),
+   se agrega directo al DOM en vivo y se hace doSaveNow (mismo mecanismo
+   de siempre — evita la carrera de scheduleSave contra el mainArea que
+   desaparece, ver bug_pattern_flush_on_blur_race). Si ya se cerró (o el
+   usuario abrió otra nota mientras tanto), se guarda directo contra el
+   registro de esa nota por su ID, sin tocar el editor que esté abierto
+   ahora — así cerrar la nota de origen, o navegar a cualquier otra, no
+   interrumpe ni desvía el dictado. */
 async function saveTranscriptionIntoCurrentNote(){
   const area = document.getElementById('transcribeCaptureArea'); if(!area) return;
   const text = stripHtmlToText(area.innerHTML).trim();
   if(!text) return;
-  const mainEl = document.getElementById('mainArea'); if(!mainEl) return;
-  const cueP = document.createElement('p'); cueP.innerHTML = '<b>#transcripcion</b>';
-  mainEl.appendChild(cueP);
-  text.split(/\n+/).forEach(line=>{ if(!line.trim()) return; const p=document.createElement('p'); p.textContent=line; mainEl.appendChild(p); });
-  await doSaveNow();
+  const noteId = _transcribeTargetNoteId; if(!noteId) return;
+  const mainEl = document.getElementById('mainArea');
+  if(mainEl && editingNoteId===noteId){
+    const cueP = document.createElement('p'); cueP.innerHTML = '<b>#transcripcion</b>';
+    mainEl.appendChild(cueP);
+    text.split(/\n+/).forEach(line=>{ if(!line.trim()) return; const p=document.createElement('p'); p.textContent=line; mainEl.appendChild(p); });
+    await doSaveNow();
+  } else {
+    const note = getNote(noteId); if(!note) return;
+    let html = note.Contenido || '';
+    html += '<p><b>#transcripcion</b></p>';
+    text.split(/\n+/).forEach(line=>{ if(line.trim()) html += '<p>'+escHtml(line)+'</p>'; });
+    note.Contenido = html;
+    note.FechaEdicion = new Date().toISOString();
+    await saveEntity('NOTAS', note);
+  }
   showToast('🎙️ Transcripción agregada a la nota');
 }
 /* "Cortar": guarda lo transcrito hasta ahora (mismo mecanismo que al
@@ -2026,7 +2094,7 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
     <span class="sep"></span>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openAIDrawer()" title="Asistente IA">✨</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="toggleTranscription()" title="Transcribir — panel a la derecha, se agrega a esta nota al cerrarlo (Chrome/Edge)">🎙️</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openOrRestoreTranscribePanel()" title="Transcribir — panel a la derecha, sigue grabando aunque cierres esta nota (Chrome/Edge)">🎙️</button>
     <span class="sep"></span>
     ${allFlags().map(([t,emoji,label,color])=>`<button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('${t}')" title="Insertar #${escAttr(t)} (${escAttr(label)}) aquí donde está el cursor" style="color:${color}">${emoji}</button>`).join('')}
     <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">
@@ -3190,7 +3258,19 @@ async function migrateTimeLogToRegistroPersonal(){
    arriesgar lo que ya funciona ahí. Idempotente: si ya existe una
    plantilla llamada "Personas" no la toca ni duplica. */
 async function ensurePersonasTemplate(){
-  if(DATA.plantillas_prop.find(p=>p.Nombre==='Personas')) return;
+  const tipos = { cumpleanos:'fecha', fecha_ultimo_contacto:'fecha', proximo_contacto:'fecha' };
+  const existing = DATA.plantillas_prop.find(p=>p.Nombre==='Personas');
+  if(existing){
+    // la plantilla se creó antes de que existiera el sistema de "tipo de
+    // campo" — se completa aquí mismo (sin duplicar) para que
+    // cumpleaños/fechas ganen su botón de sync a Calendar sin que el
+    // usuario tenga que editar la plantilla a mano.
+    const currentTipos = templateFieldTypes(existing);
+    if(!currentTipos.cumpleanos){
+      await saveEntity('PLANTILLAS_PROP', Object.assign({}, existing, { TiposJSON: JSON.stringify(Object.assign({}, currentTipos, tipos)) }));
+    }
+    return;
+  }
   const campos = ['nombre','cumpleanos','relacion','de_donde_lo_conozco','ciudad','pais','ocupacion','contacto','familia',
     'informacion_sobre_el','por_que_es_importante_para_mi','gustos','cosas_que_no_le_gustan','comida_favorita','bebida_favorita',
     'color_favorito','pasatiempos','talla','regalo_ideal','fecha_ultimo_contacto','ultimo_que_supe','como_esta',
@@ -3198,7 +3278,7 @@ async function ensurePersonasTemplate(){
     'cosas_que_agradezco','detalles_que_yo_he_tenido','regalos_que_ya_le_di','detalle_que_quisiera_tener','no_olvidar',
     'por_que_no_debo_olvidarlo','considerarlo_cuando_viaje','que_le_podria_llevar','lugares_que_le_gustarian','navidad',
     'ocasiones_importantes','recuerdos','anecdotas','temas_de_conversacion','otros_datos'];
-  await saveEntity('PLANTILLAS_PROP', { ID:uid(), Nombre:'Personas', CamposJSON: JSON.stringify(campos), UsaPersona:'', Recordatorio:'', Notebook:'' });
+  await saveEntity('PLANTILLAS_PROP', { ID:uid(), Nombre:'Personas', CamposJSON: JSON.stringify(campos), TiposJSON: JSON.stringify(tipos), UsaPersona:'', Recordatorio:'', Notebook:'' });
 }
 function fmtHM(d){ return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }
 function fmtDuration(ms){
@@ -4660,22 +4740,37 @@ function exportFieldTablePDF(id){
   area.innerHTML = '<h1>'+escHtml(bt.Nombre)+'</h1>' + fieldTableBodyHTML(bt).replace(/<button[^>]*>.*?<\/button>/g,'');
   window.print();
 }
+/* Los campos de una plantilla son texto libre por default — un campo se
+   puede marcar como "fecha" agregando " | fecha" al final de su línea
+   (mismo espíritu que la sintaxis "elemento | destino | prioridad" de
+   los checklists). CamposJSON sigue siendo un array plano de nombres
+   (sin tocar los ~8 lugares que ya lo leen así); el tipo vive aparte en
+   TiposJSON = {nombreCampo: 'fecha'} — ausente = texto. Un campo de
+   fecha usa un <input type="date"> real en el formulario ⚡ (en vez de
+   textarea) y gana un botón 📅 para sincronizarlo con Google Calendar
+   una vez que la nota ya tiene un valor guardado ahí. */
+function templateFieldTypes(pt){
+  if(!pt) return {};
+  try{ return JSON.parse(pt.TiposJSON||'{}'); }catch(e){ return {}; }
+}
 function openFieldTemplateModal(existingId){
   const existing = existingId ? DATA.plantillas_prop.find(p=>p.ID===existingId) : null;
   let campos = []; if(existing){ try{ campos = JSON.parse(existing.CamposJSON||'[]'); }catch(e){} }
+  const tipos = templateFieldTypes(existing);
+  const camposText = campos.map(c => tipos[c]==='fecha' ? (c+' | fecha') : c).join('\n');
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
     <div class="modal-head"><b>${existing?'✏️ Editar':'+'} Plantilla de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Esta misma lista de campos la puedes insertar después como texto (#campo debajo del otro), como columna izquierda de una tabla Cornell, o llenarla directo con el formulario rápido (⚡) — eliges al momento de usarla.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Esta misma lista de campos la puedes insertar después como texto (#campo debajo del otro), como columna izquierda de una tabla Cornell, o llenarla directo con el formulario rápido (⚡) — eliges al momento de usarla. Agrega " | fecha" al final de un campo (ej. "cumpleanos | fecha") para poder sincronizarlo con Google Calendar más tarde.</p>
       <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Nombre</label>
       <input type="text" id="ftplNombre" value="${existing?escAttr(existing.Nombre):''}" placeholder="ej. Enfermedad">
       <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Campos (uno por línea, sin #)</label>
       <textarea id="ftplCampos" rows="6" placeholder="nombre enfermedad
-definicion
+cumpleanos | fecha
 morfo
 tx
-dx">${existing?escHtml(campos.join('\n')):''}</textarea>
+dx">${existing?escHtml(camposText):''}</textarea>
       <label style="display:flex;align-items:center;gap:6px;margin-top:12px;font-size:13px;cursor:pointer">
         <input type="checkbox" id="ftplUsaPersona" ${existing&&existing.UsaPersona?'checked':''}> Es por persona (varios familiares/pacientes, cada quien su historial — ej. Somatometría)
       </label>
@@ -4694,12 +4789,18 @@ dx">${existing?escHtml(campos.join('\n')):''}</textarea>
 }
 function saveFieldTemplate(btn, existingId){
   const nombre = document.getElementById('ftplNombre').value.trim();
-  const campos = document.getElementById('ftplCampos').value.split('\n').map(s=>s.trim().toLowerCase().replace(/\s+/g,'_')).filter(Boolean);
+  const campos = []; const tipos = {};
+  document.getElementById('ftplCampos').value.split('\n').map(s=>s.trim()).filter(Boolean).forEach(line=>{
+    const parts = line.split('|').map(s=>s.trim());
+    const slug = parts[0].toLowerCase().replace(/\s+/g,'_'); if(!slug) return;
+    campos.push(slug);
+    if(parts[1] && parts[1].toLowerCase()==='fecha') tipos[slug] = 'fecha';
+  });
   const usaPersona = document.getElementById('ftplUsaPersona').checked ? '1' : '';
   const recordatorio = document.getElementById('ftplRecordatorio').value;
   const notebook = document.getElementById('ftplNotebook').value;
   if(!nombre || !campos.length){ showToast('Ponle nombre y al menos un campo'); return; }
-  saveEntity('PLANTILLAS_PROP', { ID: existingId||uid(), Nombre:nombre, CamposJSON: JSON.stringify(campos), UsaPersona:usaPersona, Recordatorio:recordatorio, Notebook:notebook }).then(()=>{
+  saveEntity('PLANTILLAS_PROP', { ID: existingId||uid(), Nombre:nombre, CamposJSON: JSON.stringify(campos), TiposJSON: JSON.stringify(tipos), UsaPersona:usaPersona, Recordatorio:recordatorio, Notebook:notebook }).then(()=>{
     btn.closest('.modal-overlay').remove(); renderFieldTablesBody(); renderReminderBanner();
   });
 }
@@ -4768,6 +4869,7 @@ function openQuickFieldFill(id){
   const pt = DATA.plantillas_prop.find(x=>x.ID===id); if(!pt) return;
   let campos=[]; try{ campos = JSON.parse(pt.CamposJSON||'[]'); }catch(e){}
   if(!campos.length) return;
+  const tipos = templateFieldTypes(pt);
   const usaPersona = !!pt.UsaPersona;
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
@@ -4783,7 +4885,7 @@ function openQuickFieldFill(id){
       <input type="text" id="qffTitle" value="${escAttr(pt.Nombre+' — '+fmtDate(new Date().toISOString()))}">
       ${campos.map((c,i)=>`
         <label style="font-size:12px;font-weight:600;display:block;margin:12px 0 4px">${escHtml(prettyFieldLabel(c))}</label>
-        <textarea id="qffField${i}" rows="2" style="width:100%;resize:vertical"></textarea>`).join('')}
+        ${tipos[c]==='fecha' ? `<input type="date" id="qffField${i}">` : `<textarea id="qffField${i}" rows="2" style="width:100%;resize:vertical"></textarea>`}`).join('')}
       <div style="margin-top:14px"><button class="btn" id="qffSaveBtn">Guardar</button></div>
     </div>
   </div>`;

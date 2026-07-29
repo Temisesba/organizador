@@ -256,15 +256,18 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .items-table input[type=text]:focus{border-color:var(--border);background:var(--bg-soft)}
 .items-table tr.done-row{opacity:.55}
 .items-table-wrap{overflow-x:auto}
-.habit-row{margin-bottom:16px}
-.habit-row-head{display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:4px;gap:8px}
-.habit-pct{color:var(--text-dim);font-size:12px;flex:none}
+.habit-row{margin-bottom:22px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.habit-row:last-child{border-bottom:none}
+.habit-row-head{display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:4px;gap:8px}
+.habit-streak-badge{font-size:15px;font-weight:700;color:var(--accent);flex:none}
+.habit-row-sub{color:var(--text-dim);font-size:12px;margin-top:4px}
 .habit-bar{height:6px;border-radius:3px;background:var(--bg-soft);overflow:hidden}
 .habit-bar-fill{height:100%;background:var(--accent)}
-.habit-heat{display:flex;gap:2px;margin-top:6px;flex-wrap:wrap}
-.habit-dot{width:9px;height:9px;border-radius:2px;display:inline-block}
-.habit-dot.on{background:var(--accent)}
-.habit-dot.off{background:var(--bg-soft);border:1px solid var(--border)}
+.habit-grid{display:grid;grid-template-rows:repeat(7,1fr);grid-auto-flow:column;gap:3px;margin-top:10px;width:fit-content}
+.habit-cell{width:12px;height:12px;border-radius:3px;display:inline-block}
+.habit-cell-on{background:var(--accent)}
+.habit-cell-off{background:var(--bg-soft);border:1px solid var(--border)}
+.habit-cell-none{background:transparent;border:1px dashed var(--border);opacity:.35}
 
 /* toast */
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 16px;border-radius:20px;font-size:13px;z-index:999;opacity:0;pointer-events:none;transition:opacity .2s}
@@ -417,7 +420,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Petra IV';
+const BUILD_VERSION = 'Uluru';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1720,6 +1723,11 @@ function openTranscribeCapture(){
     <div class="modal-head"><b>🎙️ Transcribir</b><button class="icon-btn" onclick="stopTranscription();this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
       <input type="text" id="transcribeTitleInput" placeholder="Título (opcional)">
+      <label style="font-size:12px;font-weight:600;display:block;margin-top:10px">Guardar en</label>
+      <select id="transcribeNotebookSelect">
+        <option value="">Registro Personal (predeterminado)</option>
+        ${DATA.notebooks.filter(nb=>nb.Nombre!==MEJORAS_NOTEBOOK).map(nb=>`<option value="${escAttr(nb.Nombre)}">${escHtml(nb.Nombre)}</option>`).join('')}
+      </select>
       <div style="margin-top:10px"><button class="btn" id="transcribeToggleBtn" onclick="toggleTranscription()">🎙️ Empezar a escuchar</button></div>
       <div id="transcribeCaptureArea" contenteditable="true" style="margin-top:10px;min-height:200px;border:1px solid var(--border);border-radius:8px;padding:10px"></div>
       <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0 0">Lo que se escucha va apareciendo solo — tú puedes escribir directo aquí también, en cualquier parte.</p>
@@ -1736,7 +1744,8 @@ async function saveTranscribeCapture(btn){
   const html = normalizeContentHTML(areaEl.innerHTML);
   if(!stripHtmlToText(html).trim()){ showToast('No hay nada que guardar todavía'); return; }
   await withSavingFeedback(btn, async ()=>{
-    const nb = await ensureRegistroPersonalNotebook();
+    const chosen = document.getElementById('transcribeNotebookSelect').value;
+    const nb = chosen ? { Nombre: chosen } : await ensureRegistroPersonalNotebook();
     const note = newBlankNote();
     note.ID = uid();
     note.Titulo = (titleEl.value||'').trim() || ('Transcripción — '+fmtDate(new Date().toISOString()));
@@ -2718,6 +2727,27 @@ async function migrateTimeLogToRegistroPersonal(){
   }
   await deleteEntity('NOTEBOOKS', oldNb.ID);
 }
+/* Plantilla "Personas" (2026-07-29, a pedido del usuario) — un registro
+   completo por persona (relación, gustos, pendientes de contacto,
+   regalos, etc.), llenado con el formulario rápido (⚡) como cualquier
+   otra plantilla de campos, con su propia tabla automática en 🧩
+   Tablas. Es DISTINTA de la lista ligera "👤 Personas" de Configuración
+   → Plantillas (esa sigue existiendo tal cual, para el selector de
+   Somatometría-estilo y el cumpleaños→Google Calendar) — dos cosas
+   relacionadas pero no lo mismo, a propósito no se fusionaron para no
+   arriesgar lo que ya funciona ahí. Idempotente: si ya existe una
+   plantilla llamada "Personas" no la toca ni duplica. */
+async function ensurePersonasTemplate(){
+  if(DATA.plantillas_prop.find(p=>p.Nombre==='Personas')) return;
+  const campos = ['nombre','cumpleanos','relacion','de_donde_lo_conozco','ciudad','pais','ocupacion','contacto','familia',
+    'informacion_sobre_el','por_que_es_importante_para_mi','gustos','cosas_que_no_le_gustan','comida_favorita','bebida_favorita',
+    'color_favorito','pasatiempos','talla','regalo_ideal','fecha_ultimo_contacto','ultimo_que_supe','como_esta',
+    'algo_importante_que_esta_viviendo','pendiente_de_preguntar','proximo_contacto','gestos_que_ha_tenido_conmigo',
+    'cosas_que_agradezco','detalles_que_yo_he_tenido','regalos_que_ya_le_di','detalle_que_quisiera_tener','no_olvidar',
+    'por_que_no_debo_olvidarlo','considerarlo_cuando_viaje','que_le_podria_llevar','lugares_que_le_gustarian','navidad',
+    'ocasiones_importantes','recuerdos','anecdotas','temas_de_conversacion','otros_datos'];
+  await saveEntity('PLANTILLAS_PROP', { ID:uid(), Nombre:'Personas', CamposJSON: JSON.stringify(campos), UsaPersona:'', Recordatorio:'', Notebook:'' });
+}
 function fmtHM(d){ return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }
 function fmtDuration(ms){
   const mins = Math.max(0, Math.round(ms/60000));
@@ -3672,6 +3702,12 @@ function openChecklistStatsModal(templateId){
   document.body.appendChild(overlay);
   document.getElementById('chkStatsBody').innerHTML = checklistStatsHTML(hist);
 }
+/* Vista tipo apps de hábitos de verdad (Streaks/Loop): una cuadrícula
+   estilo "calendario de contribuciones" (semanas en columnas, días
+   lunes-domingo en filas) en vez de una tira plana — distingue tres
+   estados por día: marcado (lleno), llenado pero sin marcar (vacío
+   pero con borde), y sin ningún llenado ese día (punteado, no cuenta
+   ni a favor ni en contra). La racha se muestra grande con 🔥. */
 function checklistStatsHTML(hist){
   const itemNames = []; const seen = new Set();
   hist.forEach(h=>{
@@ -3679,24 +3715,39 @@ function checklistStatsHTML(hist){
     items.forEach(it=>{ if(it.text && !seen.has(it.text)){ seen.add(it.text); itemNames.push(it.text); } });
   });
   const rows = itemNames.map(name=>{
-    const series = hist.map(h=>{
+    const byDate = {};
+    hist.forEach(h=>{
       let items=[]; try{ items=JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
       const it = items.find(x=>x.text===name);
-      return it ? { date:new Date(h.Fecha), checked: !!it.checked } : null;
-    }).filter(Boolean);
+      if(it) byDate[new Date(h.Fecha).toDateString()] = !!it.checked;
+    });
+    const series = Object.keys(byDate).map(d=>({ date:new Date(d), checked:byDate[d] })).sort((a,b)=>a.date-b.date);
     const total = series.length;
     const doneCount = series.filter(s=>s.checked).length;
     const pct = total ? Math.round(100*doneCount/total) : 0;
     let streak=0; for(let i=series.length-1;i>=0;i--){ if(series[i].checked) streak++; else break; }
     let best=0, run=0; series.forEach(s=>{ if(s.checked){ run++; best=Math.max(best,run); } else run=0; });
-    const heat = series.slice(-30).map(s=>`<span class="habit-dot ${s.checked?'on':'off'}" title="${escAttr(s.date.toLocaleDateString('es-MX'))}"></span>`).join('');
     return `<div class="habit-row">
-      <div class="habit-row-head"><b>${escHtml(name)}</b><span class="habit-pct">${pct}% · 🔥${streak}${best>streak?(' (mejor '+best+')'):''}</span></div>
+      <div class="habit-row-head"><b>${escHtml(name)}</b><span class="habit-streak-badge">🔥 ${streak}</span></div>
       <div class="habit-bar"><div class="habit-bar-fill" style="width:${pct}%"></div></div>
-      <div class="habit-heat">${heat}</div>
+      <div class="habit-row-sub">${pct}% cumplimiento${best>streak?(' · mejor racha '+best):''}</div>
+      ${habitCalendarGridHTML(byDate)}
     </div>`;
   }).join('');
-  return `<p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">${hist.length} llenado${hist.length===1?'':'s'} registrados — últimos 30 en la tira de cada elemento.</p>${rows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos con nombre en el historial todavía.</p>'}`;
+  return `<p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">${hist.length} llenado${hist.length===1?'':'s'} registrados.</p>${rows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos con nombre en el historial todavía.</p>'}`;
+}
+function habitCalendarGridHTML(byDate){
+  const todayMid = new Date(); todayMid.setHours(0,0,0,0);
+  const daysBack = 69; // 10 semanas
+  const start = new Date(todayMid); start.setDate(start.getDate()-daysBack);
+  start.setDate(start.getDate()-((start.getDay()+6)%7)); // retrocede hasta el lunes de esa semana
+  const cells = [];
+  for(let d=new Date(start); d<=todayMid; d.setDate(d.getDate()+1)){
+    const key = d.toDateString();
+    const state = byDate.hasOwnProperty(key) ? (byDate[key]?'on':'off') : 'none';
+    cells.push(`<span class="habit-cell habit-cell-${state}" title="${escAttr(d.toLocaleDateString('es-MX',{weekday:'short',day:'numeric',month:'short'}))}"></span>`);
+  }
+  return `<div class="habit-grid">${cells.join('')}</div>`;
 }
 
 /* ============ Tablas dinámicas por bloque ============
@@ -4920,7 +4971,7 @@ function boot(){
   syncSortUI();
   applySbCollapsedState();
   renderAll();
-  syncNow(false).then(migrateLocalFlagsAndSearchesOnce).then(autoPurgeOldTrash).then(migrateTimeLogToRegistroPersonal).then(renderAll);
+  syncNow(false).then(migrateLocalFlagsAndSearchesOnce).then(autoPurgeOldTrash).then(migrateTimeLogToRegistroPersonal).then(ensurePersonasTemplate).then(renderAll);
   initSplitResizerOnce();
   initEditorResizerOnce();
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }

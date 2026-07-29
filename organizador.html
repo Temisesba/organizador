@@ -453,7 +453,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Valle de la Luna';
+const BUILD_VERSION = 'Cañón del Colorado';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1714,7 +1714,7 @@ function timeLogChapterHTML(dateObj, dayNotes, highlight, q, activeTags){
     const hit = tagName && highlight.includes(tagName.toLowerCase());
     const innerTags = tagName ? `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(tagName)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(tagName)}')" title="Filtrar por #${escAttr(tagName)}">#${escHtml(tagName)}</span>` : '';
     return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}')"><div class="field-card-tag">${escHtml(rangeLabel)}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
-  }).join('');
+  }).reverse().join(''); // más reciente primero, igual que el modal de Registro de tiempo
   const isToday = dateObj.toDateString()===new Date().toDateString();
   const label = isToday ? 'Hoy' : dateObj.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
   return `<div class="chapter-group" onclick="openTimeLogModal(new Date('${dateObj.toISOString()}'))">
@@ -3538,7 +3538,12 @@ function renderTimeLogView(){
   label.textContent = isToday ? 'Hoy' : _timeLogViewDate.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
   const ranges = timeLogRangesForDate(_timeLogViewDate);
   const totals = {};
-  const rows = ranges.map((r,i)=>{
+  // el cálculo de cada rango necesita el orden cronológico de siempre
+  // (cada bloque depende del anterior/siguiente), pero se pide ver el
+  // más reciente hasta arriba — se arma cada fila con su índice
+  // original y solo se invierte el ORDEN al juntarlas, sin tocar la
+  // lógica de rangos/dividir.
+  const rowsHTML = ranges.map((r,i)=>{
     const n = r.note;
     const long = r.durMs > 2*60*60*1000;
     const tagKey = n.Tags || '(sin etiqueta)';
@@ -3554,8 +3559,8 @@ function renderTimeLogView(){
       <button class="icon-btn" onclick="openNoteEditor('${n.ID}')" title="Editar texto">✏️</button>
       <button class="icon-btn" onclick="deleteTimeLogEntryUI('${n.ID}')" title="Borrar">🗑️</button>
     </div>`;
-  }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin registros este día</p>';
-  document.getElementById('timeLogTimeline').innerHTML = rows;
+  });
+  document.getElementById('timeLogTimeline').innerHTML = rowsHTML.slice().reverse().join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin registros este día</p>';
 
   const summaryHTML = Object.entries(totals).sort((a,b)=>b[1]-a[1]).map(([tag,ms])=>
     `<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span>${tag==='(sin etiqueta)'?tag:'#'+escHtml(tag)}</span><b>${fmtDuration(ms)}</b></div>`

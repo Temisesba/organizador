@@ -439,7 +439,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Petra';
+const BUILD_VERSION = 'Fiordo de Milford';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2889,6 +2889,7 @@ function renderHabitCaptureList(){
         <button class="icon-btn" onclick="decrementHabitToday('${h.ID}')" ${count<=0?'disabled':''} title="Quitar uno">−</button>
         <button class="icon-btn" onclick="incrementHabitToday('${h.ID}')" title="Agregar uno">+</button>
         <span style="color:var(--text-dim);font-size:12px">🔥 ${streak}</span>
+        <button class="icon-btn" onclick="openHabitEditModal('${h.ID}')" title="Editar">✏️</button>
         <button class="icon-btn" onclick="deleteHabitUI('${h.ID}')">🗑️</button>
       </div>`;
     }
@@ -2897,6 +2898,7 @@ function renderHabitCaptureList(){
       <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHabitToday('${h.ID}')">
       ${nameSpan}
       <span style="color:var(--text-dim);font-size:12px">🔥 ${streak}</span>
+      <button class="icon-btn" onclick="event.stopPropagation();openHabitEditModal('${h.ID}')" title="Editar">✏️</button>
       <button class="icon-btn" onclick="event.stopPropagation();deleteHabitUI('${h.ID}')">🗑️</button>
     </div>`;
   }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin hábitos todavía — agrega el primero abajo.</p>';
@@ -2957,6 +2959,54 @@ function deleteHabitUI(id){
   if(!confirm('¿Eliminar este hábito? Se borra también su historial de días marcados.')) return;
   const logs = DATA.habito_log.filter(l=>l.HabitoID===id);
   Promise.all(logs.map(l=>deleteEntity('HABITO_LOG', l.ID))).then(()=>deleteEntity('HABITOS', id)).then(renderHabitCaptureList);
+}
+function openHabitEditModal(id){
+  const h = DATA.habitos.find(x=>x.ID===id); if(!h) return;
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(420px,100%)">
+    <div class="modal-head"><b>✏️ Editar hábito</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Nombre</label>
+      <input type="text" id="habitEditName" value="${escAttr(h.Nombre)}">
+      <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:60px">
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Emoji</label>
+          <input type="text" id="habitEditEmoji" value="${escAttr(h.Emoji||'✅')}" style="text-align:center">
+        </div>
+        <div style="flex:1;min-width:90px">
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Veces/día</label>
+          <input type="number" id="habitEditMeta" min="1" placeholder="ej. 8" value="${escAttr(h.Meta||'')}">
+        </div>
+        <div style="flex:1;min-width:100px">
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Hora habitual</label>
+          <input type="time" id="habitEditHora" value="${escAttr(h.Hora||'')}">
+        </div>
+      </div>
+      <p class="hint" style="color:var(--text-dim);font-size:11px;margin:4px 0 0">Si cambias "veces/día" el conteo de hoy no se borra — solo cambia cuánto necesitas para que cuente como cumplido.</p>
+      <label style="font-size:12px;font-weight:600;display:block;margin-top:10px">Avísame si no lo he hecho</label>
+      ${recordatorioSelectHTML('habitEditFx', h.Recordatorio||'')}
+      <div style="margin-top:14px"><button class="btn" onclick="saveHabitEdit('${id}')">Guardar</button></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('habitEditName').focus();
+}
+async function saveHabitEdit(id){
+  const h = DATA.habitos.find(x=>x.ID===id); if(!h) return;
+  const nombre = (document.getElementById('habitEditName').value||'').trim();
+  if(!nombre){ showToast('Ponle un nombre'); return; }
+  const row = Object.assign({}, h, {
+    Nombre: nombre,
+    Emoji: (document.getElementById('habitEditEmoji').value||'').trim() || '✅',
+    Meta: document.getElementById('habitEditMeta').value || '',
+    Hora: document.getElementById('habitEditHora').value || '',
+    Recordatorio: document.getElementById('habitEditFx').value || ''
+  });
+  await saveEntity('HABITOS', row);
+  document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#habitEditName')) o.remove(); });
+  renderHabitCaptureList();
+  renderReminderBanner();
+  showToast('Hábito actualizado');
 }
 /* Estadísticas de hábitos, pestaña "✅ Hábitos" en 🧩 Tablas — mismo
    look que el de checklists (cuadrícula de calendario + racha), pero

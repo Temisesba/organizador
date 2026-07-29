@@ -417,7 +417,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Sacsayhuamán';
+const BUILD_VERSION = 'Petra IV';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1231,6 +1231,7 @@ function applySavedSearch(id){
   renderSidebar(); renderMain();
 }
 function deleteSavedSearch(id){
+  if(!confirm('¿Eliminar esta búsqueda guardada?')) return;
   deleteEntity('BUSQUEDAS', id).then(renderSavedSearches);
 }
 function renderSavedSearches(){
@@ -1695,31 +1696,65 @@ function initEditorResizerOnce(){
   document.addEventListener('touchend', ()=>{ if(_editorResizing){ _editorResizing=false; localStorage.setItem('org_editor_width', editorWidth); } });
 }
 function closeNoteEditor(){
-  stopTranscription();
   const ov = document.getElementById('editorOverlay'); if(ov) ov.remove();
   abandonEmptyDraftIfAny();
   editingNoteId=null;
   renderMain();
 }
-/* Transcripción en vivo (Web Speech API — solo Chrome/Edge, no hay
-   forma de evitarlo, Firefox/Safari no la soportan de forma
-   utilizable). A propósito NO escribe donde esté el cursor del
-   usuario — así puede seguir tomando sus propios apuntes en cualquier
-   parte de la nota mientras escucha — sino que va acumulando el texto
-   reconocido en un único párrafo marcado (id="transcribeLiveP") al
-   final de la nota, que se actualiza completo en cada resultado
-   (definitivo + lo que va reconociendo a medias). Al detener, ese
-   párrafo se "suelta" (se le quita el id) para que una transcripción
-   futura empiece en uno nuevo en vez de seguir escribiendo encima. */
+/* Transcripción en vivo (Web Speech API — solo Chrome/Edge, Firefox/
+   Safari no la soportan de forma utilizable) — vive en su PROPIO
+   cuadro aparte (no mete texto dentro de la nota que tengas abierta),
+   con su título, y "Guardar como nota" la manda a Registro Personal.
+   Igual que antes, el texto reconocido nunca se escribe donde esté tu
+   cursor — usa un párrafo marcado (id="transcribeLiveP") que se
+   actualiza completo en cada resultado, así puedes seguir escribiendo
+   tú en cualquier otra parte del mismo cuadro sin que se pisen. Al
+   detener, ese párrafo se "suelta" (se le quita el id) para que una
+   transcripción futura empiece en uno nuevo en vez de escribir
+   encima. */
 let _speechRecognition = null;
 let _transcribing = false;
+function openTranscribeCapture(){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(560px,100%)">
+    <div class="modal-head"><b>🎙️ Transcribir</b><button class="icon-btn" onclick="stopTranscription();this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <input type="text" id="transcribeTitleInput" placeholder="Título (opcional)">
+      <div style="margin-top:10px"><button class="btn" id="transcribeToggleBtn" onclick="toggleTranscription()">🎙️ Empezar a escuchar</button></div>
+      <div id="transcribeCaptureArea" contenteditable="true" style="margin-top:10px;min-height:200px;border:1px solid var(--border);border-radius:8px;padding:10px"></div>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0 0">Lo que se escucha va apareciendo solo — tú puedes escribir directo aquí también, en cualquier parte.</p>
+      <div style="margin-top:10px"><button class="btn" id="transcribeSaveBtn" onclick="saveTranscribeCapture(this)">Guardar como nota</button></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('transcribeCaptureArea').focus();
+}
+async function saveTranscribeCapture(btn){
+  stopTranscription();
+  const titleEl = document.getElementById('transcribeTitleInput');
+  const areaEl = document.getElementById('transcribeCaptureArea');
+  const html = normalizeContentHTML(areaEl.innerHTML);
+  if(!stripHtmlToText(html).trim()){ showToast('No hay nada que guardar todavía'); return; }
+  await withSavingFeedback(btn, async ()=>{
+    const nb = await ensureRegistroPersonalNotebook();
+    const note = newBlankNote();
+    note.ID = uid();
+    note.Titulo = (titleEl.value||'').trim() || ('Transcripción — '+fmtDate(new Date().toISOString()));
+    note.Notebook = nb.Nombre;
+    note.Contenido = html;
+    await saveEntity('NOTAS', note);
+    document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#transcribeCaptureArea')) o.remove(); });
+    renderAll();
+    showToast('✅ Guardada en Registro Personal');
+  });
+}
 function toggleTranscription(){ if(_transcribing) stopTranscription(); else startTranscription(); }
 function startTranscription(){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!SR){ showToast('Tu navegador no soporta transcripción de voz (funciona en Chrome/Edge)'); return; }
-  const mainEl = document.getElementById('mainArea'); if(!mainEl) return;
+  const targetEl = document.getElementById('transcribeCaptureArea'); if(!targetEl) return;
   let liveP = document.createElement('p'); liveP.id = 'transcribeLiveP';
-  mainEl.appendChild(liveP);
+  targetEl.appendChild(liveP);
   let finalText = '';
   _speechRecognition = new SR();
   _speechRecognition.lang = 'es-MX';
@@ -1733,7 +1768,6 @@ function startTranscription(){
     }
     const p = document.getElementById('transcribeLiveP');
     if(p) p.textContent = finalText + interim;
-    scheduleSave();
   };
   _speechRecognition.onerror = (e)=>{
     if(e.error==='not-allowed'){ showToast('Necesito permiso del micrófono'); stopTranscription(); }
@@ -1751,12 +1785,11 @@ function stopTranscription(){
   const liveP = document.getElementById('transcribeLiveP');
   if(liveP) liveP.removeAttribute('id');
   updateTranscribeBtn();
-  scheduleSave();
 }
 function updateTranscribeBtn(){
-  const btn = document.getElementById('transcribeBtn'); if(!btn) return;
+  const btn = document.getElementById('transcribeToggleBtn'); if(!btn) return;
   btn.classList.toggle('active', _transcribing);
-  btn.title = _transcribing ? 'Detener transcripción' : 'Transcribir — escucha y va escribiendo mientras tú también tomas apuntes (Chrome/Edge)';
+  btn.textContent = _transcribing ? '⏸️ Detener' : '🎙️ Empezar a escuchar';
 }
 function editorInnerHTML(note, isModal){
   editingCornell = isCornellNote(note);
@@ -1827,7 +1860,6 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
     <span class="sep"></span>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openAIDrawer()" title="Asistente IA">✨</button>
-    <button class="icon-btn" id="transcribeBtn" onmousedown="event.preventDefault()" onclick="toggleTranscription()" title="Transcribir — escucha y va escribiendo mientras tú también tomas apuntes (Chrome/Edge)">🎙️</button>
     <span class="sep"></span>
     ${allFlags().map(([t,emoji,label,color])=>`<button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('${t}')" title="Insertar #${escAttr(t)} (${escAttr(label)}) aquí donde está el cursor" style="color:${color}">${emoji}</button>`).join('')}
     <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">
@@ -2558,6 +2590,7 @@ function openCreateMenu(){
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openQuickDatoModal()">⚡ Dato general</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openFieldTemplatePicker()">🏷️ Plantilla</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openTimeLogModal()">⏱ Registro de tiempo</button>
+      <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openTranscribeCapture()">🎙️ Transcribir</button>
     </div>
   </div>`;
   overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
@@ -3670,34 +3703,32 @@ function checklistStatsHTML(hist){
    No busca notas enteras — busca párrafos/bloques (de cualquier nota) que
    lleven una etiqueta, y saca las demás etiquetas #clave:valor de ESE
    mismo bloque como columnas. */
-/* Una pestaña por plantilla de campos: la tabla se arma sola (columnas
-   = los campos de esa plantilla, filas = las notas que la usaron, vía
-   PlantillaPropID) — no hay que configurar CampoFiltro/Columnas a mano
-   como con las tablas "Personalizadas" de abajo. Buscar/ordenar
-   asc-desc funciona igual en todas las pestañas. */
+/* Una tabla por plantilla de campos (columnas = los campos de esa
+   plantilla, filas = las notas que la usaron, vía PlantillaPropID) —
+   no hay que configurar CampoFiltro/Columnas a mano como con las
+   tablas "Personalizadas". Se elige con un <select> en vez de una
+   pestaña por plantilla — con pocas plantillas ya se ve bien, pero
+   apenas vayan creciendo una fila de pestañas se vuelve inmanejable;
+   un desplegable escala sin problema. Buscar/ordenar asc-desc
+   funciona igual elijas lo que elijas. */
 function openBlockTables(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  const tplTabs = DATA.plantillas_prop.map(pt=>`<button onclick="blockTablesTab(this,'tpl:${pt.ID}')">${escHtml(pt.Nombre)}</button>`).join('');
+  const options = DATA.plantillas_prop.map(pt=>`<option value="tpl:${pt.ID}">🏷️ ${escHtml(pt.Nombre)}</option>`).join('')
+    + `<option value="custom">Personalizadas</option><option value="bloque">Por etiqueta de bloque</option>`;
   overlay.innerHTML = `<div class="modal" style="width:min(1200px,96vw)">
     <div class="modal-head"><b>🧩 Tablas</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
-    <div class="tabs" style="flex-wrap:wrap">
-      ${tplTabs}
-      <button onclick="blockTablesTab(this,'custom')">Personalizadas</button>
-      <button onclick="blockTablesTab(this,'bloque')">Por etiqueta de bloque</button>
+    <div style="padding:12px 16px 0">
+      <select id="blockTablesSelect" onchange="blockTablesSelectChange(this.value)" style="width:auto;min-width:240px">${options}</select>
     </div>
     <div class="modal-body" id="blockTablesBody"></div>
   </div>`;
   document.body.appendChild(overlay);
-  const firstTab = overlay.querySelector('.tabs button');
-  firstTab.classList.add('active');
-  if(DATA.plantillas_prop.length) renderTemplateTableBody(DATA.plantillas_prop[0].ID);
-  else renderFieldTablesBody();
+  blockTablesSelectChange(document.getElementById('blockTablesSelect').value);
 }
-function blockTablesTab(btn, tab){
-  btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
-  if(tab==='bloque') renderBlockTablesBody();
-  else if(tab==='custom') renderFieldTablesBody();
-  else if(tab.indexOf('tpl:')===0) renderTemplateTableBody(tab.slice(4));
+function blockTablesSelectChange(val){
+  if(val==='bloque') renderBlockTablesBody();
+  else if(val==='custom') renderFieldTablesBody();
+  else if(val && val.indexOf('tpl:')===0) renderTemplateTableBody(val.slice(4));
 }
 function templateNotesRows(templateId){
   const pt = DATA.plantillas_prop.find(x=>x.ID===templateId);
@@ -4235,7 +4266,7 @@ function renderBlockTablesBody(){
     <div class="tpl-card">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <b>${escHtml(bt.Nombre)}</b> <span style="color:var(--text-dim);font-size:12px">#${escHtml(bt.TagFiltro)}</span>
-        <button class="icon-btn" onclick="deleteEntity('BLOQUE_TABLAS','${bt.ID}').then(renderBlockTablesBody)">🗑️</button>
+        <button class="icon-btn" onclick="deleteBlockTableUI('${bt.ID}')">🗑️</button>
       </div>
       ${blockTableRenderHTML(bt.TagFiltro)}
     </div>`).join('') || '<p style="color:var(--text-dim)">Sin tablas todavía — crea una arriba.</p>';
@@ -4245,6 +4276,10 @@ function saveBlockTable(){
   const tag = document.getElementById('btTag').value.trim().replace(/^#/,'');
   if(!nombre || !tag){ showToast('Ponle nombre y etiqueta'); return; }
   saveEntity('BLOQUE_TABLAS', { ID:uid(), Nombre:nombre, TagFiltro:tag }).then(renderBlockTablesBody);
+}
+function deleteBlockTableUI(id){
+  if(!confirm('¿Eliminar esta tabla guardada? No borra tus notas, solo esta vista.')) return;
+  deleteEntity('BLOQUE_TABLAS', id).then(renderBlockTablesBody);
 }
 /* Compendio rápido: todo lo escrito con esta etiqueta, en cualquier nota,
    para poder seguir anotando encima ("ya lo vi", "no me gustó"…) sin tener
@@ -4394,7 +4429,11 @@ function addDicManual(){
 }
 function renderDicList(){
   const el = document.getElementById('dicList'); if(!el) return;
-  el.innerHTML = DATA.diccionario.slice().reverse().map(d=>`<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:3px 0;font-size:13px"><span>${escHtml(d.Termino)} → ${escHtml(d.Traduccion)}</span><button class="icon-btn" onclick="deleteEntity('DICCIONARIO','${d.ID}').then(renderDicList)">🗑️</button></div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Vacío</p>';
+  el.innerHTML = DATA.diccionario.slice().reverse().map(d=>`<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:3px 0;font-size:13px"><span>${escHtml(d.Termino)} → ${escHtml(d.Traduccion)}</span><button class="icon-btn" onclick="deleteDicEntryUI('${d.ID}')">🗑️</button></div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Vacío</p>';
+}
+function deleteDicEntryUI(id){
+  if(!confirm('¿Eliminar esta entrada del diccionario?')) return;
+  deleteEntity('DICCIONARIO', id).then(renderDicList);
 }
 function renderFeedbackList(){
   const el = document.getElementById('fbList'); if(!el) return;
@@ -4519,6 +4558,7 @@ function renderFlagsSection(){
     <button class="btn secondary" onclick="openAddFlagModal()">+ agregar bandera</button>`;
 }
 function deleteCustomFlag(id){
+  if(!confirm('¿Quitar esta bandera rápida?')) return;
   deleteEntity('FLAGS', id).then(()=>{ renderSettingsTags(); renderSidebar(); });
 }
 const FLAG_EMOJI_CHOICES = ['⚑','🚩','📌','⭐','★','❤️','🔥','⚠️','❗','✅','🔔','💡','📎','🎯','🕐','🔒','🎓','💊','🧪','📞','🛒','✈️','🎂','💰'];
@@ -4686,8 +4726,13 @@ function renderSettingsNotebooks(){
       <input type="text" value="${escAttr(nb.Nombre)}" onchange="updateNbField('${nb.ID}','Nombre',this.value)">
       <input type="text" value="${escAttr(nb.TagsHeredados)}" placeholder="etiquetas heredadas" onchange="updateNbField('${nb.ID}','TagsHeredados',this.value)">
       <input type="text" value="${escAttr(nb.TagAuto||'')}" placeholder="auto-ruteo desde Inbox (ej. musica)" title="Si una nota del Inbox lleva esta etiqueta, se mueve sola a este cuaderno" onchange="updateNbField('${nb.ID}','TagAuto',this.value.replace(/^#/,''))">
-      <button class="icon-btn" onclick="deleteEntity('NOTEBOOKS','${nb.ID}').then(()=>{renderSettingsNotebooks();renderSidebar();})">🗑️</button>
+      <button class="icon-btn" onclick="deleteNotebookUI('${nb.ID}')">🗑️</button>
     </div>`).join('') || '<p style="color:var(--text-dim)">Sin cuadernos todavía</p>';
+}
+function deleteNotebookUI(id){
+  const nb = DATA.notebooks.find(x=>x.ID===id); if(!nb) return;
+  if(!confirm('¿Eliminar el cuaderno "'+nb.Nombre+'"? Las notas que tenía NO se borran, solo se quedan sin cuaderno (las verás en el Inbox).')) return;
+  deleteEntity('NOTEBOOKS', id).then(()=>{ renderSettingsNotebooks(); renderSidebar(); });
 }
 function updateNbField(id, field, val){ const nb=DATA.notebooks.find(x=>x.ID===id); if(!nb) return; nb[field]=val; saveEntity('NOTEBOOKS', nb).then(()=>renderSidebar()); }
 function renderSettingsAppearance(){
@@ -4851,8 +4896,12 @@ function renderMejorasList(){
   wrap.innerHTML = items.map(n=>`<div class="settings-row">
       <span style="flex:1;font-size:13px;cursor:pointer" onclick="openNoteEditor('${n.ID}')">${escHtml(noteSnippetText(n).slice(0,90))}</span>
       <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
-      <button class="icon-btn" onclick="deleteEntity('NOTAS','${n.ID}').then(()=>{renderMejorasList();renderAll();})">🗑️</button>
+      <button class="icon-btn" onclick="deleteMejoraUI('${n.ID}')">🗑️</button>
     </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada todavía — el primero que agregues aparece aquí.</p>';
+}
+function deleteMejoraUI(id){
+  if(!confirm('¿Eliminar esta idea?')) return;
+  deleteEntity('NOTAS', id).then(()=>{ renderMejorasList(); renderAll(); });
 }
 
 /* ============ Tema ============ */

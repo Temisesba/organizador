@@ -357,7 +357,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
     <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel">Sync</span></button>
-    <button class="btn secondary no-print" onclick="openNoteEditor(null)">+ Nota</button>
+    <button class="btn no-print" onclick="openNoteEditor(null)">+ Nota</button>
     <button class="btn no-print" onclick="openCreateMenu()" title="Dato general, plantilla o registro de tiempo">+</button>
   </header>
 
@@ -417,7 +417,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Cristo Redentor';
+const BUILD_VERSION = 'Torre de Pisa';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -539,7 +539,7 @@ function renderCalDayView(){
   const notesEl = document.getElementById('calNotesList');
   const notes = notesOnDate(_calViewDate);
   notesEl.innerHTML = notes.length ? notes.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
-      <span style="flex:1">${escHtml(n.Titulo||'(sin título)')}</span>
+      <span style="flex:1"><b>${escHtml(fmtHM(new Date(n.Fecha)))}</b> ${escHtml(n.Titulo||'(sin título)')}</span>
     </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin notas este día</p>';
 }
 function renderCalMonthGrid(){
@@ -613,27 +613,49 @@ function renderCalEventsList(events){
     const start = ev.start.dateTime ? new Date(ev.start.dateTime) : null;
     const end = ev.end.dateTime ? new Date(ev.end.dateTime) : null;
     const timeLabel = start ? (fmtHM(start)+(end?'–'+fmtHM(end):'')) : 'Todo el día';
-    const linkedNote = DATA.notas.find(n=>n.GCalEventId===ev.id && !n.Papelera);
+    const linkedNotes = notesForEvent(ev.id);
     return `<div class="settings-row" style="align-items:flex-start">
       <span style="flex:1">
         <b>${escHtml(timeLabel)}</b><br>
         ${escHtml(ev.summary||'(sin título)')}
         ${ev.location?`<br><span style="color:var(--text-dim);font-size:12px">📍 ${escHtml(ev.location)}</span>`:''}
       </span>
-      <button class="icon-btn" onclick="openOrCreateNoteForEvent('${escAttr(ev.id)}','${escAttr(ev.summary||'')}','${escAttr(ev.start.dateTime||ev.start.date||'')}')" title="${linkedNote?'Ver nota vinculada':'Crear nota para este evento'}">${linkedNote?'📝':'📝+'}</button>
+      <button class="icon-btn" onclick="openEventNotesUI('${escAttr(ev.id)}','${escAttr(ev.summary||'')}','${escAttr(ev.start.dateTime||ev.start.date||'')}')" title="${linkedNotes.length?('Ver/agregar nota ('+linkedNotes.length+')'):'Crear nota para este evento'}">${linkedNotes.length?('📝 '+linkedNotes.length):'📝+'}</button>
       <button class="icon-btn" onclick='editGoogleEvent(${JSON.stringify(ev.id)})' title="Editar evento">✏️</button>
     </div>`;
   }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin eventos este día</p>';
 }
-/* Nota vinculada a un evento: se guarda el ID del evento de Google en la
-   nota (columna GCalEventId) para encontrarla de vuelta con exactitud,
-   sin depender de que el título no haya cambiado. Reusa el mismo truco
-   de asignar ID sincrónico que openNoteEditor(null), para no reabrir la
-   condición de carrera de notas duplicadas. */
-function openOrCreateNoteForEvent(eventId, summary, startIso){
-  const existing = DATA.notas.find(n=>n.GCalEventId===eventId && !n.Papelera);
+/* Nota(s) vinculadas a un evento: se guarda el ID del evento de Google en
+   la nota (columna GCalEventId) para encontrarla de vuelta con exactitud,
+   sin depender de que el título no haya cambiado. Un evento puede tener
+   MÁS de una nota (ej. apuntes de varias sesiones de la misma junta) — si
+   ya hay alguna, se ofrece un mini-selector en vez de abrir siempre la
+   primera. Reusa el mismo truco de asignar ID sincrónico que
+   openNoteEditor(null), para no reabrir la condición de carrera de notas
+   duplicadas. */
+function notesForEvent(eventId){
+  return DATA.notas.filter(n=>n.GCalEventId===eventId && !n.Papelera).sort((a,b)=>new Date(a.Fecha)-new Date(b.Fecha));
+}
+function openEventNotesUI(eventId, summary, startIso){
+  const notes = notesForEvent(eventId);
+  if(!notes.length){ createNoteForEvent(eventId, summary, startIso); return; }
+  if(notes.length===1){
+    document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#calEventsList')) o.remove(); });
+    openNoteEditor(notes[0].ID);
+    return;
+  }
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(360px,100%)">
+    <div class="modal-head"><b>📝 Notas de este evento</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      ${notes.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="this.closest('.modal-overlay').remove();openNoteEditor('${escAttr(n.ID)}')"><span style="flex:1">${escHtml(n.Titulo||'(sin título)')}</span></div>`).join('')}
+      <button class="btn secondary" style="margin-top:10px" onclick="this.closest('.modal-overlay').remove();createNoteForEvent('${escAttr(eventId)}','${escAttr(summary)}','${escAttr(startIso)}')">+ Otra nota para este evento</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+function createNoteForEvent(eventId, summary, startIso){
   document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#calEventsList')) o.remove(); });
-  if(existing){ openNoteEditor(existing.ID); return; }
   if(editingNoteId) abandonEmptyDraftIfAny();
   const note = newBlankNote();
   note.ID = uid();
@@ -1390,17 +1412,59 @@ function openReminderTarget(type, id){
   if(type==='plantilla_prop') openQuickFieldFill(id);
   else openFillModal(id);
 }
+/* Cumpleaños próximos (próximos 7 días) de las Personas que tengan
+   fecha de nacimiento guardada — reutiliza la misma barra de
+   recordatorios y el mismo mecanismo de "ocultar por hoy". Clic en el
+   chip abre una nota nueva en el cuaderno Cumpleaños (el mismo que ya
+   existe con auto-ruteo #cumple), lista para anotar regalo/plan. */
+function upcomingBirthdays(withinDays){
+  const today = new Date(); today.setHours(0,0,0,0);
+  return DATA.personas.filter(p=>p.FechaNacimiento).map(p=>{
+    const bd = new Date(p.FechaNacimiento+'T00:00:00');
+    if(isNaN(bd)) return null;
+    let next = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
+    if(next < today) next = new Date(today.getFullYear()+1, bd.getMonth(), bd.getDate());
+    const daysUntil = Math.round((next-today)/86400000);
+    return { persona:p, daysUntil };
+  }).filter(x=>x && x.daysUntil<=withinDays).sort((a,b)=>a.daysUntil-b.daysUntil);
+}
+async function ensureCumpleanosNotebook(){
+  let nb = DATA.notebooks.find(n=>n.TagAuto==='cumple') || DATA.notebooks.find(n=>n.Nombre==='Cumpleaños');
+  if(!nb) nb = await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:'Cumpleaños', TagsHeredados:'', Color:'#d1477a', TagAuto:'cumple' });
+  return nb;
+}
+async function openBirthdayNote(personaId){
+  const p = DATA.personas.find(x=>x.ID===personaId); if(!p) return;
+  const nb = await ensureCumpleanosNotebook();
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  if(editingNoteId) abandonEmptyDraftIfAny();
+  const note = newBlankNote();
+  note.ID = uid();
+  note.Titulo = 'Cumpleaños de '+p.Nombre;
+  note.Tags = 'cumple';
+  note.Notebook = nb.Nombre;
+  DATA.notas.push(note);
+  editingNoteId = note.ID;
+  if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = noteDetailHTML(note); }
+  else renderNoteModal(note);
+}
 function renderReminderBanner(){
   const el = document.getElementById('reminderBanner'); if(!el) return;
   const dismissed = dismissedReminderIds();
   const pending = pendingRemindersToday().filter(r=>!dismissed.has(r.type+':'+r.id));
-  if(!pending.length){ el.innerHTML=''; return; }
-  el.innerHTML = `<div class="reminder-bar">
-    <b>⏰ Pendiente hoy:</b>
-    <span class="reminder-chips">${pending.map(r=>`<span class="reminder-chip">
+  const birthdays = upcomingBirthdays(7).filter(b=>!dismissed.has('cumple:'+b.persona.ID));
+  if(!pending.length && !birthdays.length){ el.innerHTML=''; return; }
+  const pendingChips = pending.map(r=>`<span class="reminder-chip">
       <span style="cursor:pointer" onclick="openReminderTarget('${r.type}','${escAttr(r.id)}')">${escHtml(r.nombre)}</span>
       <button class="icon-btn" style="padding:0 3px" title="Ocultar por hoy" onclick="dismissReminder('${r.type}:${escAttr(r.id)}')">✕</button>
-    </span>`).join('')}</span>
+    </span>`).join('');
+  const birthdayChips = birthdays.map(b=>`<span class="reminder-chip">
+      <span style="cursor:pointer" onclick="openBirthdayNote('${escAttr(b.persona.ID)}')">🎂 ${escHtml(b.persona.Nombre)} — ${b.daysUntil===0?'¡hoy!':('en '+b.daysUntil+' días')}</span>
+      <button class="icon-btn" style="padding:0 3px" title="Ocultar por hoy" onclick="dismissReminder('cumple:${escAttr(b.persona.ID)}')">✕</button>
+    </span>`).join('');
+  el.innerHTML = `<div class="reminder-bar">
+    <b>⏰ Pendiente:</b>
+    <span class="reminder-chips">${pendingChips}${birthdayChips}</span>
   </div>`;
 }
 
@@ -1628,10 +1692,68 @@ function initEditorResizerOnce(){
   document.addEventListener('touchend', ()=>{ if(_editorResizing){ _editorResizing=false; localStorage.setItem('org_editor_width', editorWidth); } });
 }
 function closeNoteEditor(){
+  stopTranscription();
   const ov = document.getElementById('editorOverlay'); if(ov) ov.remove();
   abandonEmptyDraftIfAny();
   editingNoteId=null;
   renderMain();
+}
+/* Transcripción en vivo (Web Speech API — solo Chrome/Edge, no hay
+   forma de evitarlo, Firefox/Safari no la soportan de forma
+   utilizable). A propósito NO escribe donde esté el cursor del
+   usuario — así puede seguir tomando sus propios apuntes en cualquier
+   parte de la nota mientras escucha — sino que va acumulando el texto
+   reconocido en un único párrafo marcado (id="transcribeLiveP") al
+   final de la nota, que se actualiza completo en cada resultado
+   (definitivo + lo que va reconociendo a medias). Al detener, ese
+   párrafo se "suelta" (se le quita el id) para que una transcripción
+   futura empiece en uno nuevo en vez de seguir escribiendo encima. */
+let _speechRecognition = null;
+let _transcribing = false;
+function toggleTranscription(){ if(_transcribing) stopTranscription(); else startTranscription(); }
+function startTranscription(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR){ showToast('Tu navegador no soporta transcripción de voz (funciona en Chrome/Edge)'); return; }
+  const mainEl = document.getElementById('mainArea'); if(!mainEl) return;
+  let liveP = document.createElement('p'); liveP.id = 'transcribeLiveP';
+  mainEl.appendChild(liveP);
+  let finalText = '';
+  _speechRecognition = new SR();
+  _speechRecognition.lang = 'es-MX';
+  _speechRecognition.continuous = true;
+  _speechRecognition.interimResults = true;
+  _speechRecognition.onresult = (e)=>{
+    let interim = '';
+    for(let i=e.resultIndex; i<e.results.length; i++){
+      const t = e.results[i][0].transcript;
+      if(e.results[i].isFinal) finalText += t + ' '; else interim += t;
+    }
+    const p = document.getElementById('transcribeLiveP');
+    if(p) p.textContent = finalText + interim;
+    scheduleSave();
+  };
+  _speechRecognition.onerror = (e)=>{
+    if(e.error==='not-allowed'){ showToast('Necesito permiso del micrófono'); stopTranscription(); }
+  };
+  _speechRecognition.onend = ()=>{ if(_transcribing){ try{ _speechRecognition.start(); }catch(e){} } };
+  _speechRecognition.start();
+  _transcribing = true;
+  updateTranscribeBtn();
+  showToast('🎙️ Escuchando…');
+}
+function stopTranscription(){
+  if(!_transcribing && !_speechRecognition) return;
+  _transcribing = false;
+  if(_speechRecognition){ try{ _speechRecognition.stop(); }catch(e){} _speechRecognition = null; }
+  const liveP = document.getElementById('transcribeLiveP');
+  if(liveP) liveP.removeAttribute('id');
+  updateTranscribeBtn();
+  scheduleSave();
+}
+function updateTranscribeBtn(){
+  const btn = document.getElementById('transcribeBtn'); if(!btn) return;
+  btn.classList.toggle('active', _transcribing);
+  btn.title = _transcribing ? 'Detener transcripción' : 'Transcribir — escucha y va escribiendo mientras tú también tomas apuntes (Chrome/Edge)';
 }
 function editorInnerHTML(note, isModal){
   editingCornell = isCornellNote(note);
@@ -1702,6 +1824,7 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
     <span class="sep"></span>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openAIDrawer()" title="Asistente IA">✨</button>
+    <button class="icon-btn" id="transcribeBtn" onmousedown="event.preventDefault()" onclick="toggleTranscription()" title="Transcribir — escucha y va escribiendo mientras tú también tomas apuntes (Chrome/Edge)">🎙️</button>
     <span class="sep"></span>
     ${allFlags().map(([t,emoji,label,color])=>`<button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('${t}')" title="Insertar #${escAttr(t)} (${escAttr(label)}) aquí donde está el cursor" style="color:${color}">${emoji}</button>`).join('')}
     <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">
@@ -2383,14 +2506,11 @@ function deleteNoteUI(id){
   saveEntity('NOTAS', note).then(()=>{ closeNoteEditor(); editingNoteId=null; renderAll(); showToast('🗑️ Movida a la papelera'); });
 }
 function trashedNotes(){ return DATA.notas.filter(n=>n.Papelera).sort((a,b)=>String(b.Papelera).localeCompare(String(a.Papelera))); }
-function openTrashUI(){
-  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  overlay.innerHTML = `<div class="modal" style="width:min(560px,100%)">
-    <div class="modal-head"><b>🗑️ Papelera</b><span><button class="icon-btn" onclick="emptyTrashUI()" title="Eliminar definitivamente todo lo de la papelera">🧹 Vaciar</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
-    <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 16px 8px">Las notas eliminadas quedan aquí 30 días antes de borrarse solas para siempre.</p>
-    <div class="modal-body" id="trashBody"></div>
-  </div>`;
-  document.body.appendChild(overlay);
+function renderSettingsTrash(){
+  const body = document.getElementById('settingsBody'); if(!body) return;
+  body.innerHTML = `<p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Las notas eliminadas quedan aquí 30 días antes de borrarse solas para siempre.</p>
+    <button class="btn secondary" onclick="emptyTrashUI()" style="margin-bottom:10px">🧹 Vaciar papelera</button>
+    <div id="trashBody"></div>`;
   renderTrashList();
 }
 function renderTrashList(){
@@ -2576,7 +2696,7 @@ function openTimeLogModal(){
     <div class="modal-head"><b>⏱ Registro de tiempo</b><button class="icon-btn" onclick="hideGlobalTagSuggest();this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
       <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">"#etiqueta, qué estás haciendo" — el bloque anterior se cierra solo cuando registras uno nuevo.</p>
-      <input type="text" id="timeLogInput" value="#" placeholder="#trabajo escribiendo la tesis">
+      <input type="text" id="timeLogInput" placeholder="#trabajo escribiendo la tesis">
       <div style="margin-top:8px"><button class="btn" id="timeLogSaveBtn" onclick="saveTimeLogEntry()">Registrar ahora</button></div>
       <div id="timeLogSummary" style="margin-top:14px"></div>
       <hr style="border:none;border-top:1px solid var(--border);margin:14px 0">
@@ -2590,7 +2710,7 @@ function openTimeLogModal(){
   </div>`;
   document.body.appendChild(overlay);
   const inp = document.getElementById('timeLogInput');
-  inp.focus(); inp.setSelectionRange(1,1);
+  inp.focus();
   inp.addEventListener('input', ()=>updateTagSuggestFromInput(inp));
   inp.addEventListener('keydown', e=>{ if(handleTagSuggestKeydown(e)) return; if(e.key==='Enter'){ e.preventDefault(); saveTimeLogEntry(); } });
   inp.addEventListener('blur', ()=>scheduleHideGlobalTagSuggest());
@@ -2618,7 +2738,7 @@ async function saveTimeLogEntry(){
     };
     await saveEntity('NOTAS', note);
     if(tag) ensureTagsRegistered('#'+tag);
-    inp.value='#'; inp.focus(); inp.setSelectionRange(1,1);
+    inp.value=''; inp.focus();
     _timeLogViewDate = new Date();
     renderTimeLogView(); renderSidebar();
   });
@@ -3793,6 +3913,11 @@ dx">${existing?escHtml(campos.join('\n')):''}</textarea>
       </label>
       <label style="font-size:12px;font-weight:600;display:block;margin-top:12px">Avísame si no la he llenado</label>
       ${recordatorioSelectHTML('ftplRecordatorio', existing?existing.Recordatorio:'')}
+      <label style="font-size:12px;font-weight:600;display:block;margin-top:12px">Cuaderno de destino</label>
+      <select id="ftplNotebook">
+        <option value="">Registro Personal (predeterminado)</option>
+        ${DATA.notebooks.filter(nb=>nb.Nombre!==MEJORAS_NOTEBOOK).map(nb=>`<option value="${escAttr(nb.Nombre)}" ${existing&&existing.Notebook===nb.Nombre?'selected':''}>${escHtml(nb.Nombre)}</option>`).join('')}
+      </select>
       <div style="margin-top:14px"><button class="btn" onclick="saveFieldTemplate(this,'${existingId||''}')">Guardar</button></div>
     </div>
   </div>`;
@@ -3804,8 +3929,9 @@ function saveFieldTemplate(btn, existingId){
   const campos = document.getElementById('ftplCampos').value.split('\n').map(s=>s.trim().toLowerCase().replace(/\s+/g,'_')).filter(Boolean);
   const usaPersona = document.getElementById('ftplUsaPersona').checked ? '1' : '';
   const recordatorio = document.getElementById('ftplRecordatorio').value;
+  const notebook = document.getElementById('ftplNotebook').value;
   if(!nombre || !campos.length){ showToast('Ponle nombre y al menos un campo'); return; }
-  saveEntity('PLANTILLAS_PROP', { ID: existingId||uid(), Nombre:nombre, CamposJSON: JSON.stringify(campos), UsaPersona:usaPersona, Recordatorio:recordatorio }).then(()=>{
+  saveEntity('PLANTILLAS_PROP', { ID: existingId||uid(), Nombre:nombre, CamposJSON: JSON.stringify(campos), UsaPersona:usaPersona, Recordatorio:recordatorio, Notebook:notebook }).then(()=>{
     btn.closest('.modal-overlay').remove(); renderFieldTablesBody(); renderReminderBanner();
   });
 }
@@ -3927,7 +4053,7 @@ async function saveQuickFieldFill(pt, campos, overlay){
       const val = (document.getElementById('qffField'+i).value||'').trim();
       return '<tr><td class="cornell-cue-cell">#'+escHtml(c)+'</td><td>'+(val?'<p>'+escHtml(val).replace(/\n/g,'</p><p>')+'</p>':'<br>')+'</td></tr>';
     }).join('');
-    const nb = await ensureRegistroPersonalNotebook();
+    const nb = (pt.Notebook && DATA.notebooks.find(n=>n.Nombre===pt.Notebook)) || await ensureRegistroPersonalNotebook();
     const note = newBlankNote();
     note.ID = uid();
     note.Titulo = titulo;
@@ -4218,6 +4344,7 @@ function openSettings(){
       <button onclick="settingsTab(this,'plantillas')">Plantillas</button>
       <button onclick="settingsTab(this,'appearance')">Apariencia</button>
       <button onclick="settingsTab(this,'connection')">Conexión</button>
+      <button onclick="settingsTab(this,'trash')">Papelera</button>
       <button onclick="settingsTab(this,'mejoras')">Mejoras</button>
     </div>
     <div class="modal-body" id="settingsBody"></div>
@@ -4233,6 +4360,7 @@ function settingsTab(btn, tab){
   if(tab==='plantillas') renderSettingsPlantillas();
   if(tab==='appearance') renderSettingsAppearance();
   if(tab==='connection') renderSettingsConnection();
+  if(tab==='trash') renderSettingsTrash();
   if(tab==='mejoras') renderSettingsMejoras();
 }
 /* Todas las plantillas (checklist y de campos) juntas y editables desde
@@ -4259,17 +4387,18 @@ function renderSettingsPlantillas(){
     <div class="settings-row">
       <input type="color" value="${p.Color||'#8a5a3b'}" onchange="updatePersonaField('${p.ID}','Color',this.value)">
       <input type="text" value="${escAttr(p.Nombre)}" onchange="updatePersonaField('${p.ID}','Nombre',this.value)">
+      <input type="date" value="${escAttr(p.FechaNacimiento||'')}" title="Cumpleaños (opcional)" onchange="updatePersonaField('${p.ID}','FechaNacimiento',this.value)">
       <button class="icon-btn" onclick="deletePersonaUI('${p.ID}')">🗑️</button>
     </div>`).join('');
   body.innerHTML = `
-    <p style="font-weight:700;margin:0 0 6px">☑️ Checklists</p>
-    ${checklistRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin checklists — créalos desde ☑️ en el panel lateral.</p>'}
-    <p style="font-weight:700;margin:16px 0 6px">🏷️ Plantillas de campos</p>
-    ${fieldRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas de campos — créalas desde "+" → Plantilla.</p>'}
-    <p style="font-weight:700;margin:16px 0 6px">👤 Personas</p>
+    <p style="font-weight:700;margin:0 0 6px">👤 Personas</p>
     <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Para plantillas de campos marcadas "es por persona" (ej. Somatometría de varios familiares).</p>
     <button class="btn secondary" style="margin-bottom:8px" onclick="promptNewPersona()">+ nueva persona</button>
-    ${personaRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin personas todavía.</p>'}`;
+    ${personaRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin personas todavía.</p>'}
+    <p style="font-weight:700;margin:16px 0 6px">☑️ Checklists</p>
+    ${checklistRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin checklists — créalos desde ☑️ en el panel lateral.</p>'}
+    <p style="font-weight:700;margin:16px 0 6px">🏷️ Plantillas de campos</p>
+    ${fieldRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas de campos — créalas desde "+" → Plantilla.</p>'}`;
 }
 function deleteFieldTemplateUI(id){
   if(!confirm('¿Eliminar esta plantilla de campos? Las notas que ya creaste con ella no se borran, solo la plantilla.')) return;
@@ -4495,8 +4624,6 @@ function renderSettingsConnection(){
     <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();reopenSetup()">Cambiar Sheet vinculado</button>
     <button class="btn secondary" onclick="checkDuplicateNoteIds()" title="Revisa si dos notas quedaron con el mismo ID — eso puede hacer que borrar una borre la otra sin querer" style="margin-left:8px">🔍 Revisar notas duplicadas</button>
     <button class="btn secondary" onclick="seedLegacyTemplates()" title="Crea plantillas Cornell, un checklist y cuadernos con auto-ruteo basados en tu sistema anterior (hábitos, diario, metas, salud…) — no duplica si ya los tienes" style="margin-left:8px">🌱 Traer plantillas del sistema anterior</button>
-    <p style="margin-top:16px"><b>🗑️ Papelera</b></p>
-    <button class="btn secondary" onclick="openTrashUI()">Ver papelera</button>
     <p style="margin-top:16px"><b>📅 Google Calendar</b><br><span id="gcalStatusText" style="font-size:12px;color:var(--text-dim)"></span></p>
     <button class="btn secondary" onclick="connectGoogleCalendar()">🔗 Conectar Google Calendar</button>`;
   renderGCalConnectionStatus();

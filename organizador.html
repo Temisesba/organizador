@@ -453,7 +453,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Machu Picchu';
+const BUILD_VERSION = 'Isla de Pascua';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3535,25 +3535,40 @@ function timeLogEntriesForDate(dateObj){
   return activeNotes().filter(n=>n.PlantillaPropID===TIMELOG_MARKER && new Date(n.Fecha).toDateString()===dayStr)
     .sort((a,b)=>String(a.Fecha).localeCompare(String(b.Fecha)));
 }
-/* Cada registro describe la actividad que EMPIEZA en ese momento y
-   sigue hasta el siguiente registro (o "ahora" si es el último de
-   hoy) — confirmado por el usuario con un ejemplo concreto: "a las
-   10pm... termino y me voy a dormir" — ese registro marca que el
-   dormir EMPIEZA a las 10pm, no que describe algo que ya pasó antes.
-   (Se probó brevemente la lectura contraria —retroactiva— por una
-   primera descripción ambigua, pero el ejemplo concreto la descarta;
-   revertido a como estaba). Función compartida por el modal
-   (renderTimeLogView) y la tarjeta de capítulo en Cards
-   (timeLogChapterHTML) para que ambas vistas muestren exactamente el
-   mismo rango. */
+/* Cada registro describe la actividad que YA pasó, desde el registro
+   anterior hasta el momento en que lo escribes (retroactivo) — a
+   pedido explícito del usuario 2026-07-29, confirmado con
+   AskUserQuestion viendo ambos lados antes de decidir: escribió "vi
+   harry potter y seguí leyendo de mi tesis" a las 10:34pm y esperaba
+   verlo como el bloque 07:59pm–10:34pm (lo que acababa de pasar), no
+   como un bloque nuevo que arranca en 10:34pm. NOTA: esto revierte una
+   decisión anterior en sentido contrario (otro ejemplo del mismo
+   usuario, "a las 10pm digo 'me voy a dormir', el dormir EMPIEZA a las
+   10pm") — la diferencia esta vez es que se confirmó explícitamente
+   viendo el efecto sobre el historial ya guardado, no solo un ejemplo
+   aislado.
+   El primer registro del día no tiene un registro anterior de dónde
+   partir — se ancla a la medianoche de ese día. El tramo desde el
+   último registro hasta "ahora" queda como bloque PENDIENTE
+   (note:null) sin texto todavía, hasta que el siguiente registro lo
+   cierre. Función compartida por el modal (renderTimeLogView) y la
+   tarjeta de capítulo en Cards (timeLogChapterHTML) para que ambas
+   vistas muestren exactamente el mismo rango. */
 function timeLogRangesForDate(dateObj){
   const entries = timeLogEntriesForDate(dateObj);
   const isToday = dateObj.toDateString()===new Date().toDateString();
-  return entries.map((n,i)=>{
-    const start = new Date(n.Fecha);
-    const end = i+1<entries.length ? new Date(entries[i+1].Fecha) : (isToday ? new Date() : start);
-    return { note:n, start, end, durMs: Math.max(0, end-start) };
+  const dayStart = new Date(dateObj); dayStart.setHours(0,0,0,0);
+  const ranges = entries.map((n,i)=>{
+    const start = i===0 ? dayStart : new Date(entries[i-1].Fecha);
+    const end = new Date(n.Fecha);
+    return { note:n, start, end, durMs: Math.max(0, end-start), pending:false };
   });
+  if(isToday){
+    const lastEnd = entries.length ? new Date(entries[entries.length-1].Fecha) : dayStart;
+    const now = new Date();
+    ranges.push({ note:null, start:lastEnd, end:now, durMs: Math.max(0, now-lastEnd), pending:true });
+  }
+  return ranges;
 }
 /* Migración de una sola vez: si de una sesión anterior queda un
    cuaderno "Registro de tiempo" con notas propias, se mueven a
@@ -3623,7 +3638,7 @@ function openTimeLogModal(dateObj){
   overlay.innerHTML = `<div class="modal" style="width:min(560px,100%)">
     <div class="modal-head"><b>⏱ Registro de tiempo y sueño</b><button class="icon-btn" onclick="hideGlobalTagSuggest();this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">"#etiqueta, qué estás haciendo, #sueño" — el bloque anterior se cierra solo cuando registras uno nuevo.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">"#etiqueta, qué acabas de hacer, #sueño" — describe el tramo que acaba de pasar (desde tu registro anterior hasta ahora); el tramo de ahora en adelante queda pendiente hasta tu siguiente registro.</p>
       <input type="text" id="timeLogInput" placeholder="#trabajo escribiendo la tesis">
       <div style="margin-top:8px"><button class="btn" id="timeLogSaveBtn" onclick="saveTimeLogEntry()">Registrar ahora</button></div>
       <div id="timeLogSummary" style="margin-top:14px"></div>
@@ -3692,15 +3707,26 @@ function renderTimeLogView(){
   const rowsHTML = ranges.map((r,i)=>{
     const n = r.note;
     const long = r.durMs > 2*60*60*1000;
+    const splitBtn = long ? `<div style="margin-top:4px"><button class="mini-btn" onclick="splitTimeLogEntry('${r.start.toISOString()}','${r.pending?'':r.end.toISOString()}')">✂️ Dividir — ¿de verdad duró tanto?</button></div>` : '';
+    if(r.pending){
+      const endLabel = isToday ? 'ahora' : fmtHM(r.end);
+      totals['(pendiente)'] = (totals['(pendiente)']||0) + r.durMs;
+      return `<div class="settings-row" style="align-items:flex-start${long?';background:rgba(211,124,60,.12)':''}">
+        <span style="flex:1">
+          <b>${fmtHM(r.start)}–${endLabel}</b> <span style="color:var(--text-dim);font-size:12px">(${fmtDuration(r.durMs)})</span><br>
+          <span style="color:var(--text-dim);font-style:italic">⏳ Aún sin registrar — escribe arriba qué hiciste en este tramo</span>
+          ${splitBtn}
+        </span>
+      </div>`;
+    }
     const tagKey = n.Tags || '(sin etiqueta)';
     totals[tagKey] = (totals[tagKey]||0) + r.durMs;
     const tagBadge = n.Tags ? `<span class="tag-badge" style="border-color:${tagColor(n.Tags)}">#${escHtml(n.Tags)}</span>` : '';
-    const endLabel = (i+1<ranges.length || !isToday) ? fmtHM(r.end) : 'ahora';
     return `<div class="settings-row" style="align-items:flex-start${long?';background:rgba(211,124,60,.12)':''}">
       <span style="flex:1">
-        <b>${fmtHM(r.start)}–${endLabel}</b> <span style="color:var(--text-dim);font-size:12px">(${fmtDuration(r.durMs)})</span><br>
+        <b>${fmtHM(r.start)}–${fmtHM(r.end)}</b> <span style="color:var(--text-dim);font-size:12px">(${fmtDuration(r.durMs)})</span><br>
         ${escHtml(n.Titulo)} ${tagBadge}
-        ${long?`<div style="margin-top:4px"><button class="mini-btn" onclick="splitTimeLogEntry('${n.ID}','${ranges[i+1]?ranges[i+1].note.ID:''}')">✂️ Dividir — ¿de verdad duró tanto?</button></div>`:''}
+        ${splitBtn}
       </span>
       <button class="icon-btn" onclick="openNoteEditor('${n.ID}')" title="Editar texto">✏️</button>
       <button class="icon-btn" onclick="deleteTimeLogEntryUI('${n.ID}')" title="Borrar">🗑️</button>
@@ -3716,11 +3742,13 @@ function renderTimeLogView(){
 /* "Dividir" un bloque largo: pregunta a qué hora cambiaste de actividad y
    qué empezaste a hacer, e inserta un registro nuevo justo ahí — el
    bloque original automáticamente "termina" antes, sin tocarlo, porque
-   la duración siempre se calcula contra el siguiente registro. */
-function splitTimeLogEntry(beforeId, afterId){
-  const before = getNote(beforeId); if(!before) return;
-  const start = new Date(before.Fecha);
-  const end = afterId ? new Date(getNote(afterId).Fecha) : new Date();
+   la duración siempre se calcula contra el siguiente registro. Recibe
+   el inicio/fin del bloque directamente como ISO (no IDs de nota) —
+   el inicio de un bloque puede ser la medianoche sintética del primer
+   registro del día, que no tiene una nota real detrás. */
+function splitTimeLogEntry(startIso, endIso){
+  const start = new Date(startIso);
+  const end = endIso ? new Date(endIso) : new Date();
   const midpoint = new Date((start.getTime()+end.getTime())/2);
   const hhmm = prompt('¿A qué hora cambiaste de actividad? (HH:MM)', fmtHM(midpoint));
   if(!hhmm) return;

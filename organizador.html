@@ -448,7 +448,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Delta del Okavango';
+const BUILD_VERSION = 'Isla de Pascua';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2619,6 +2619,12 @@ function wrapRtTables(container){
   container.querySelectorAll('table.rt-table').forEach(table=>{
     if(table.closest('.rt-table-wrap')) return;
     if(!table.parentElement || !table.parentElement.closest('td,th')) return;
+    // una tabla anidada sin ninguna celda con texto no tiene nada que
+    // "contener" — envolverla solo deja un botón flotando sin sentido
+    // (reporte: "¿por qué el Cornell pone eso de expandir?" en una
+    // celda vacía). Sin envolver, una tabla vacía simplemente no se ve.
+    const hasContent = Array.from(table.querySelectorAll('td,th')).some(c => (c.textContent||'').trim());
+    if(!hasContent) return;
     const wrap = document.createElement('div');
     wrap.className = 'rt-table-wrap';
     table.parentNode.insertBefore(wrap, table);
@@ -3264,6 +3270,14 @@ async function saveQuickDato(){
   const inp = document.getElementById('quickDatoInput');
   const raw = (inp.value||'').trim(); if(!raw) return;
   const btn = document.getElementById('quickDatoSaveBtn');
+  // el modal se queda abierto para seguir capturando una tras otra — eso
+  // significa que Enter Y el botón "Guardar" pueden dispararse casi
+  // juntos (Enter rápido dos veces, o el usuario no ve el aviso de
+  // "guardado" a tiempo y lo intenta de nuevo con el mismo texto).
+  // Reporte real: varias notas idénticas seguidas en Datos generales,
+  // con IDs distintos pero el mismo contenido. El botón deshabilitado
+  // ya cubre el caso de doble-clic; esto cubre Enter+clic entremezclados.
+  if(btn && btn.disabled) return;
   await withSavingFeedback(btn, async ()=>{
     const m = raw.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)\s*[,:]?\s*(.*)$/);
     const tag = m ? m[1] : '';
@@ -3274,11 +3288,20 @@ async function saveQuickDato(){
     // Inbox normal (autoRouteNotebook), aplicado aquí también.
     const autoNb = tag ? DATA.notebooks.find(nb2 => nb2.TagAuto && String(nb2.TagAuto).replace(/^#/,'')===tag) : null;
     const nb = autoNb || await ensureDatosGeneralesNotebook();
+    const titulo = tag ? ('#'+tag) : raw.slice(0,40);
+    // mismo título+texto que algo guardado hace unos segundos en el mismo
+    // cuaderno = casi seguro es un reintento del mismo dato, no uno nuevo.
+    const dupe = DATA.notas.find(n2 => !n2.Papelera && n2.Notebook===nb.Nombre && n2.Titulo===titulo && stripHtmlToText(n2.Contenido||'')===texto.trim() && (Date.now()-new Date(n2.Fecha).getTime())<8000);
+    if(dupe){
+      showToast('Ya se había guardado hace un momento');
+      inp.value='#'; inp.focus(); inp.setSelectionRange(1,1);
+      return;
+    }
     // el # ya va en el título y en la etiqueta del campo Tags — repetirlo
     // también dentro del cuerpo era mostrarlo tres veces por nada.
     const note = {
       ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(),
-      Titulo: tag ? ('#'+tag) : raw.slice(0,40),
+      Titulo: titulo,
       Contenido: '<p>'+escHtml(texto)+'</p>',
       Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:''
     };
@@ -3436,14 +3459,21 @@ async function saveTimeLogEntry(){
   const inp = document.getElementById('timeLogInput');
   const raw = (inp.value||'').trim(); if(!raw) return;
   const btn = document.getElementById('timeLogSaveBtn');
+  // mismo resguardo que saveQuickDato: el modal se queda abierto para
+  // seguir registrando, así que Enter+clic casi juntos podían duplicar
+  // el mismo registro con dos IDs distintos.
+  if(btn && btn.disabled) return;
   await withSavingFeedback(btn, async ()=>{
     const m = raw.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)\s*[,:]?\s*(.*)$/);
     const tag = m ? m[1] : '';
     const texto = m ? m[2] : raw;
     const nb = await ensureRegistroPersonalNotebook();
+    const titulo = texto || (tag?('#'+tag):raw.slice(0,40));
+    const dupe = DATA.notas.find(n2 => !n2.Papelera && n2.PlantillaPropID===TIMELOG_MARKER && n2.Titulo===titulo && (Date.now()-new Date(n2.Fecha).getTime())<8000);
+    if(dupe){ showToast('Ya se había registrado hace un momento'); inp.value=''; inp.focus(); return; }
     const note = {
       ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(),
-      Titulo: texto || (tag?('#'+tag):raw.slice(0,40)),
+      Titulo: titulo,
       Contenido: '<p>'+escHtml(texto||raw)+'</p>',
       Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'', PlantillaPropID:TIMELOG_MARKER
     };

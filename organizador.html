@@ -439,7 +439,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Fiordo de Milford';
+const BUILD_VERSION = 'Salar de Uyuni';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2834,21 +2834,30 @@ function habitStreak(habitoId){
   while(set.has(d.toDateString())){ streak++; d.setDate(d.getDate()-1); }
   return streak;
 }
-async function toggleHabitToday(habitoId){
+/* saveEntity/deleteEntity ya actualizan DATA en el momento (de forma
+   síncrona, antes de mandar el guardado real por red) — el número se
+   veía tardado porque estas tres funciones hacían "await" sobre esa
+   llamada de red ANTES de volver a pintar la lista, así que el "+"
+   esperaba la ida y vuelta al servidor para que el número cambiara en
+   pantalla. Sin el await, DATA ya quedó al día de inmediato y se puede
+   repintar YA — el guardado real sigue su curso aparte, en segundo
+   plano (el flujo normal de esta app en cualquier otro lado: local
+   primero, red aparte). */
+function toggleHabitToday(habitoId){
   const existing = habitLoggedToday(habitoId);
-  if(existing){ await deleteEntity('HABITO_LOG', existing.ID); }
-  else{ await saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:new Date().toISOString() }); }
+  if(existing){ deleteEntity('HABITO_LOG', existing.ID); }
+  else{ saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:new Date().toISOString() }); }
   renderHabitCaptureList();
 }
-async function incrementHabitToday(habitoId){
-  await saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:new Date().toISOString() });
+function incrementHabitToday(habitoId){
+  saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:new Date().toISOString() });
   renderHabitCaptureList();
 }
-async function decrementHabitToday(habitoId){
+function decrementHabitToday(habitoId){
   const todayStr = new Date().toDateString();
   const todays = DATA.habito_log.filter(l=>l.HabitoID===habitoId && new Date(l.Fecha).toDateString()===todayStr).sort((a,b)=>+new Date(b.Fecha)-+new Date(a.Fecha));
   if(!todays.length) return;
-  await deleteEntity('HABITO_LOG', todays[0].ID);
+  deleteEntity('HABITO_LOG', todays[0].ID);
   renderHabitCaptureList();
 }
 function openHabitCapture(){
@@ -2914,10 +2923,20 @@ function habitFormRowHTML(i){
   return `<div class="fill-row" style="gap:6px;margin-bottom:6px;flex-wrap:wrap">
     <input type="text" id="habitFormName${i}" placeholder="nombre (ej. tomar agua)" style="flex:2;min-width:130px">
     <input type="text" id="habitFormEmoji${i}" placeholder="✅" style="width:48px;text-align:center">
-    <input type="number" id="habitFormMeta${i}" placeholder="veces/día" min="1" style="width:80px" title="Cuántas veces al día (opcional — vacío = una vez ya cuenta como hecho; ej. pon 8 para 8 vasos de agua)">
-    <input type="time" id="habitFormHora${i}" style="width:110px" title="Hora habitual (opcional)">
+    <input type="number" id="habitFormMeta${i}" placeholder="veces/día" min="1" style="width:80px" title="Cuántas veces al día (opcional — vacío = una vez ya cuenta como hecho; ej. pon 8 para 8 vasos de agua)" oninput="toggleHabitHoraVisibility('habitFormHoraWrap${i}','habitFormHora${i}',this.value)">
+    <span id="habitFormHoraWrap${i}"><input type="time" id="habitFormHora${i}" style="width:110px" title="Hora habitual (opcional) — solo tiene sentido si es una vez al día"></span>
     ${recordatorioSelectHTML('habitFormFx'+i, '')}
   </div>`;
+}
+/* La "hora habitual" solo tiene sentido para un hábito de una sola vez
+   al día (ej. meditar a las 7am) — si es de varias veces (ej. 8 vasos
+   de agua) una sola hora no representa nada, así que se esconde en
+   cuanto la meta pasa de 1 (y se limpia su valor, para no guardar algo
+   escondido/olvidado que el usuario ya no puede ver). */
+function toggleHabitHoraVisibility(wrapId, inputId, metaValue){
+  const hide = parseInt(metaValue, 10) > 1;
+  const wrap = document.getElementById(wrapId); if(wrap) wrap.style.display = hide ? 'none' : '';
+  if(hide){ const inp = document.getElementById(inputId); if(inp) inp.value = ''; }
 }
 function renderHabitAddRows(){
   const el = document.getElementById('habitAddRows'); if(!el) return;
@@ -2975,13 +2994,14 @@ function openHabitEditModal(id){
         </div>
         <div style="flex:1;min-width:90px">
           <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Veces/día</label>
-          <input type="number" id="habitEditMeta" min="1" placeholder="ej. 8" value="${escAttr(h.Meta||'')}">
+          <input type="number" id="habitEditMeta" min="1" placeholder="ej. 8" value="${escAttr(h.Meta||'')}" oninput="toggleHabitHoraVisibility('habitEditHoraWrap','habitEditHora',this.value)">
         </div>
-        <div style="flex:1;min-width:100px">
+        <div id="habitEditHoraWrap" style="flex:1;min-width:100px;${habitGoal(h)>1?'display:none':''}">
           <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Hora habitual</label>
           <input type="time" id="habitEditHora" value="${escAttr(h.Hora||'')}">
         </div>
       </div>
+      <p class="hint" style="color:var(--text-dim);font-size:11px;margin:4px 0 0">La hora solo aplica a hábitos de una vez al día — si pones más de 1 en "veces/día" se esconde, porque una sola hora no representa un hábito que pasa varias veces.</p>
       <p class="hint" style="color:var(--text-dim);font-size:11px;margin:4px 0 0">Si cambias "veces/día" el conteo de hoy no se borra — solo cambia cuánto necesitas para que cuente como cumplido.</p>
       <label style="font-size:12px;font-weight:600;display:block;margin-top:10px">Avísame si no lo he hecho</label>
       ${recordatorioSelectHTML('habitEditFx', h.Recordatorio||'')}
@@ -3191,9 +3211,9 @@ function openTimeLogModal(dateObj){
   _timeLogViewDate = dateObj || new Date();
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(560px,100%)">
-    <div class="modal-head"><b>⏱ Registro de tiempo</b><button class="icon-btn" onclick="hideGlobalTagSuggest();this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-head"><b>⏱ Registro de tiempo y sueño</b><button class="icon-btn" onclick="hideGlobalTagSuggest();this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">"#etiqueta, qué estás haciendo" — el bloque anterior se cierra solo cuando registras uno nuevo.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">"#etiqueta, qué estás haciendo, #sueño" — el bloque anterior se cierra solo cuando registras uno nuevo.</p>
       <input type="text" id="timeLogInput" placeholder="#trabajo escribiendo la tesis">
       <div style="margin-top:8px"><button class="btn" id="timeLogSaveBtn" onclick="saveTimeLogEntry()">Registrar ahora</button></div>
       <div id="timeLogSummary" style="margin-top:14px"></div>

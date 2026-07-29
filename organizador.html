@@ -453,7 +453,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Cañón del Colorado';
+const BUILD_VERSION = 'Salar de Atacama';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3021,6 +3021,25 @@ function openCreateMenu(){
    hábito con meta necesita VARIAS filas el mismo día para contar como
    cumplido, en vez de que la sola existencia de una fila ya baste. */
 function habitGoal(h){ const n = parseInt(h && h.Meta, 10); return (n>0) ? n : 1; }
+/* Google Sheets a veces "adivina" que un valor tipo "07:36" es una
+   hora de verdad y lo convierte a su propio tipo interno de fecha —
+   al leerlo de vuelta regresa como una fecha completa ancla al "día
+   cero" de Sheets (1899-12-30), no el texto "HH:MM" que se guardó
+   (reportado: "⏰ 1899-12-31T01:36:36.000Z" en vez de la hora). Mismo
+   tipo de bug ya documentado (bug_pattern_sheets_number_coercion en
+   memoria), esta vez con una hora en vez de un número. Se recupera
+   leyendo horas/minutos LOCALES del Date (no UTC) — así es como
+   <input type="time"> los interpretó al guardarlos originalmente. */
+function normalizeHoraValue(val){
+  if(!val) return '';
+  const s = String(val).trim();
+  if(/^\d{2}:\d{2}$/.test(s)) return s;
+  if(/^\d{4}-\d{2}-\d{2}T/.test(s)){
+    const d = new Date(s);
+    if(!isNaN(d.getTime())) return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  }
+  return '';
+}
 function habitCountOnDate(habitoId, dateStr){
   return DATA.habito_log.filter(l=>l.HabitoID===habitoId && new Date(l.Fecha).toDateString()===dateStr).length;
 }
@@ -3088,7 +3107,7 @@ function openHabitCapture(){
     </div>
   </div>`;
   document.body.appendChild(overlay);
-  window._habitFormRowCount = 3;
+  window._habitFormRowCount = 1;
   renderHabitCaptureList();
   renderHabitAddRows();
 }
@@ -3098,7 +3117,8 @@ function renderHabitCaptureList(){
   el.innerHTML = activos.map(h=>{
     const goal = habitGoal(h);
     const streak = habitStreak(h.ID);
-    const nameSpan = `<span style="flex:1">${h.Emoji||'✅'} ${escHtml(h.Nombre)}${h.Hora?` <span style="color:var(--text-dim);font-size:11px">⏰ ${escHtml(h.Hora)}</span>`:''}</span>`;
+    const horaShown = normalizeHoraValue(h.Hora);
+    const nameSpan = `<span style="flex:1">${h.Emoji||'✅'} ${escHtml(h.Nombre)}${horaShown?` <span style="color:var(--text-dim);font-size:11px">⏰ ${escHtml(horaShown)}</span>`:''}</span>`;
     if(goal>1){
       const count = habitCountOnDate(h.ID, new Date().toDateString());
       const done = count>=goal;
@@ -3178,7 +3198,7 @@ async function saveHabitFormRows(){
   }
   if(!rows.length){ showToast('Escribe al menos un nombre'); return; }
   await Promise.all(rows.map(r=>saveEntity('HABITOS', { ID:uid(), Nombre:r.name, Emoji:r.emoji, Color:randomColor(), Activo:'1', Hora:r.hora, Recordatorio:r.recordatorio, Meta:r.meta })));
-  window._habitFormRowCount = 3;
+  window._habitFormRowCount = 1;
   renderHabitAddRows();
   renderHabitCaptureList();
   renderReminderBanner();
@@ -3208,7 +3228,7 @@ function openHabitEditModal(id){
         </div>
         <div id="habitEditHoraWrap" style="flex:1;min-width:100px;${habitGoal(h)>1?'display:none':''}">
           <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Hora habitual</label>
-          <input type="time" id="habitEditHora" value="${escAttr(h.Hora||'')}">
+          <input type="time" id="habitEditHora" value="${escAttr(normalizeHoraValue(h.Hora))}">
         </div>
       </div>
       <p class="hint" style="color:var(--text-dim);font-size:11px;margin:4px 0 0">La hora solo aplica a hábitos de una vez al día — si pones más de 1 en "veces/día" se esconde, porque una sola hora no representa un hábito que pasa varias veces.</p>

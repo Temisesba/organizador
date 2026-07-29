@@ -207,6 +207,8 @@ table.rt-table{border-collapse:collapse;margin:.5em 0;width:100%}
 table.rt-table td,table.rt-table th{border:1px solid var(--border);padding:6px 9px;min-width:40px;vertical-align:top}
 table.rt-table tr:nth-child(even) td{background:var(--bg-soft)}
 table.rt-table td.cornell-cue-cell{font-weight:700;color:var(--accent);background:var(--accent-soft, var(--bg-soft));width:26%}
+.scroll-flash{animation:scrollFlash 1.6s ease;border-radius:4px}
+@keyframes scrollFlash{ 0%{outline:3px solid var(--accent)} 75%{outline:3px solid var(--accent)} 100%{outline:3px solid transparent} }
 table.cornell-table{border:2px solid var(--accent)}
 table.rt-table td.grid-row-header,table.rt-table td.grid-col-header{font-weight:700;color:var(--accent);background:var(--accent-soft, var(--bg-soft))}
 table.rt-table td.grid-corner{background:var(--bg-soft);opacity:.5}
@@ -446,7 +448,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Sendero Inca';
+const BUILD_VERSION = 'Delta del Okavango';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1662,7 +1664,11 @@ function chapterGroupHTML(n, pairs, highlight){
     const dateVal = isDateField ? stripHtmlToText(p.texto).trim() : '';
     const dateValLooksValid = /^\d{4}-\d{2}-\d{2}$/.test(dateVal) || /^\d{2}-\d{2}$/.test(dateVal);
     const syncBtn = (isDateField && dateValLooksValid) ? `<button class="icon-btn" style="padding:0 3px" onclick="event.stopPropagation();syncFieldDateToCalendar('${n.ID}','${fieldName}')" title="Sincronizar esta fecha con Google Calendar">📅</button>` : '';
-    return `<div class="field-card"><div class="field-card-tag">${escHtml(label)}${syncBtn}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
+    // clic en la tarjetita (no solo en el capítulo completo) abre la
+    // nota y salta directo a este campo — antes solo abría la nota en
+    // el tope, y en una nota larga (ej. con muchas transcripciones)
+    // tocaba buscar a mano dónde estaba lo que se quería ver.
+    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}','${escAttr(p.cue)}')"><div class="field-card-tag">${escHtml(label)}${syncBtn}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
   }).join('');
   return `<div class="chapter-group" onclick="openNoteEditor('${n.ID}')" style="${n.Color?('border-left:4px solid '+n.Color):''}">
     <div class="chapter-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}<span class="chapter-meta">${n.Notebook?(escHtml(n.Notebook)+' · '):''}${fmtDate(n.Fecha)}</span></div>
@@ -1806,7 +1812,7 @@ function abandonEmptyDraftIfAny(){
     apiPost('deleteRow', { table:'NOTAS', id: editingNoteId });
   }
 }
-function openNoteEditor(id){
+function openNoteEditor(id, scrollToCue){
   if(editingNoteId && editingNoteId!==id) abandonEmptyDraftIfAny();
   let note;
   if(id){
@@ -1822,16 +1828,34 @@ function openNoteEditor(id){
     DATA.notas.push(note);
     editingNoteId = note.ID;
   }
-  if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = noteDetailHTML(note); return; }
-  renderNoteModal(note);
+  if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = noteDetailHTML(note); if(scrollToCue) scrollNoteToTag(scrollToCue); return; }
+  renderNoteModal(note, scrollToCue);
 }
 function noteDetailHTML(note){ return editorInnerHTML(note, false); }
-function renderNoteModal(note){
+function renderNoteModal(note, scrollToCue){
   const overlay = document.createElement('div'); overlay.id='editorOverlay'; overlay.className='no-print';
   overlay.innerHTML = `<div class="split-handle" id="editorResizeHandle"></div><div id="editorPanel" style="width:${editorWidth}px">${editorInnerHTML(note, true)}</div>`;
   overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) closeNoteEditor(); });
   document.body.appendChild(overlay);
   bindEditorEvents(note);
+  if(scrollToCue) scrollNoteToTag(scrollToCue);
+}
+/* Salta directo a un campo/cue específico dentro de la nota que se
+   acaba de abrir (ej. al abrir desde una tarjetita de #importante en
+   Cards) en vez de dejar que se busque a mano en una nota larga —
+   busca la celda Cornell o el párrafo cuyo texto coincide exacto con
+   ese cue, lo centra en la vista y lo resalta un momento. */
+function scrollNoteToTag(cue){
+  setTimeout(()=>{
+    const mainEl = document.getElementById('mainArea'); if(!mainEl) return;
+    const needle = String(cue).trim().toLowerCase();
+    const candidates = Array.from(mainEl.querySelectorAll('td.cornell-cue-cell, p, div'));
+    const target = candidates.find(el => (el.textContent||'').trim().toLowerCase() === needle);
+    if(!target) return;
+    target.scrollIntoView({ block:'center', behavior:'smooth' });
+    target.classList.add('scroll-flash');
+    setTimeout(()=>target.classList.remove('scroll-flash'), 1600);
+  }, 50);
 }
 /* manija para agrandar/achicar el panel del editor — mismo patrón que el
    separador de la vista dividida, delegado en document */

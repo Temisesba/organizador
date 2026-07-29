@@ -446,7 +446,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Bahía Bioluminiscente';
+const BUILD_VERSION = 'Sendero Inca';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1303,7 +1303,13 @@ function quickFlag(tag){
   const mainEl = document.getElementById('mainArea');
   if(mainEl){
     focusMainEditor();
-    document.execCommand('insertHTML', false, '#'+tag+'&nbsp;');
+    // se inserta como una "píldora" visible (mismo estilo que el resto
+    // de la app) en vez de texto plano — pedido explícito: con mucho
+    // texto alrededor, "#importante" como texto suelto se perdía de
+    // vista. El texto que queda adentro sigue siendo "#tag" normal
+    // (stripHtmlToText lo lee igual), así que nada que ya dependa de
+    // encontrar la etiqueta como texto dentro de la nota se rompe.
+    document.execCommand('insertHTML', false, '<span class="tag-badge" style="border-color:'+tagColor(tag)+'">#'+escHtml(tag)+'</span>&nbsp;');
     scheduleSave();
     ensureTagsRegistered('#'+tag);
     showToast('Agregada #'+tag);

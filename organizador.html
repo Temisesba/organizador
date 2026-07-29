@@ -448,7 +448,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Isla de Pascua';
+const BUILD_VERSION = 'Meseta del Tíbet';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1229,6 +1229,7 @@ function renderSidebar(){
       </span>
       <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();startInlineTagEdit('${escAttr(t)}', this)" title="Renombrar etiqueta">✏️</button>
       <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();openTagCompendium('${escAttr(t)}')" title="Ver todo lo etiquetado con #${escAttr(t)}">👁</button>
+      <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();deleteTagFromSidebar('${escAttr(t)}')" title="Eliminar etiqueta">🗑️</button>
     </div>`;
   }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin etiquetas todavía</p>';
 
@@ -2324,8 +2325,9 @@ function bindEditorEvents(note){
   const mainEl = document.getElementById('mainArea');
   if(mainEl){
     wrapRtTables(mainEl);
+    badgeifyInlineTags(mainEl);
     mainEl.addEventListener('input', ()=>{ scheduleSave(); scheduleRouteHints(); updateTagSuggestFromEditable(); });
-    mainEl.addEventListener('blur', ()=>{ doSaveNow(); scheduleHideGlobalTagSuggest(); });
+    mainEl.addEventListener('blur', ()=>{ badgeifyInlineTags(mainEl); doSaveNow(); scheduleHideGlobalTagSuggest(); });
     mainEl.addEventListener('keydown', handleRichKeydown);
     mainEl.addEventListener('change', (e)=>{
       // los checkbox dentro del editor no reflejan su "checked" en el HTML
@@ -2645,6 +2647,47 @@ function toggleRtTableExpand(btn){
   const expanded = wrap.classList.toggle('expanded');
   btn.textContent = expanded ? '⤡ Contener' : '⤢ Expandir';
   scheduleSave();
+}
+/* Cualquier "#tag" escrito directo en el cuerpo de la nota (no solo los
+   insertados con las banderas rápidas ⚑★⚠) se ve como una píldora de
+   color, igual que en cualquier otra parte de la app — pedido
+   explícito ("#task investigarlo" se perdía como texto plano). Solo se
+   aplica al abrir la nota y al salir del área de edición (blur), NUNCA
+   mientras se está escribiendo — reescribir nodos de texto en vivo
+   mientras el cursor puede estar justo ahí es exactamente el tipo de
+   cosa que rompe la posición del cursor/composición IME (ver
+   feedback_editor_preferences en memoria). Un TreeWalker evita tocar
+   texto que ya está dentro de un badge (no lo vuelve a envolver cada
+   vez) o dentro del botón de expandir/contener de una tabla anidada. */
+function badgeifyInlineTags(container){
+  if(!container) return;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+    acceptNode(node){
+      if(!node.nodeValue || !/#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+/.test(node.nodeValue)) return NodeFilter.FILTER_REJECT;
+      if(node.parentElement && node.parentElement.closest('.tag-badge, .rt-table-expand-btn')) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const textNodes = []; let n; while((n = walker.nextNode())) textNodes.push(n);
+  textNodes.forEach(node=>{
+    const text = node.nodeValue;
+    const regex = /#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)/g;
+    const frag = document.createDocumentFragment();
+    let lastIndex = 0; let m; let found = false;
+    while((m = regex.exec(text))){
+      found = true;
+      if(m.index > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, m.index)));
+      const span = document.createElement('span');
+      span.className = 'tag-badge';
+      span.style.borderColor = tagColor(m[1].toLowerCase());
+      span.textContent = m[0];
+      frag.appendChild(span);
+      lastIndex = m.index + m[0].length;
+    }
+    if(!found) return;
+    if(lastIndex < text.length) frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+    node.parentNode.replaceChild(frag, node);
+  });
 }
 /* "Tabla de etiquetas": encabezado de fila (primera columna) y encabezado
    de columna (primera fila) se convierten SOLOS en etiquetas de cada
@@ -5646,7 +5689,13 @@ function tagRegex(name){
 }
 async function renameTagEverywhere(oldName, newName){
   newName = newName.toLowerCase();
-  if(!newName || oldName.toLowerCase()===newName) return;
+  // OJO: comparación con distinción de mayúsculas a propósito — antes
+  // comparaba oldName.toLowerCase()===newName, así que renombrar
+  // "Dengue" → "dengue" (exactamente el caso de combinar variantes que
+  // solo difieren en mayúsculas) se veía "igual" y no hacía nada. Bug
+  // real reportado: el usuario intentaba fusionar #Dengue con #dengue
+  // desde el panel lateral y no pasaba absolutamente nada.
+  if(!newName || oldName===newName) return;
   const affected = notesUsingTag(oldName);
   for(const n of affected){
     n.Tags = parseTagsText(n.Tags).map(t=>t.toLowerCase()===oldName.toLowerCase()?newName:t).join(' ');
@@ -5700,6 +5749,19 @@ async function deleteTagUI(id){
   await deleteEntity('TAGS', id);
   renderSettingsTags(); renderAll();
 }
+/* Igual que deleteTagUI, pero directo desde el panel lateral — "t" puede
+   ser una etiqueta que solo vive suelta dentro del texto de las notas y
+   nunca se registró formalmente (sin fila en TAGS), así que no siempre
+   hay un ID que borrar — mismo criterio que renameTagFromSidebar. */
+async function deleteTagFromSidebar(name){
+  const ok = confirm('¿Eliminar la etiqueta #'+name+'?\n\nSe quita de todas tus notas, pero las notas NO se borran — solo dejan de tener esta etiqueta.');
+  if(!ok) return;
+  await removeTagEverywhere(name);
+  const t = findTagByName(name);
+  if(t) await deleteEntity('TAGS', t.ID);
+  renderAll();
+  showToast('Etiqueta eliminada');
+}
 function updateTagField(id, field, val){
   const t=DATA.tags.find(x=>x.ID===id); if(!t) return;
   if(field==='Etiqueta'){
@@ -5722,12 +5784,46 @@ function renderSettingsNotebooks(){
       <button class="icon-btn" onclick="deleteNotebookUI('${nb.ID}')">🗑️</button>
     </div>`).join('') || '<p style="color:var(--text-dim)">Sin cuadernos todavía</p>';
 }
-function deleteNotebookUI(id){
+async function deleteNotebookUI(id){
   const nb = DATA.notebooks.find(x=>x.ID===id); if(!nb) return;
   if(!confirm('¿Eliminar el cuaderno "'+nb.Nombre+'"? Las notas que tenía NO se borran, solo se quedan sin cuaderno (las verás en el Inbox).')) return;
-  deleteEntity('NOTEBOOKS', id).then(()=>{ renderSettingsNotebooks(); renderSidebar(); });
+  // el mensaje de arriba promete "se quedan sin cuaderno" — hay que
+  // cumplirlo de verdad (antes solo se borraba la fila de NOTEBOOKS,
+  // dejando note.Notebook apuntando a un nombre que ya no existe).
+  const affected = DATA.notas.filter(n=>n.Notebook===nb.Nombre);
+  for(const n of affected){ n.Notebook = ''; await saveEntity('NOTAS', n); }
+  await deleteEntity('NOTEBOOKS', id);
+  renderSettingsNotebooks(); renderAll();
 }
-function updateNbField(id, field, val){ const nb=DATA.notebooks.find(x=>x.ID===id); if(!nb) return; nb[field]=val; saveEntity('NOTEBOOKS', nb).then(()=>renderSidebar()); }
+/* Las notas y las plantillas de campos guardan a qué cuaderno
+   pertenecen por NOMBRE (texto), no por ID — así que renombrar un
+   cuaderno sin actualizar esas referencias las deja apuntando a un
+   nombre que ya no existe (huérfanas: siguen vivas y se siguen viendo
+   en 📥 Inbox, que no filtra por cuaderno, pero desaparecen del
+   cuaderno renombrado). Bug real reportado: "cambié el nombre de un
+   cuaderno y sus notas vinculadas se perdieron" — antes updateNbField
+   solo tocaba la fila de NOTEBOOKS, sin tocar nada más. Mismo tipo de
+   arreglo que ya existía para renombrar etiquetas (renameTagEverywhere). */
+async function renameNotebookEverywhere(oldName, newName){
+  if(!newName || oldName===newName) return;
+  const affectedNotes = DATA.notas.filter(n=>n.Notebook===oldName);
+  for(const n of affectedNotes){ n.Notebook = newName; await saveEntity('NOTAS', n); }
+  const affectedTemplates = DATA.plantillas_prop.filter(pt=>pt.Notebook===oldName);
+  for(const pt of affectedTemplates){ pt.Notebook = newName; await saveEntity('PLANTILLAS_PROP', pt); }
+  if(affectedNotes.length) showToast('Cuaderno renombrado — '+affectedNotes.length+' nota'+(affectedNotes.length>1?'s':'')+' movida'+(affectedNotes.length>1?'s':'')+' con él');
+}
+function updateNbField(id, field, val){
+  const nb=DATA.notebooks.find(x=>x.ID===id); if(!nb) return;
+  if(field==='Nombre'){
+    const oldName = nb.Nombre; const newName = val.trim();
+    if(!newName){ showToast('El cuaderno necesita un nombre'); renderSidebar(); return; }
+    if(newName===oldName) return;
+    nb.Nombre = newName;
+    saveEntity('NOTEBOOKS', nb).then(()=>renameNotebookEverywhere(oldName, newName)).then(()=>renderAll());
+    return;
+  }
+  nb[field]=val; saveEntity('NOTEBOOKS', nb).then(()=>renderSidebar());
+}
 function renderSettingsAppearance(){
   const body = document.getElementById('settingsBody');
   const theme = document.documentElement.getAttribute('data-theme')||'light';

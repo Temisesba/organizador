@@ -196,6 +196,16 @@ table.rt-table td.cornell-cue-cell{font-weight:700;color:var(--accent);backgroun
 table.cornell-table{border:2px solid var(--accent)}
 table.rt-table td.grid-row-header,table.rt-table td.grid-col-header{font-weight:700;color:var(--accent);background:var(--accent-soft, var(--bg-soft))}
 table.rt-table td.grid-corner{background:var(--bg-soft);opacity:.5}
+/* tabla anidada dentro de otra celda (ej. pegada dentro de una columna de
+   Cornell): por defecto se contiene con scroll propio para no desfasar el
+   layout de la nota; el botón deja "expandirla" cuando sí se quiere que
+   abarque todo el ancho */
+.rt-table-wrap{max-width:100%;overflow-x:auto;margin:.5em 0}
+.rt-table-wrap table.rt-table{margin:0}
+.rt-table-wrap.expanded{overflow-x:visible;max-width:none}
+.rt-table-expand-btn{display:block;margin:0 0 4px 0;background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;padding:1px 8px;font-size:12px;cursor:pointer;opacity:.6;color:inherit}
+.rt-table-expand-btn:hover{opacity:1}
+.rt-table-wrap.expanded .rt-table-expand-btn{background:var(--accent);color:var(--accent-text);opacity:1}
 table.grid-table{border:2px solid var(--accent)}
 .cornell-bar{display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:12px;color:var(--accent);font-weight:600}
 
@@ -229,6 +239,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
    mientras el panel escucha. */
 .transcribe-side-panel{background:var(--bg-elev);width:320px;flex:none;height:100%;box-shadow:var(--shadow);display:flex;flex-direction:column;border-left:1px solid var(--border)}
 @media (max-width:820px){ .transcribe-side-panel{width:100%;position:fixed;inset:0;z-index:210} }
+.transcribe-min-chip{position:fixed;right:20px;bottom:20px;z-index:250;background:var(--accent);color:var(--accent-text);border:none;border-radius:20px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:var(--shadow);cursor:pointer}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px}
 .modal{background:var(--bg-elev);border-radius:var(--radius);box-shadow:var(--shadow);width:min(640px,100%);max-height:90vh;display:flex;flex-direction:column}
 .modal.fullscreen{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0}
@@ -363,6 +374,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <div class="spacer"></div>
     <button class="icon-btn no-print" onclick="openHelpSheet()" title="Comandos y etiquetas (/ayuda)">❔</button>
     <button class="icon-btn no-print" onclick="openBlockTables()" title="Tablas por bloque">🧩</button>
+    <button class="icon-btn no-print" onclick="openGeneralExplorer()" title="Explorador de archivos — etiqueta y busca en una carpeta de tu compu (recuerda cuál elegiste)">📁</button>
     <button class="icon-btn no-print" onclick="openAIDrawer()" title="Asistente IA">✨</button>
     <button class="icon-btn no-print" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
@@ -427,7 +439,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Meteora';
+const BUILD_VERSION = 'Uluru';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -753,7 +765,7 @@ function deleteGoogleEventUI(eventId){
 }
 let GAS_URL = localStorage.getItem('org_gas_url') || '';
 let SHEET_ID = localStorage.getItem('org_sheet_id') || '';
-let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[], personas:[] };
+let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[], personas:[], habitos:[], habito_log:[] };
 // Banderas rápidas de fábrica (no se pueden borrar) — las que agrega el
 // usuario desde Configuración se guardan como filas normales en el Sheet
 // (tabla FLAGS), igual que cualquier otra etiqueta o nota, para que
@@ -915,12 +927,13 @@ function normalizeData(d){
     plantillas: d.plantillas||[], historial: d.historial||[],
     diccionario: d.diccionario||[], feedback: d.feedback||[],
     bloque_tablas: d.bloque_tablas||[], plantillas_prop: d.plantillas_prop||[],
-    flags: d.flags||[], busquedas: d.busquedas||[], personas: d.personas||[]
+    flags: d.flags||[], busquedas: d.busquedas||[], personas: d.personas||[],
+    habitos: d.habitos||[], habito_log: d.habito_log||[]
   };
 }
 
 /* ============ CRUD genérico local + remoto ============ */
-const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas' };
+const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas', HABITOS:'habitos', HABITO_LOG:'habito_log' };
 function cacheData(){ try{ localStorage.setItem('org_data_cache', JSON.stringify(DATA)); }catch(e){} }
 async function saveEntity(table, obj){
   if(!obj.ID) obj.ID = uid();
@@ -1784,20 +1797,67 @@ function toggleTranscription(){
     panel = document.createElement('div');
     panel.id = 'transcribePanel'; panel.className = 'transcribe-side-panel';
     panel.innerHTML = `
-      <div class="drawer-head"><b>🎙️ Transcribiendo</b><button class="icon-btn" onclick="closeTranscribePanel()">✕</button></div>
+      <div class="drawer-head"><b>🎙️ Transcribir</b><span><button class="icon-btn" onclick="minimizeTranscribePanel()" title="Minimizar — sigue escuchando aunque no lo veas">➖</button><button class="icon-btn" onclick="closeTranscribePanel()">✕</button></span></div>
       <div style="padding:10px;overflow-y:auto;flex:1;display:flex;flex-direction:column;min-height:0">
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Idioma</label>
+        <select id="transcribeLangSelect">
+          <option value="es-MX">Español (México)</option>
+          <option value="es-ES">Español (España)</option>
+          <option value="en-US">English (US)</option>
+          <option value="en-GB">English (UK)</option>
+          <option value="pt-BR">Português (Brasil)</option>
+          <option value="fr-FR">Français</option>
+        </select>
+        <p class="hint" style="color:var(--text-dim);font-size:11px;margin:4px 0 8px">El navegador no detecta el idioma solo — elígelo antes de darle a escuchar.</p>
         <div id="transcribeCaptureArea" contenteditable="true" style="flex:1;min-height:120px;border:1px solid var(--border);border-radius:8px;padding:10px"></div>
         <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0 0">Se agrega a esta misma nota (como #transcripcion) al cerrar este panel — mientras tanto sigue escribiendo tus apuntes en la nota, a la izquierda.</p>
-        <button class="btn" id="transcribeToggleBtn" style="margin-top:8px" onclick="toggleTranscription()">⏸️ Detener</button>
+        <button class="btn" id="transcribeToggleBtn" style="margin-top:8px" onclick="toggleTranscription()">🎙️ Empezar a escuchar</button>
       </div>`;
     editorOverlay.appendChild(panel);
+    return; // el panel recién se abre — que elija idioma antes de empezar a escuchar
   }
   startTranscription();
 }
+let _closingTranscribePanel = false;
 async function closeTranscribePanel(){
-  stopTranscription();
-  await saveTranscriptionIntoCurrentNote();
-  const panel = document.getElementById('transcribePanel'); if(panel) panel.remove();
+  // Cerrar dos veces rápido (doble clic en ✕) llamaba a esto dos veces
+  // antes de que la primera terminara de guardar — la segunda leía el
+  // mismo texto del panel (que no se vacía hasta después) y lo volvía
+  // a agregar, duplicando el campo #transcripcion. Esta bandera hace
+  // que la segunda llamada no haga nada mientras la primera sigue en
+  // curso.
+  if(_closingTranscribePanel) return;
+  _closingTranscribePanel = true;
+  try{
+    stopTranscription();
+    await saveTranscriptionIntoCurrentNote();
+    const panel = document.getElementById('transcribePanel'); if(panel) panel.remove();
+    const chip = document.getElementById('transcribeMinChip'); if(chip) chip.remove();
+  } finally {
+    _closingTranscribePanel = false;
+  }
+}
+/* Minimizar NO detiene el reconocimiento — solo esconde el panel
+   (display:none, sigue en el DOM) y deja una "píldora" flotante para
+   volver a abrirlo. El "onresult" sigue escribiendo en
+   #transcribeLiveP normalmente aunque nadie lo esté viendo; nada se
+   pierde hasta que de verdad le des ✕ (eso sí guarda y detiene). */
+function minimizeTranscribePanel(){
+  const panel = document.getElementById('transcribePanel'); if(!panel) return;
+  panel.style.display = 'none';
+  let chip = document.getElementById('transcribeMinChip');
+  if(!chip){
+    chip = document.createElement('button');
+    chip.id = 'transcribeMinChip';
+    chip.className = 'transcribe-min-chip no-print';
+    chip.onclick = restoreTranscribePanel;
+    document.body.appendChild(chip);
+  }
+  chip.textContent = (_transcribing?'🎙️':'⏸️') + ' ' + (_transcribing?'Transcribiendo':'En pausa') + ' — tocar para ver';
+}
+function restoreTranscribePanel(){
+  const panel = document.getElementById('transcribePanel'); if(panel) panel.style.display = '';
+  const chip = document.getElementById('transcribeMinChip'); if(chip) chip.remove();
 }
 /* Guarda YA (doSaveNow directo, no el scheduleSave con debounce de
    500ms) — si se usara el debounce y justo después alguien cierra la
@@ -1823,8 +1883,9 @@ function startTranscription(){
   let liveP = document.createElement('p'); liveP.id = 'transcribeLiveP';
   targetEl.appendChild(liveP);
   let finalText = '';
+  const langSel = document.getElementById('transcribeLangSelect');
   _speechRecognition = new SR();
-  _speechRecognition.lang = 'es-MX';
+  _speechRecognition.lang = (langSel && langSel.value) || 'es-MX';
   _speechRecognition.continuous = true;
   _speechRecognition.interimResults = true;
   _speechRecognition.onresult = (e)=>{
@@ -1854,9 +1915,10 @@ function stopTranscription(){
   updateTranscribeBtn();
 }
 function updateTranscribeBtn(){
-  const btn = document.getElementById('transcribeToggleBtn'); if(!btn) return;
-  btn.classList.toggle('active', _transcribing);
-  btn.textContent = _transcribing ? '⏸️ Detener' : '🎙️ Empezar a escuchar';
+  const btn = document.getElementById('transcribeToggleBtn');
+  if(btn){ btn.classList.toggle('active', _transcribing); btn.textContent = _transcribing ? '⏸️ Detener' : '🎙️ Empezar a escuchar'; }
+  const chip = document.getElementById('transcribeMinChip');
+  if(chip) chip.textContent = (_transcribing?'🎙️':'⏸️') + ' ' + (_transcribing?'Transcribiendo':'En pausa') + ' — tocar para ver';
 }
 function editorInnerHTML(note, isModal){
   editingCornell = isCornellNote(note);
@@ -2085,6 +2147,7 @@ function bindEditorEvents(note){
   });
   const mainEl = document.getElementById('mainArea');
   if(mainEl){
+    wrapRtTables(mainEl);
     mainEl.addEventListener('input', ()=>{ scheduleSave(); scheduleRouteHints(); updateTagSuggestFromEditable(); });
     mainEl.addEventListener('blur', ()=>{ doSaveNow(); scheduleHideGlobalTagSuggest(); });
     mainEl.addEventListener('keydown', handleRichKeydown);
@@ -2366,6 +2429,39 @@ function insertRichTable(){
   focusMainEditor();
   const trs = Array.from({length:rows}).map(()=>'<tr>'+Array.from({length:cols}).map(()=>'<td><br></td>').join('')+'</tr>').join('');
   document.execCommand('insertHTML', false, '<table class="rt-table">'+trs+'</table><p><br></p>');
+  wrapRtTables(document.getElementById('mainArea'));
+  scheduleSave();
+}
+/* si una tabla queda anidada dentro de la celda de otra tabla (ej. Cornell)
+   se envuelve en un contenedor con scroll propio para que no desfase el
+   layout de la nota; el botón deja "expandirla" cuando sí se quiere que
+   abarque todo el ancho. Se llama tanto al insertar/pegar como al abrir
+   una nota (para normalizar tablas anidadas que se guardaron antes de que
+   existiera este contenedor) */
+function wrapRtTables(container){
+  if(!container) return;
+  container.querySelectorAll('table.rt-table').forEach(table=>{
+    if(table.closest('.rt-table-wrap')) return;
+    if(!table.parentElement || !table.parentElement.closest('td,th')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'rt-table-wrap';
+    table.parentNode.insertBefore(wrap, table);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'rt-table-expand-btn';
+    btn.contentEditable = 'false';
+    btn.title = 'Expandir esta tabla (o volver a contenerla con scroll)';
+    btn.textContent = '⤢ Expandir';
+    btn.setAttribute('onmousedown', 'event.preventDefault()');
+    btn.setAttribute('onclick', 'toggleRtTableExpand(this)');
+    wrap.appendChild(btn);
+    wrap.appendChild(table);
+  });
+}
+function toggleRtTableExpand(btn){
+  const wrap = btn.closest('.rt-table-wrap'); if(!wrap) return;
+  const expanded = wrap.classList.toggle('expanded');
+  btn.textContent = expanded ? '⤡ Contener' : '⤢ Expandir';
   scheduleSave();
 }
 /* "Tabla de etiquetas": encabezado de fila (primera columna) y encabezado
@@ -2575,6 +2671,7 @@ function stripHtmlToText(html){
     if(node.nodeType===3){ parts.push(node.textContent); return; }
     if(node.nodeType!==1) return;
     if(node.tagName==='BR'){ parts.push('\n'); return; }
+    if(node.tagName==='BUTTON') return; // ej. el botón de expandir/contener tablas anidadas — no es contenido de la nota
     Array.from(node.childNodes).forEach(walk);
     if(BLOCK.test(node.tagName)) parts.push('\n');
   })(d);
@@ -2658,10 +2755,107 @@ function openCreateMenu(){
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openQuickDatoModal()">⚡ Dato general</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openFieldTemplatePicker()">🏷️ Plantilla</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openTimeLogModal()">⏱ Registro de tiempo</button>
+      <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openHabitCapture()">✅ Registrar hábito</button>
     </div>
   </div>`;
   overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
   document.body.appendChild(overlay);
+}
+
+/* ============ Hábitos: seguimiento tipo Streaks/Loop ================
+   Distinto del checklist genérico (esto es de un solo toque por hábito
+   por día, con racha como lo central) — un HABITOS define el hábito
+   (nombre/emoji/color), y HABITO_LOG solo tiene una fila por día en
+   que SÍ se cumplió (que exista la fila = cumplido; nada que "marcar
+   como no cumplido" aparte de borrar la fila del día). */
+function habitLoggedToday(habitoId){
+  const todayStr = new Date().toDateString();
+  return DATA.habito_log.find(l=>l.HabitoID===habitoId && new Date(l.Fecha).toDateString()===todayStr);
+}
+function habitStreak(habitoId){
+  const logs = DATA.habito_log.filter(l=>l.HabitoID===habitoId).map(l=>new Date(l.Fecha).toDateString());
+  const set = new Set(logs);
+  let streak = 0; let d = new Date();
+  // si hoy no está marcado, la racha "actual" cuenta desde ayer para
+  // atrás (para no mostrar 0 injustamente apenas empieza el día)
+  if(!set.has(d.toDateString())) d.setDate(d.getDate()-1);
+  while(set.has(d.toDateString())){ streak++; d.setDate(d.getDate()-1); }
+  return streak;
+}
+async function toggleHabitToday(habitoId){
+  const existing = habitLoggedToday(habitoId);
+  if(existing){ await deleteEntity('HABITO_LOG', existing.ID); }
+  else{ await saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:new Date().toISOString() }); }
+  renderHabitCaptureList();
+}
+function openHabitCapture(){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(420px,100%)">
+    <div class="modal-head"><b>✅ Hábitos de hoy</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <div id="habitCaptureList"></div>
+      <div style="display:flex;gap:6px;margin-top:12px">
+        <input type="text" id="habitNewName" placeholder="nuevo hábito (ej. tomar agua)">
+        <button class="btn secondary" onclick="addHabitUI()">+</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  renderHabitCaptureList();
+}
+function renderHabitCaptureList(){
+  const el = document.getElementById('habitCaptureList'); if(!el) return;
+  const activos = DATA.habitos.filter(h=>h.Activo!=='0');
+  el.innerHTML = activos.map(h=>{
+    const done = !!habitLoggedToday(h.ID);
+    const streak = habitStreak(h.ID);
+    return `<div class="settings-row" style="cursor:pointer" onclick="toggleHabitToday('${h.ID}')">
+      <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHabitToday('${h.ID}')">
+      <span style="flex:1">${h.Emoji||'✅'} ${escHtml(h.Nombre)}</span>
+      <span style="color:var(--text-dim);font-size:12px">🔥 ${streak}</span>
+      <button class="icon-btn" onclick="event.stopPropagation();deleteHabitUI('${h.ID}')">🗑️</button>
+    </div>`;
+  }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin hábitos todavía — agrega el primero abajo.</p>';
+}
+async function addHabitUI(){
+  const inp = document.getElementById('habitNewName');
+  const name = (inp.value||'').trim(); if(!name) return;
+  await saveEntity('HABITOS', { ID:uid(), Nombre:name, Emoji:'✅', Color:randomColor(), Activo:'1' });
+  inp.value='';
+  renderHabitCaptureList();
+}
+function deleteHabitUI(id){
+  if(!confirm('¿Eliminar este hábito? Se borra también su historial de días marcados.')) return;
+  const logs = DATA.habito_log.filter(l=>l.HabitoID===id);
+  Promise.all(logs.map(l=>deleteEntity('HABITO_LOG', l.ID))).then(()=>deleteEntity('HABITOS', id)).then(renderHabitCaptureList);
+}
+/* Estadísticas de hábitos, pestaña "✅ Hábitos" en 🧩 Tablas — mismo
+   look que el de checklists (cuadrícula de calendario + racha), pero
+   solo dos estados (hubo registro ese día / no lo hubo), porque acá no
+   existe un "llenado pero sin marcar" — la fila en HABITO_LOG SOLO
+   existe cuando sí se cumplió. */
+function renderHabitStatsTab(){
+  const body = document.getElementById('blockTablesBody'); if(!body) return;
+  const activos = DATA.habitos.filter(h=>h.Activo!=='0');
+  if(!activos.length){ body.innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:13px">Sin hábitos todavía — agrégalos desde "+" → Registrar hábito.</p>'; return; }
+  const rows = activos.map(h=>{
+    const logs = DATA.habito_log.filter(l=>l.HabitoID===h.ID);
+    const byDate = {}; logs.forEach(l=>{ byDate[new Date(l.Fecha).toDateString()] = true; });
+    const streak = habitStreak(h.ID);
+    const days = logs.map(l=>new Date(l.Fecha).toDateString()).sort();
+    let best=0, run=0, prev=null;
+    days.forEach(d=>{
+      run = (prev && Math.round((new Date(d)-new Date(prev))/86400000)===1) ? run+1 : 1;
+      best = Math.max(best, run); prev = d;
+    });
+    const totalDays = days.length;
+    return `<div class="habit-row">
+      <div class="habit-row-head"><b>${h.Emoji||'✅'} ${escHtml(h.Nombre)}</b><span class="habit-streak-badge">🔥 ${streak}</span></div>
+      <div class="habit-row-sub">${totalDays} día${totalDays===1?'':'s'} registrado${totalDays===1?'':'s'}${best>streak?(' · mejor racha '+best):''}</div>
+      ${habitCalendarGridHTML(byDate)}
+    </div>`;
+  }).join('');
+  body.innerHTML = rows;
 }
 
 /* ============ + Dato general: captura ultrarrápida "#etiqueta, texto" ==
@@ -3060,10 +3254,10 @@ async function openNotebookFolder(notebookId, notebookName){
    permisos del navegador sobre esa carpeta). notebookName es opcional:
    si la carpeta se abrió desde un cuaderno, "📝 nota" crea la nota
    DENTRO de ese cuaderno; si se abrió desde una nota suelta, no aplica. */
-async function openExplorer(folderHandle, label, notebookName){
+async function openExplorer(folderHandle, label, notebookName, changeFolderFnName){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(720px,100%)">
-    <div class="modal-head"><b>📁 ${escHtml(label)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-head"><b>📁 ${escHtml(label)}</b><span>${changeFolderFnName?`<button class="icon-btn" onclick="${changeFolderFnName}()" title="Elegir otra carpeta">🔄</button>`:''}<button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="modal-body">
       <input type="text" id="explorerSearch" placeholder="Buscar archivo…" oninput="renderExplorerList()">
       <div id="explorerList" style="margin-top:10px">Cargando…</div>
@@ -3077,6 +3271,32 @@ async function openExplorer(folderHandle, label, notebookName){
     for await (const [name, handle] of folderHandle.entries()) window._explorerEntries.push({name, handle, kind: handle.kind});
   }catch(e){ showToast('No se pudo leer la carpeta'); }
   renderExplorerList();
+}
+/* Entrada general al explorador, no ligada a una nota o cuaderno en
+   particular — recuerda la última carpeta elegida (misma IndexedDB de
+   siempre) para no tener que volver a elegirla cada vez que se abre,
+   con un botón 🔄 para cambiarla cuando quieras. */
+async function openGeneralExplorer(){
+  const key = 'general-explorer-folder';
+  let handle = await idbGet(key).catch(()=>null);
+  if(handle){
+    const perm = await handle.queryPermission({mode:'read'}).catch(()=>'denied');
+    if(perm!=='granted'){
+      const reperm = await handle.requestPermission({mode:'read'}).catch(()=>'denied');
+      if(reperm!=='granted'){ showToast('Falta dar permiso de nuevo para esa carpeta — elige una'); handle = null; }
+    }
+  }
+  if(!handle){ await changeGeneralExplorerFolder(); return; }
+  openExplorer(handle, handle.name, '', 'changeGeneralExplorerFolder');
+}
+async function changeGeneralExplorerFolder(){
+  if(!window.showDirectoryPicker){ showToast('Tu navegador no permite esto (usa Chrome/Edge de escritorio)'); return; }
+  try{
+    const handle = await window.showDirectoryPicker();
+    await idbSet('general-explorer-folder', handle);
+    document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#explorerList')) o.remove(); });
+    openExplorer(handle, handle.name, '', 'changeGeneralExplorerFolder');
+  }catch(e){ /* usuario canceló */ }
 }
 /* Notas que ya mencionan un archivo por nombre (mismo criterio que ya
    usan los chips de "archivo vinculado" en el editor — por nombre, no
@@ -3193,11 +3413,17 @@ function parsePastedPlainTextRows(text){
    tabla anidada dentro de otra. Si no, se crea una tabla nueva pero con
    nuestro propio estilo (clase rt-table) — se ignora el formato que traía
    la tabla de origen (Excel, Word, otra nota…) para que los bordes se
-   vean iguales al resto de tablas de la app. */
+   vean iguales al resto de tablas de la app.
+   Excepción: Cornell (2 columnas fijas: pista|desarrollo) y Grid (fila y
+   columna de encabezado con significado) NO se agrandan así — pegar ahí
+   una tabla ancha antes rompía todo el layout de la nota (crecía la tabla
+   entera a 8+ columnas). En esos dos casos se inserta como tabla anidada
+   y contenida (con scroll propio, ver wrapRtTables) dentro de la celda. */
 function pasteTableRows(rows){
   const existing = currentTableFromSelection();
   const startCell = currentCellFromSelection();
-  if(existing && startCell && startCell.closest('table')===existing){
+  const existingIsFixedLayout = existing && (existing.classList.contains('cornell-table') || existing.classList.contains('grid-table'));
+  if(existing && startCell && !existingIsFixedLayout && startCell.closest('table')===existing){
     const startRowIdx = Array.from(existing.rows).indexOf(startCell.closest('tr'));
     const startColIdx = Array.from(startCell.parentNode.children).indexOf(startCell);
     rows.forEach((rowVals, r)=>{
@@ -3218,6 +3444,7 @@ function pasteTableRows(rows){
     const trs = rows.map(r=>'<tr>'+r.map(v=>'<td>'+escHtml(v)+'</td>').join('')+'</tr>').join('');
     focusMainEditor();
     document.execCommand('insertHTML', false, '<table class="rt-table">'+trs+'</table><p><br></p>');
+    wrapRtTables(document.getElementById('mainArea'));
   }
   scheduleSave();
 }
@@ -3822,22 +4049,43 @@ function habitCalendarGridHTML(byDate){
    funciona igual elijas lo que elijas. */
 function openBlockTables(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  const options = DATA.plantillas_prop.map(pt=>`<option value="tpl:${pt.ID}">🏷️ ${escHtml(pt.Nombre)}</option>`).join('')
-    + `<option value="custom">Personalizadas</option><option value="bloque">Por etiqueta de bloque</option>`;
   overlay.innerHTML = `<div class="modal" style="width:min(1200px,96vw)">
     <div class="modal-head"><b>🧩 Tablas</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
-    <div style="padding:12px 16px 0">
-      <select id="blockTablesSelect" onchange="blockTablesSelectChange(this.value)" style="width:auto;min-width:240px">${options}</select>
+    <div class="tabs">
+      <button class="active" onclick="blockTablesTab(this,'tpl')">Plantillas</button>
+      <button onclick="blockTablesTab(this,'custom')">Personalizadas</button>
+      <button onclick="blockTablesTab(this,'bloque')">Por etiqueta de bloque</button>
+      <button onclick="blockTablesTab(this,'habitos')">✅ Hábitos</button>
     </div>
     <div class="modal-body" id="blockTablesBody"></div>
   </div>`;
   document.body.appendChild(overlay);
-  blockTablesSelectChange(document.getElementById('blockTablesSelect').value);
+  renderTemplateTablesTab();
 }
-function blockTablesSelectChange(val){
-  if(val==='bloque') renderBlockTablesBody();
-  else if(val==='custom') renderFieldTablesBody();
-  else if(val && val.indexOf('tpl:')===0) renderTemplateTableBody(val.slice(4));
+function blockTablesTab(btn, tab){
+  btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
+  if(tab==='bloque') renderBlockTablesBody();
+  else if(tab==='custom') renderFieldTablesBody();
+  else if(tab==='habitos') renderHabitStatsTab();
+  else if(tab==='tpl') renderTemplateTablesTab();
+}
+/* La pestaña "Plantillas" es la única de las tres con un desplegable
+   adentro (en vez de ser una pestaña por plantilla) — con pocas
+   plantillas ya se veía apretado, y solo esta lista crece sin límite a
+   medida que agregas plantillas nuevas; "Personalizadas" y "Por
+   etiqueta de bloque" son conceptos fijos, no hace falta escalarlos
+   igual. */
+function renderTemplateTablesTab(){
+  const body = document.getElementById('blockTablesBody'); if(!body) return;
+  if(!DATA.plantillas_prop.length){
+    body.innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:13px">Sin plantillas de campos todavía — créalas con "+" → Plantilla, o en Configuración → Plantillas.</p>';
+    return;
+  }
+  const options = DATA.plantillas_prop.map(pt=>`<option value="${pt.ID}">${escHtml(pt.Nombre)}</option>`).join('');
+  body.innerHTML = `
+    <select id="tplTablesSelect" onchange="renderTemplateTableBody(this.value)" style="width:auto;min-width:240px">${options}</select>
+    <div id="tplTableOuter" style="margin-top:10px"></div>`;
+  renderTemplateTableBody(DATA.plantillas_prop[0].ID);
 }
 function templateNotesRows(templateId){
   const pt = DATA.plantillas_prop.find(x=>x.ID===templateId);
@@ -3885,7 +4133,8 @@ function templateTableInnerHTML(templateId){
   return '<div style="overflow:auto;margin-top:8px"><table class="org-table"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 function renderTemplateTableBody(templateId){
-  const container = document.getElementById('blockTablesBody'); if(!container) return;
+  const container = document.getElementById('tplTableOuter'); if(!container) return;
+  const sel = document.getElementById('tplTablesSelect'); if(sel) sel.value = templateId;
   const { pt, rows } = templateNotesRows(templateId);
   if(!pt) return;
   container.innerHTML = `

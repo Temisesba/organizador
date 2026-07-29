@@ -41,7 +41,9 @@ const TABLE_DEFS = {
   PLANTILLAS_PROP: ['ID', 'Nombre', 'CamposJSON', 'UsaPersona', 'Recordatorio', 'Notebook'],
   FLAGS:         ['ID', 'Nombre', 'Emoji', 'Color'],
   BUSQUEDAS:     ['ID', 'Nombre', 'Query', 'Tags', 'Modo'],
-  PERSONAS:      ['ID', 'Nombre', 'Color', 'FechaNacimiento', 'GCalEventId']
+  PERSONAS:      ['ID', 'Nombre', 'Color', 'FechaNacimiento', 'GCalEventId'],
+  HABITOS:       ['ID', 'Nombre', 'Emoji', 'Color', 'Activo'],
+  HABITO_LOG:    ['ID', 'HabitoID', 'Fecha']
 };
 
 // ── Router GET (solo lectura ligera, ej. ping de conexión) ────

@@ -41,7 +41,7 @@ const TABLE_DEFS = {
   PLANTILLAS_PROP: ['ID', 'Nombre', 'CamposJSON', 'UsaPersona', 'Recordatorio', 'Notebook'],
   FLAGS:         ['ID', 'Nombre', 'Emoji', 'Color'],
   BUSQUEDAS:     ['ID', 'Nombre', 'Query', 'Tags', 'Modo'],
-  PERSONAS:      ['ID', 'Nombre', 'Color', 'FechaNacimiento']
+  PERSONAS:      ['ID', 'Nombre', 'Color', 'FechaNacimiento', 'GCalEventId']
 };
 
 // ── Router GET (solo lectura ligera, ej. ping de conexión) ────

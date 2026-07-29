@@ -417,7 +417,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Torre de Pisa';
+const BUILD_VERSION = 'Sacsayhuamán';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1413,40 +1413,43 @@ function openReminderTarget(type, id){
   else openFillModal(id);
 }
 /* Cumpleaños próximos (próximos 7 días) de las Personas que tengan
-   fecha de nacimiento guardada — reutiliza la misma barra de
-   recordatorios y el mismo mecanismo de "ocultar por hoy". Clic en el
-   chip abre una nota nueva en el cuaderno Cumpleaños (el mismo que ya
-   existe con auto-ruteo #cumple), lista para anotar regalo/plan. */
+   fecha guardada — solo día y mes, sin año (FechaNacimiento se guarda
+   como "MM-DD", no una fecha completa; nadie quiere compartir el año).
+   El lugar correcto para "avísame cada año en tal fecha" es el
+   calendario de verdad, no un cuaderno de notas — el chip de la barra
+   de pendientes sincroniza (o actualiza) un evento anual recurrente en
+   Google Calendar en vez de crear una nota. */
 function upcomingBirthdays(withinDays){
   const today = new Date(); today.setHours(0,0,0,0);
   return DATA.personas.filter(p=>p.FechaNacimiento).map(p=>{
-    const bd = new Date(p.FechaNacimiento+'T00:00:00');
-    if(isNaN(bd)) return null;
-    let next = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
-    if(next < today) next = new Date(today.getFullYear()+1, bd.getMonth(), bd.getDate());
+    const parts = String(p.FechaNacimiento).split('-').map(s=>parseInt(s,10));
+    if(parts.length<2 || isNaN(parts[0]) || isNaN(parts[1])) return null;
+    const mm = parts[0], dd = parts[1];
+    let next = new Date(today.getFullYear(), mm-1, dd);
+    if(next < today) next = new Date(today.getFullYear()+1, mm-1, dd);
     const daysUntil = Math.round((next-today)/86400000);
     return { persona:p, daysUntil };
   }).filter(x=>x && x.daysUntil<=withinDays).sort((a,b)=>a.daysUntil-b.daysUntil);
 }
-async function ensureCumpleanosNotebook(){
-  let nb = DATA.notebooks.find(n=>n.TagAuto==='cumple') || DATA.notebooks.find(n=>n.Nombre==='Cumpleaños');
-  if(!nb) nb = await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:'Cumpleaños', TagsHeredados:'', Color:'#d1477a', TagAuto:'cumple' });
-  return nb;
-}
-async function openBirthdayNote(personaId){
-  const p = DATA.personas.find(x=>x.ID===personaId); if(!p) return;
-  const nb = await ensureCumpleanosNotebook();
-  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
-  if(editingNoteId) abandonEmptyDraftIfAny();
-  const note = newBlankNote();
-  note.ID = uid();
-  note.Titulo = 'Cumpleaños de '+p.Nombre;
-  note.Tags = 'cumple';
-  note.Notebook = nb.Nombre;
-  DATA.notas.push(note);
-  editingNoteId = note.ID;
-  if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = noteDetailHTML(note); }
-  else renderNoteModal(note);
+async function syncBirthdayToCalendar(personaId){
+  const p = DATA.personas.find(x=>x.ID===personaId); if(!p || !p.FechaNacimiento) return;
+  if(!googleAccessToken){ showToast('Conecta Google Calendar primero, en Configuración → Conexión'); return; }
+  const [mm,dd] = String(p.FechaNacimiento).split('-').map(s=>parseInt(s,10));
+  const pad = n=>String(n).padStart(2,'0');
+  const todayMid = new Date(); todayMid.setHours(0,0,0,0);
+  let start = new Date(todayMid.getFullYear(), mm-1, dd);
+  if(start < todayMid) start = new Date(todayMid.getFullYear()+1, mm-1, dd);
+  const end = new Date(start); end.setDate(end.getDate()+1);
+  const dstr = d => d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+  const body = { summary: '🎂 Cumpleaños de '+p.Nombre, start:{date:dstr(start)}, end:{date:dstr(end)}, recurrence:['RRULE:FREQ=YEARLY'] };
+  const url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'+(p.GCalEventId?'/'+p.GCalEventId:'');
+  const res = await fetch(url, { method: p.GCalEventId?'PATCH':'POST', headers:{ Authorization:'Bearer '+googleAccessToken, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  if(!res.ok){ showToast('No se pudo sincronizar con Calendar ('+res.status+')'); return; }
+  const data = await res.json();
+  p.GCalEventId = data.id;
+  await saveEntity('PERSONAS', p);
+  showToast('📅 Cumpleaños de '+p.Nombre+' en tu Google Calendar (se repite cada año)');
+  renderSettingsPlantillas();
 }
 function renderReminderBanner(){
   const el = document.getElementById('reminderBanner'); if(!el) return;
@@ -1459,7 +1462,7 @@ function renderReminderBanner(){
       <button class="icon-btn" style="padding:0 3px" title="Ocultar por hoy" onclick="dismissReminder('${r.type}:${escAttr(r.id)}')">✕</button>
     </span>`).join('');
   const birthdayChips = birthdays.map(b=>`<span class="reminder-chip">
-      <span style="cursor:pointer" onclick="openBirthdayNote('${escAttr(b.persona.ID)}')">🎂 ${escHtml(b.persona.Nombre)} — ${b.daysUntil===0?'¡hoy!':('en '+b.daysUntil+' días')}</span>
+      <span style="cursor:pointer" onclick="syncBirthdayToCalendar('${escAttr(b.persona.ID)}')" title="${b.persona.GCalEventId?'Ya está en tu Google Calendar — clic para actualizar':'Clic para agregarlo a Google Calendar'}">🎂 ${escHtml(b.persona.Nombre)} — ${b.daysUntil===0?'¡hoy!':('en '+b.daysUntil+' días')}${b.persona.GCalEventId?' 📅':''}</span>
       <button class="icon-btn" style="padding:0 3px" title="Ocultar por hoy" onclick="dismissReminder('cumple:${escAttr(b.persona.ID)}')">✕</button>
     </span>`).join('');
   el.innerHTML = `<div class="reminder-bar">
@@ -3667,22 +3670,91 @@ function checklistStatsHTML(hist){
    No busca notas enteras — busca párrafos/bloques (de cualquier nota) que
    lleven una etiqueta, y saca las demás etiquetas #clave:valor de ESE
    mismo bloque como columnas. */
+/* Una pestaña por plantilla de campos: la tabla se arma sola (columnas
+   = los campos de esa plantilla, filas = las notas que la usaron, vía
+   PlantillaPropID) — no hay que configurar CampoFiltro/Columnas a mano
+   como con las tablas "Personalizadas" de abajo. Buscar/ordenar
+   asc-desc funciona igual en todas las pestañas. */
 function openBlockTables(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  const tplTabs = DATA.plantillas_prop.map(pt=>`<button onclick="blockTablesTab(this,'tpl:${pt.ID}')">${escHtml(pt.Nombre)}</button>`).join('');
   overlay.innerHTML = `<div class="modal" style="width:min(1200px,96vw)">
     <div class="modal-head"><b>🧩 Tablas</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
-    <div class="tabs">
-      <button class="active" onclick="blockTablesTab(this,'campos')">Por campos de nota</button>
+    <div class="tabs" style="flex-wrap:wrap">
+      ${tplTabs}
+      <button onclick="blockTablesTab(this,'custom')">Personalizadas</button>
       <button onclick="blockTablesTab(this,'bloque')">Por etiqueta de bloque</button>
     </div>
     <div class="modal-body" id="blockTablesBody"></div>
   </div>`;
   document.body.appendChild(overlay);
-  renderFieldTablesBody();
+  const firstTab = overlay.querySelector('.tabs button');
+  firstTab.classList.add('active');
+  if(DATA.plantillas_prop.length) renderTemplateTableBody(DATA.plantillas_prop[0].ID);
+  else renderFieldTablesBody();
 }
 function blockTablesTab(btn, tab){
   btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
-  if(tab==='campos') renderFieldTablesBody(); else renderBlockTablesBody();
+  if(tab==='bloque') renderBlockTablesBody();
+  else if(tab==='custom') renderFieldTablesBody();
+  else if(tab.indexOf('tpl:')===0) renderTemplateTableBody(tab.slice(4));
+}
+function templateNotesRows(templateId){
+  const pt = DATA.plantillas_prop.find(x=>x.ID===templateId);
+  if(!pt) return { pt:null, campos:[], rows:[] };
+  let campos = []; try{ campos = JSON.parse(pt.CamposJSON||'[]'); }catch(e){}
+  if(pt.UsaPersona) campos = ['persona'].concat(campos);
+  const rows = activeNotes().filter(n=>n.PlantillaPropID===templateId).map(n=>({ note:n, fields:getNoteFields(n) }));
+  return { pt, campos, rows };
+}
+window._tplTableSort = window._tplTableSort || {};
+window._tplTableSearch = window._tplTableSearch || {};
+function toggleTplTableSort(templateId, col){
+  const cur = window._tplTableSort[templateId];
+  const dir = (cur && cur.col===col && cur.dir==='asc') ? 'desc' : 'asc';
+  window._tplTableSort[templateId] = { col, dir };
+  const el = document.getElementById('tplTableWrap-'+templateId); if(el) el.innerHTML = templateTableInnerHTML(templateId);
+}
+function setTplTableSearch(templateId, val){
+  window._tplTableSearch[templateId] = val;
+  const el = document.getElementById('tplTableWrap-'+templateId); if(el) el.innerHTML = templateTableInnerHTML(templateId);
+}
+function templateTableInnerHTML(templateId){
+  const { pt, campos, rows: allRows } = templateNotesRows(templateId);
+  if(!pt) return '';
+  const search = (window._tplTableSearch[templateId]||'').toLowerCase().trim();
+  let rows = allRows;
+  if(search) rows = rows.filter(r => (r.note.Titulo||'').toLowerCase().includes(search) || campos.some(c=>String(r.fields[c]||'').toLowerCase().includes(search)));
+  const sortState = window._tplTableSort[templateId];
+  if(sortState){
+    rows = rows.slice().sort((a,b)=>{
+      const av = sortState.col==='__title__' ? (a.note.Titulo||'') : (a.fields[sortState.col]||'');
+      const bv = sortState.col==='__title__' ? (b.note.Titulo||'') : (b.fields[sortState.col]||'');
+      const cmp = String(av).localeCompare(String(bv),'es',{numeric:true});
+      return sortState.dir==='asc' ? cmp : -cmp;
+    });
+  } else {
+    rows = rows.slice().sort((a,b)=>String(b.note.Fecha).localeCompare(String(a.note.Fecha)));
+  }
+  if(!rows.length) return '<p style="color:var(--text-dim);font-size:13px;margin-top:8px">Sin registros todavía.</p>';
+  const arrow = c => sortState && sortState.col===c ? (sortState.dir==='asc'?' ▲':' ▼') : '';
+  const head = '<th style="cursor:pointer" onclick="toggleTplTableSort(\''+templateId+'\',\'__title__\')">Nota'+arrow('__title__')+'</th>'
+    + campos.map(c=>'<th style="cursor:pointer" onclick="toggleTplTableSort(\''+templateId+'\',\''+escAttr(c)+'\')">'+escHtml(prettyFieldLabel(c))+arrow(c)+'</th>').join('');
+  const body = rows.map(r=>'<tr><td class="title-cell" onclick="openNoteEditor(\''+r.note.ID+'\')">'+escHtml(r.note.Titulo||'(sin título)')+'</td>'
+    + campos.map(c=>'<td>'+escHtml(r.fields[c]||'')+'</td>').join('') + '</tr>').join('');
+  return '<div style="overflow:auto;margin-top:8px"><table class="org-table"><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+}
+function renderTemplateTableBody(templateId){
+  const container = document.getElementById('blockTablesBody'); if(!container) return;
+  const { pt, rows } = templateNotesRows(templateId);
+  if(!pt) return;
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b style="font-size:13.5px">${escHtml(pt.Nombre)}</b>
+      <span style="color:var(--text-dim);font-size:12px">${rows.length} registro${rows.length===1?'':'s'}</span>
+    </div>
+    <input type="text" placeholder="🔎 buscar…" value="${escAttr(window._tplTableSearch[templateId]||'')}" oninput="setTplTableSearch('${templateId}',this.value)" style="width:100%">
+    <div id="tplTableWrap-${templateId}">${templateTableInnerHTML(templateId)}</div>`;
 }
 
 /* ---- Tablas por campos de nota: "#dx" solo en su línea + el texto de
@@ -3705,20 +3777,8 @@ function renderFieldTablesBody(){
       <input type="text" id="ftCols" list="fieldNamesDatalist" placeholder="columnas (ej. definicion, tx)" style="flex:1.4;min-width:160px">
       <button class="btn" id="ftCrearBtn" onclick="saveFieldTable()">+ Crear</button>
     </div>
-    <div id="fieldTablesList"></div>
-    <hr style="border:none;border-top:1px solid var(--border);margin:20px 0 14px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <b style="font-size:13.5px">🏷️ Plantillas de campos</b>
-      <button class="btn secondary" onclick="openFieldTemplateModal()">+ Nueva</button>
-    </div>
-    <div id="fieldTemplatesList"></div>`;
+    <div id="fieldTablesList"></div>`;
   renderFieldTablesList();
-  document.getElementById('fieldTemplatesList').innerHTML = DATA.plantillas_prop.map(pt=>`
-    <div class="settings-row">
-      <span style="flex:1">${escHtml(pt.Nombre)} ${pt.UsaPersona?'<span class="tag-badge" title="Por persona">👤</span>':''}${pt.Recordatorio?`<span class="tag-badge" title="${escAttr(RECORDATORIO_LABELS[pt.Recordatorio]||'')}">⏰</span>`:''}<br><span style="color:var(--text-dim);font-size:12px">${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')} — ${lastFilledLabel(lastFilledFieldTemplate(pt.ID))}</span></span>
-      <button class="icon-btn" onclick="openFieldTemplateModal('${pt.ID}')" title="Editar plantilla">✏️</button>
-      <button class="icon-btn" onclick="deleteFieldTemplateUI('${pt.ID}')">🗑️</button>
-    </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas — créalas aquí y luego insértalas desde 🏷️ en el editor de la nota, o con "+ Plantilla" en el encabezado.</p>';
 }
 async function saveFieldTable(){
   const nombre = document.getElementById('ftNombre').value.trim();
@@ -3802,7 +3862,8 @@ function btCardHTML(bt){
         <button class="icon-btn" onclick="event.stopPropagation();deleteFieldTableUI('${bt.ID}')" title="Eliminar">🗑️</button>
       </span>
     </div>
-    ${collapsed?'':fieldTableRenderHTML(bt)}
+    ${collapsed?'':`<input type="text" placeholder="🔎 buscar en esta tabla…" value="${escAttr(window._btSearch[bt.ID]||'')}" oninput="setBtSearch('${bt.ID}',this.value)" style="margin-top:8px;width:100%">
+    <div id="btTableWrap-${bt.ID}">${fieldTableBodyHTML(bt)}</div>`}
   </div>`;
 }
 function renderFieldTablesList(){
@@ -3853,20 +3914,27 @@ function handleFieldTableCellEdit(td){
   if(ok){ const n=getNote(noteId); showToast('✏️ Actualizado en "'+(n?n.Titulo:'')+'"'); }
 }
 window._btSort = window._btSort || {};
+window._btSearch = window._btSearch || {};
 function toggleBtSort(id, col){
   const cur = window._btSort[id];
   const dir = (cur && cur.col===col && cur.dir==='asc') ? 'desc' : 'asc';
   window._btSort[id] = { col, dir };
   renderFieldTablesList();
 }
-function fieldTableRenderHTML(bt){
+function setBtSearch(id, val){
+  window._btSearch[id] = val;
+  const el = document.getElementById('btTableWrap-'+id); if(el) el.innerHTML = fieldTableBodyHTML(DATA.bloque_tablas.find(b=>b.ID===id));
+}
+function fieldTableBodyHTML(bt){
   const campo = (bt.CampoFiltro||'').toLowerCase();
   const valor = (bt.ValorFiltro||'').toLowerCase();
   const cols = (bt.Columnas||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
   let rows = allEntities();
   if(campo) rows = rows.filter(e=>(e.fields[campo]||'').toLowerCase().includes(valor));
   else if(valor) rows = rows.filter(e=>Object.values(e.fields).some(v=>(v||'').toLowerCase().includes(valor)));
-  if(!rows.length) return '<p style="color:var(--text-dim);font-size:13px;margin-top:8px">Sin resultados todavía.</p>';
+  const search = (window._btSearch[bt.ID]||'').toLowerCase().trim();
+  if(search) rows = rows.filter(e=>e.entity.toLowerCase().includes(search) || cols.some(c=>(e.fields[c]||'').toLowerCase().includes(search)));
+  if(!rows.length) return '<p style="color:var(--text-dim);font-size:13px;margin-top:8px">Sin resultados.</p>';
   const sortState = window._btSort[bt.ID];
   if(sortState){
     rows = rows.slice().sort((a,b)=>{
@@ -3889,7 +3957,7 @@ function fieldTableRenderHTML(bt){
 function exportFieldTablePDF(id){
   const bt = DATA.bloque_tablas.find(x=>x.ID===id); if(!bt) return;
   const area = document.getElementById('printArea');
-  area.innerHTML = '<h1>'+escHtml(bt.Nombre)+'</h1>' + fieldTableRenderHTML(bt).replace(/<button[^>]*>.*?<\/button>/g,'');
+  area.innerHTML = '<h1>'+escHtml(bt.Nombre)+'</h1>' + fieldTableBodyHTML(bt).replace(/<button[^>]*>.*?<\/button>/g,'');
   window.print();
 }
 function openFieldTemplateModal(existingId){
@@ -4387,7 +4455,8 @@ function renderSettingsPlantillas(){
     <div class="settings-row">
       <input type="color" value="${p.Color||'#8a5a3b'}" onchange="updatePersonaField('${p.ID}','Color',this.value)">
       <input type="text" value="${escAttr(p.Nombre)}" onchange="updatePersonaField('${p.ID}','Nombre',this.value)">
-      <input type="date" value="${escAttr(p.FechaNacimiento||'')}" title="Cumpleaños (opcional)" onchange="updatePersonaField('${p.ID}','FechaNacimiento',this.value)">
+      ${birthdaySelectHTML(p.ID, p.FechaNacimiento)}
+      ${p.FechaNacimiento ? `<button class="icon-btn" onclick="syncBirthdayToCalendar('${p.ID}')" title="${p.GCalEventId?'Ya está en Google Calendar — clic para actualizar':'Agregar a Google Calendar (se repite cada año)'}">📅${p.GCalEventId?'✅':''}</button>` : ''}
       <button class="icon-btn" onclick="deletePersonaUI('${p.ID}')">🗑️</button>
     </div>`).join('');
   body.innerHTML = `
@@ -4415,6 +4484,23 @@ function promptNewPersona(){
   return saveEntity('PERSONAS', { ID:uid(), Nombre:name.trim(), Color:randomColor() }).then(p=>{ renderSettingsPlantillas(); return p; });
 }
 function updatePersonaField(id, field, val){ const p=DATA.personas.find(x=>x.ID===id); if(!p) return; p[field]=val; saveEntity('PERSONAS', p); }
+const MESES_NOMBRES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+function birthdaySelectHTML(personaId, current){
+  const parts = current ? String(current).split('-').map(s=>parseInt(s,10)) : [null,null];
+  const mm = parts[0], dd = parts[1];
+  const dayOpts = ['<option value="">Día</option>'].concat(Array.from({length:31},(_,i)=>i+1).map(d=>`<option value="${d}" ${d===dd?'selected':''}>${d}</option>`)).join('');
+  const monthOpts = ['<option value="">Mes</option>'].concat(MESES_NOMBRES.map((m,i)=>`<option value="${i+1}" ${i+1===mm?'selected':''}>${m}</option>`)).join('');
+  return `<select style="width:auto" title="Día de cumpleaños" onchange="updatePersonaBirthdayPart('${personaId}','day',this.value)">${dayOpts}</select>
+    <select style="width:auto" title="Mes de cumpleaños" onchange="updatePersonaBirthdayPart('${personaId}','month',this.value)">${monthOpts}</select>`;
+}
+function updatePersonaBirthdayPart(personaId, part, val){
+  const p = DATA.personas.find(x=>x.ID===personaId); if(!p) return;
+  let [mm,dd] = String(p.FechaNacimiento||'-').split('-');
+  if(part==='day') dd = val; else mm = val;
+  const newVal = (mm && dd) ? (String(mm).padStart(2,'0')+'-'+String(dd).padStart(2,'0')) : '';
+  updatePersonaField(personaId, 'FechaNacimiento', newVal);
+  renderSettingsPlantillas();
+}
 function deletePersonaUI(id){
   if(!confirm('¿Eliminar esta persona? Las notas que ya guardaste con su nombre no se borran ni se les quita el campo #persona.')) return;
   deleteEntity('PERSONAS', id).then(renderSettingsPlantillas);

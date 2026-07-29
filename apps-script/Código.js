@@ -42,7 +42,7 @@ const TABLE_DEFS = {
   FLAGS:         ['ID', 'Nombre', 'Emoji', 'Color'],
   BUSQUEDAS:     ['ID', 'Nombre', 'Query', 'Tags', 'Modo'],
   PERSONAS:      ['ID', 'Nombre', 'Color', 'FechaNacimiento', 'GCalEventId'],
-  HABITOS:       ['ID', 'Nombre', 'Emoji', 'Color', 'Activo', 'Hora', 'Recordatorio'],
+  HABITOS:       ['ID', 'Nombre', 'Emoji', 'Color', 'Activo', 'Hora', 'Recordatorio', 'Meta'],
   HABITO_LOG:    ['ID', 'HabitoID', 'Fecha']
 };
 

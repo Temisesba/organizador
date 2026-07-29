@@ -439,7 +439,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Serengeti';
+const BUILD_VERSION = 'Petra';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1410,9 +1410,13 @@ function isReminderDue(lastDate, recordatorio){
   return diffDays >= days;
 }
 function lastHabitLog(habitoId){
-  const logs = DATA.habito_log.filter(l=>l.HabitoID===habitoId);
-  if(!logs.length) return null;
-  return new Date(Math.max(...logs.map(l=>+new Date(l.Fecha))));
+  // "última vez que se cumplió" — para un hábito con meta (ej. 8 vasos de
+  // agua) eso significa el último día en que se alcanzó la meta, no
+  // cualquier día que se tocó aunque sea una vez (habitDoneDates ya hace
+  // ese filtro; para un hábito simple con meta=1 esto es idéntico a antes)
+  const dates = habitDoneDates(habitoId);
+  if(!dates.length) return null;
+  return new Date(Math.max(...dates.map(d=>+new Date(d))));
 }
 function pendingRemindersToday(){
   const pending = [];
@@ -1798,6 +1802,7 @@ async function closeNoteEditor(){
    capítulo de esa nota, igual que cualquier otro campo. */
 let _speechRecognition = null;
 let _transcribing = false;
+let _transcribeFinalText = ''; // vive fuera de startTranscription() para poder vaciarla desde cutTranscriptSegment() sin tener que parar/reiniciar el reconocimiento
 function toggleTranscription(){
   if(_transcribing){ stopTranscription(); return; }
   const editorOverlay = document.getElementById('editorOverlay');
@@ -1820,8 +1825,11 @@ function toggleTranscription(){
         </select>
         <p class="hint" style="color:var(--text-dim);font-size:11px;margin:4px 0 8px">El navegador no detecta el idioma solo — elígelo antes de darle a escuchar.</p>
         <div id="transcribeCaptureArea" contenteditable="true" style="flex:1;min-height:0;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:10px"></div>
-        <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0 0">Se agrega a esta misma nota (como #transcripcion) al cerrar este panel — mientras tanto sigue escribiendo tus apuntes en la nota, a la izquierda.</p>
-        <button class="btn" id="transcribeToggleBtn" style="margin-top:8px" onclick="toggleTranscription()">🎙️ Empezar a escuchar</button>
+        <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0 0">Se agrega a esta misma nota (como #transcripcion) al cerrar este panel, o de una vez con "✂️ Cortar" — mientras tanto sigue escribiendo tus apuntes en la nota, a la izquierda.</p>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="btn" id="transcribeToggleBtn" style="flex:1" onclick="toggleTranscription()">🎙️ Empezar a escuchar</button>
+          <button class="btn secondary" onclick="cutTranscriptSegment()" title="Guarda lo transcrito hasta aquí en la nota y sigue escuchando desde cero — para ir usando el texto por partes, en vez de esperar hasta cerrar el panel">✂️ Cortar</button>
+        </div>
       </div>`;
     editorOverlay.appendChild(panel);
     return; // el panel recién se abre — que elija idioma antes de empezar a escuchar
@@ -1886,13 +1894,31 @@ async function saveTranscriptionIntoCurrentNote(){
   await doSaveNow();
   showToast('🎙️ Transcripción agregada a la nota');
 }
+/* "Cortar": guarda lo transcrito hasta ahora (mismo mecanismo que al
+   cerrar el panel) pero SIN parar de escuchar — vacía el panel y sigue
+   grabando desde cero. Deja usar el texto ya guardado de inmediato
+   (editar la nota, agregar un subtítulo a mano entre segmentos, etc.)
+   mientras el resto de la charla se sigue transcribiendo aparte, en vez
+   de tener que esperar hasta el final para tener algo utilizable. */
+async function cutTranscriptSegment(){
+  const area = document.getElementById('transcribeCaptureArea'); if(!area) return;
+  const text = stripHtmlToText(area.innerHTML).trim();
+  if(!text){ showToast('Todavía no hay nada que cortar'); return; }
+  await saveTranscriptionIntoCurrentNote();
+  area.innerHTML = '';
+  _transcribeFinalText = '';
+  if(_transcribing){
+    const liveP = document.createElement('p'); liveP.id = 'transcribeLiveP';
+    area.appendChild(liveP);
+  }
+}
 function startTranscription(){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(!SR){ showToast('Tu navegador no soporta transcripción de voz (funciona en Chrome/Edge)'); return; }
   const targetEl = document.getElementById('transcribeCaptureArea'); if(!targetEl) return;
   let liveP = document.createElement('p'); liveP.id = 'transcribeLiveP';
   targetEl.appendChild(liveP);
-  let finalText = '';
+  _transcribeFinalText = '';
   const langSel = document.getElementById('transcribeLangSelect');
   _speechRecognition = new SR();
   _speechRecognition.lang = (langSel && langSel.value) || 'es-MX';
@@ -1902,10 +1928,10 @@ function startTranscription(){
     let interim = '';
     for(let i=e.resultIndex; i<e.results.length; i++){
       const t = e.results[i][0].transcript;
-      if(e.results[i].isFinal) finalText += t + ' '; else interim += t;
+      if(e.results[i].isFinal) _transcribeFinalText += t + ' '; else interim += t;
     }
     const p = document.getElementById('transcribeLiveP');
-    if(p) p.textContent = finalText + interim;
+    if(p) p.textContent = _transcribeFinalText + interim;
     targetEl.scrollTop = targetEl.scrollHeight; // que siga a la vista el texto más nuevo, en vez de quedarse arriba
   };
   _speechRecognition.onerror = (e)=>{
@@ -2779,13 +2805,28 @@ function openCreateMenu(){
    (nombre/emoji/color), y HABITO_LOG solo tiene una fila por día en
    que SÍ se cumplió (que exista la fila = cumplido; nada que "marcar
    como no cumplido" aparte de borrar la fila del día). */
+/* Hábitos "de una vez" (Meta vacía/1, ej. "meditar") vs hábitos "de
+   varias veces al día" (Meta>1, ej. tomar agua = 8 vasos) — mismo
+   HABITO_LOG de siempre (una fila = una vez que pasó), solo que un
+   hábito con meta necesita VARIAS filas el mismo día para contar como
+   cumplido, en vez de que la sola existencia de una fila ya baste. */
+function habitGoal(h){ const n = parseInt(h && h.Meta, 10); return (n>0) ? n : 1; }
+function habitCountOnDate(habitoId, dateStr){
+  return DATA.habito_log.filter(l=>l.HabitoID===habitoId && new Date(l.Fecha).toDateString()===dateStr).length;
+}
+function habitDoneDates(habitoId){
+  const h = DATA.habitos.find(x=>x.ID===habitoId);
+  const goal = habitGoal(h);
+  const counts = {};
+  DATA.habito_log.filter(l=>l.HabitoID===habitoId).forEach(l=>{ const d=new Date(l.Fecha).toDateString(); counts[d]=(counts[d]||0)+1; });
+  return Object.keys(counts).filter(d=>counts[d]>=goal);
+}
 function habitLoggedToday(habitoId){
   const todayStr = new Date().toDateString();
   return DATA.habito_log.find(l=>l.HabitoID===habitoId && new Date(l.Fecha).toDateString()===todayStr);
 }
 function habitStreak(habitoId){
-  const logs = DATA.habito_log.filter(l=>l.HabitoID===habitoId).map(l=>new Date(l.Fecha).toDateString());
-  const set = new Set(logs);
+  const set = new Set(habitDoneDates(habitoId));
   let streak = 0; let d = new Date();
   // si hoy no está marcado, la racha "actual" cuenta desde ayer para
   // atrás (para no mostrar 0 injustamente apenas empieza el día)
@@ -2799,6 +2840,17 @@ async function toggleHabitToday(habitoId){
   else{ await saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:new Date().toISOString() }); }
   renderHabitCaptureList();
 }
+async function incrementHabitToday(habitoId){
+  await saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:new Date().toISOString() });
+  renderHabitCaptureList();
+}
+async function decrementHabitToday(habitoId){
+  const todayStr = new Date().toDateString();
+  const todays = DATA.habito_log.filter(l=>l.HabitoID===habitoId && new Date(l.Fecha).toDateString()===todayStr).sort((a,b)=>+new Date(b.Fecha)-+new Date(a.Fecha));
+  if(!todays.length) return;
+  await deleteEntity('HABITO_LOG', todays[0].ID);
+  renderHabitCaptureList();
+}
 function openHabitCapture(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
@@ -2807,7 +2859,7 @@ function openHabitCapture(){
       <div id="habitCaptureList"></div>
       <details style="margin-top:14px">
         <summary style="cursor:pointer;font-weight:600;font-size:13px">+ Agregar hábitos nuevos</summary>
-        <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0">Hora y frecuencia son opcionales — si pones frecuencia, te lo recuerdo arriba cuando toque (⏰ Pendiente).</p>
+        <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0">Hora, veces/día y frecuencia son opcionales. Pon "veces/día" para hábitos de varias veces (ej. 8 para tomar agua) — te muestro un contador en vez de una sola casilla. Si pones frecuencia, te lo recuerdo arriba cuando toque (⏰ Pendiente).</p>
         <div id="habitAddRows" style="margin-top:4px"></div>
         <div style="display:flex;gap:6px;margin-top:8px">
           <button class="btn secondary" onclick="addHabitFormRow()">+ otra fila</button>
@@ -2825,11 +2877,25 @@ function renderHabitCaptureList(){
   const el = document.getElementById('habitCaptureList'); if(!el) return;
   const activos = DATA.habitos.filter(h=>h.Activo!=='0');
   el.innerHTML = activos.map(h=>{
-    const done = !!habitLoggedToday(h.ID);
+    const goal = habitGoal(h);
     const streak = habitStreak(h.ID);
+    const nameSpan = `<span style="flex:1">${h.Emoji||'✅'} ${escHtml(h.Nombre)}${h.Hora?` <span style="color:var(--text-dim);font-size:11px">⏰ ${escHtml(h.Hora)}</span>`:''}</span>`;
+    if(goal>1){
+      const count = habitCountOnDate(h.ID, new Date().toDateString());
+      const done = count>=goal;
+      return `<div class="settings-row">
+        ${nameSpan}
+        <span style="font-size:12px;font-weight:600;${done?'color:var(--success)':'color:var(--text-dim)'}">${count}/${goal}</span>
+        <button class="icon-btn" onclick="decrementHabitToday('${h.ID}')" ${count<=0?'disabled':''} title="Quitar uno">−</button>
+        <button class="icon-btn" onclick="incrementHabitToday('${h.ID}')" title="Agregar uno">+</button>
+        <span style="color:var(--text-dim);font-size:12px">🔥 ${streak}</span>
+        <button class="icon-btn" onclick="deleteHabitUI('${h.ID}')">🗑️</button>
+      </div>`;
+    }
+    const done = !!habitLoggedToday(h.ID);
     return `<div class="settings-row" style="cursor:pointer" onclick="toggleHabitToday('${h.ID}')">
       <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHabitToday('${h.ID}')">
-      <span style="flex:1">${h.Emoji||'✅'} ${escHtml(h.Nombre)}${h.Hora?` <span style="color:var(--text-dim);font-size:11px">⏰ ${escHtml(h.Hora)}</span>`:''}</span>
+      ${nameSpan}
       <span style="color:var(--text-dim);font-size:12px">🔥 ${streak}</span>
       <button class="icon-btn" onclick="event.stopPropagation();deleteHabitUI('${h.ID}')">🗑️</button>
     </div>`;
@@ -2846,6 +2912,7 @@ function habitFormRowHTML(i){
   return `<div class="fill-row" style="gap:6px;margin-bottom:6px;flex-wrap:wrap">
     <input type="text" id="habitFormName${i}" placeholder="nombre (ej. tomar agua)" style="flex:2;min-width:130px">
     <input type="text" id="habitFormEmoji${i}" placeholder="✅" style="width:48px;text-align:center">
+    <input type="number" id="habitFormMeta${i}" placeholder="veces/día" min="1" style="width:80px" title="Cuántas veces al día (opcional — vacío = una vez ya cuenta como hecho; ej. pon 8 para 8 vasos de agua)">
     <input type="time" id="habitFormHora${i}" style="width:110px" title="Hora habitual (opcional)">
     ${recordatorioSelectHTML('habitFormFx'+i, '')}
   </div>`;
@@ -2873,12 +2940,13 @@ async function saveHabitFormRows(){
     rows.push({
       name,
       emoji: (document.getElementById('habitFormEmoji'+i)?.value||'').trim() || '✅',
+      meta: document.getElementById('habitFormMeta'+i)?.value || '',
       hora: document.getElementById('habitFormHora'+i)?.value || '',
       recordatorio: document.getElementById('habitFormFx'+i)?.value || ''
     });
   }
   if(!rows.length){ showToast('Escribe al menos un nombre'); return; }
-  await Promise.all(rows.map(r=>saveEntity('HABITOS', { ID:uid(), Nombre:r.name, Emoji:r.emoji, Color:randomColor(), Activo:'1', Hora:r.hora, Recordatorio:r.recordatorio })));
+  await Promise.all(rows.map(r=>saveEntity('HABITOS', { ID:uid(), Nombre:r.name, Emoji:r.emoji, Color:randomColor(), Activo:'1', Hora:r.hora, Recordatorio:r.recordatorio, Meta:r.meta })));
   window._habitFormRowCount = 3;
   renderHabitAddRows();
   renderHabitCaptureList();
@@ -2900,10 +2968,11 @@ function renderHabitStatsTab(){
   const activos = DATA.habitos.filter(h=>h.Activo!=='0');
   if(!activos.length){ body.innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:13px">Sin hábitos todavía — agrégalos desde "+" → Registrar hábito.</p>'; return; }
   const rows = activos.map(h=>{
-    const logs = DATA.habito_log.filter(l=>l.HabitoID===h.ID);
-    const byDate = {}; logs.forEach(l=>{ byDate[new Date(l.Fecha).toDateString()] = true; });
+    const goal = habitGoal(h);
+    const doneDates = habitDoneDates(h.ID);
+    const byDate = {}; doneDates.forEach(d=>{ byDate[d] = true; });
     const streak = habitStreak(h.ID);
-    const days = logs.map(l=>new Date(l.Fecha).toDateString()).sort();
+    const days = doneDates.slice().sort();
     let best=0, run=0, prev=null;
     days.forEach(d=>{
       run = (prev && Math.round((new Date(d)-new Date(prev))/86400000)===1) ? run+1 : 1;
@@ -2911,8 +2980,8 @@ function renderHabitStatsTab(){
     });
     const totalDays = days.length;
     return `<div class="habit-row">
-      <div class="habit-row-head"><b>${h.Emoji||'✅'} ${escHtml(h.Nombre)}</b><span class="habit-streak-badge">🔥 ${streak}</span></div>
-      <div class="habit-row-sub">${totalDays} día${totalDays===1?'':'s'} registrado${totalDays===1?'':'s'}${best>streak?(' · mejor racha '+best):''}</div>
+      <div class="habit-row-head"><b>${h.Emoji||'✅'} ${escHtml(h.Nombre)}${goal>1?` <span style="font-weight:400;font-size:12px;color:var(--text-dim)">(meta ${goal}/día)</span>`:''}</b><span class="habit-streak-badge">🔥 ${streak}</span></div>
+      <div class="habit-row-sub">${totalDays} día${totalDays===1?'':'s'} completado${totalDays===1?'':'s'}${best>streak?(' · mejor racha '+best):''}</div>
       ${habitCalendarGridHTML(byDate)}
     </div>`;
   }).join('');

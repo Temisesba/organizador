@@ -33,7 +33,7 @@ const TABLE_DEFS = {
   NOTAS:         ['ID', 'Fecha', 'FechaEdicion', 'Titulo', 'Contenido', 'Tags', 'Notebook', 'Cornell', 'CornellCue', 'Color', 'Pinned', 'Orden', 'Archivo', 'Papelera', 'GCalEventId', 'PlantillaPropID'],
   TAGS:          ['ID', 'Etiqueta', 'Color', 'EsComando', 'Descripcion'],
   NOTEBOOKS:     ['ID', 'Nombre', 'TagsHeredados', 'Color', 'TagAuto'],
-  PLANTILLAS:    ['ID', 'Nombre', 'ItemsJSON', 'Tags', 'Recordatorio'],
+  PLANTILLAS:    ['ID', 'Nombre', 'ItemsJSON', 'Tags', 'Recordatorio', 'ColumnasJSON'],
   HISTORIAL:     ['ID', 'PlantillaID', 'Fecha', 'ItemsJSON', 'NotaID', 'Nombre'],
   DICCIONARIO:   ['ID', 'Termino', 'Traduccion', 'Notas', 'Fecha'],
   FEEDBACK:      ['ID', 'Fecha', 'Original', 'Correccion', 'Contexto'],
@@ -42,7 +42,7 @@ const TABLE_DEFS = {
   FLAGS:         ['ID', 'Nombre', 'Emoji', 'Color'],
   BUSQUEDAS:     ['ID', 'Nombre', 'Query', 'Tags', 'Modo'],
   PERSONAS:      ['ID', 'Nombre', 'Color', 'FechaNacimiento', 'GCalEventId'],
-  HABITOS:       ['ID', 'Nombre', 'Emoji', 'Color', 'Activo'],
+  HABITOS:       ['ID', 'Nombre', 'Emoji', 'Color', 'Activo', 'Hora', 'Recordatorio'],
   HABITO_LOG:    ['ID', 'HabitoID', 'Fecha']
 };
 

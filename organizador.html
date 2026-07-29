@@ -120,6 +120,11 @@ main:fullscreen{background:var(--bg);padding:20px}
 .note-card .nc-snip{font-size:12.5px;color:var(--text-dim);flex:1;white-space:pre-wrap;overflow:hidden;max-height:60px}
 .nc-tags{display:flex;flex-wrap:wrap;gap:4px}
 .tag-badge{font-size:11px;padding:2px 7px;border-radius:20px;border:1px solid var(--border);background:var(--bg-soft)}
+/* dentro del cuerpo de la nota (texto normal a 14.5px) el mismo badge
+   de 11px se sentía chiquito y costaba leerlo — pedido explícito, solo
+   aquí se agranda; en el panel lateral/tarjetitas compactas se deja
+   igual de chico a propósito. */
+.rich-editor .tag-badge{font-size:13.5px;padding:2px 9px}
 .tag-badge.hit{background:var(--accent);border-color:var(--accent);color:var(--accent-text);font-weight:700}
 [data-theme="eink"] .tag-badge{border:1.5px solid #000}
 .nc-foot{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-dim)}
@@ -448,7 +453,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Meseta del Tíbet';
+const BUILD_VERSION = 'Valle de la Luna';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -5635,6 +5640,16 @@ function saveNewFlag(){
     showToast('Bandera '+emoji+' #'+name+' agregada');
   });
 }
+/* Antes esta lista solo mostraba filas de DATA.tags (etiquetas
+   "registradas" formalmente) — el panel lateral, en cambio, siempre
+   mostró TODAS las etiquetas detectadas (incluidas las que solo viven
+   como "#palabra" suelta dentro de una nota, sin registro propio).
+   Pedido explícito: que ambas listas sean la misma. Ahora recorre
+   allTagsWithCounts() (lo mismo que usa el panel lateral) en vez de
+   DATA.tags directo — una etiqueta sin fila propia se ve con sus
+   valores por default (color café, sin "comando") y le nace una fila
+   real en TAGS en cuanto se toca cualquiera de sus campos aquí, igual
+   que renombrar/eliminar desde el panel lateral ya hacían. */
 function renderSettingsTags(){
   const body = document.getElementById('settingsBody');
   body.innerHTML = renderFlagsSection() + `<hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
@@ -5643,14 +5658,24 @@ function renderSettingsTags(){
       <button class="btn secondary" onclick="mergeDuplicateTagsUI()" title="Si por alguna razón quedaron dos etiquetas con el mismo nombre (ej. creadas casi al mismo tiempo desde dos notas), combínalas en una sola">🧹 Combinar duplicadas</button>
     </div>
     <div id="tagsRows" style="margin-top:10px"></div>`;
-  const sorted = DATA.tags.slice().sort((a,b)=>String(a.Etiqueta||'').localeCompare(String(b.Etiqueta||''),'es'));
-  document.getElementById('tagsRows').innerHTML = sorted.map(t=>`
-    <div class="settings-row">
-      <input type="color" value="${t.Color||'#8a5a3b'}" onchange="updateTagField('${t.ID}','Color',this.value)">
-      <input type="text" value="${escAttr(t.Etiqueta)}" onchange="updateTagField('${t.ID}','Etiqueta',this.value)">
-      <label style="font-size:12px;display:flex;gap:4px;align-items:center" title="Solo cambia en qué sección aparece dentro de ❔ Comandos y etiquetas (arriba en 'Comandos', si no en 'Etiquetas') — no cambia cómo se comporta la etiqueta en tus notas."><input type="checkbox" ${t.EsComando?'checked':''} onchange="updateTagField('${t.ID}','EsComando',this.checked?'1':'')"> comando</label>
-      <button class="icon-btn" onclick="deleteTagUI('${t.ID}')">🗑️</button>
-    </div>`).join('') || '<p style="color:var(--text-dim)">Sin etiquetas todavía</p>';
+  const flagNames = new Set(allFlags().map(f=>f[0]));
+  const names = allTagsWithCounts().map(([t])=>t).filter(t=>!flagNames.has(t)).sort((a,b)=>a.localeCompare(b,'es'));
+  document.getElementById('tagsRows').innerHTML = names.map(name=>{
+    const t = findTagByName(name);
+    return `<div class="settings-row">
+      <input type="color" value="${(t&&t.Color)||'#8a5a3b'}" onchange="updateTagFieldByName('${escAttr(name)}','Color',this.value)">
+      <input type="text" value="${escAttr(name)}" onchange="renameTagFromSidebar('${escAttr(name)}', this.value.trim().replace(/^#/,'').toLowerCase())">
+      <label style="font-size:12px;display:flex;gap:4px;align-items:center" title="Solo cambia en qué sección aparece dentro de ❔ Comandos y etiquetas (arriba en 'Comandos', si no en 'Etiquetas') — no cambia cómo se comporta la etiqueta en tus notas."><input type="checkbox" ${t&&t.EsComando?'checked':''} onchange="updateTagFieldByName('${escAttr(name)}','EsComando',this.checked?'1':'')"> comando</label>
+      <button class="icon-btn" onclick="deleteTagFromSidebar('${escAttr(name)}')">🗑️</button>
+    </div>`;
+  }).join('') || '<p style="color:var(--text-dim)">Sin etiquetas todavía</p>';
+}
+async function updateTagFieldByName(name, field, val){
+  let t = findTagByName(name);
+  if(!t){ t = { ID:uid(), Etiqueta:name, Color:randomColor(), EsComando:'', Descripcion:'' }; }
+  t[field] = val;
+  await saveEntity('TAGS', t);
+  renderSettingsTags(); renderSidebar();
 }
 function promptNewTag(){
   const n=prompt('Nombre de la etiqueta (sin #):'); if(!n) return;
@@ -5741,18 +5766,11 @@ async function removeTagEverywhere(name){
     await saveEntity('NOTAS', n);
   }
 }
-async function deleteTagUI(id){
-  const t = DATA.tags.find(x=>x.ID===id); if(!t) return;
-  const ok = confirm('¿Eliminar la etiqueta #'+t.Etiqueta+'?\n\nSe quita la etiqueta de todas tus notas, pero las notas NO se borran — solo dejan de tener esa etiqueta.');
-  if(!ok) return;
-  await removeTagEverywhere(t.Etiqueta);
-  await deleteEntity('TAGS', id);
-  renderSettingsTags(); renderAll();
-}
-/* Igual que deleteTagUI, pero directo desde el panel lateral — "t" puede
-   ser una etiqueta que solo vive suelta dentro del texto de las notas y
-   nunca se registró formalmente (sin fila en TAGS), así que no siempre
-   hay un ID que borrar — mismo criterio que renameTagFromSidebar. */
+/* Un solo borrado de etiqueta para toda la app (panel lateral Y
+   Configuración usan esta misma) — "name" puede ser una etiqueta que
+   solo vive suelta dentro del texto de las notas y nunca se registró
+   formalmente (sin fila en TAGS), así que no siempre hay un ID que
+   borrar de entrada. */
 async function deleteTagFromSidebar(name){
   const ok = confirm('¿Eliminar la etiqueta #'+name+'?\n\nSe quita de todas tus notas, pero las notas NO se borran — solo dejan de tener esta etiqueta.');
   if(!ok) return;
@@ -5761,16 +5779,6 @@ async function deleteTagFromSidebar(name){
   if(t) await deleteEntity('TAGS', t.ID);
   renderAll();
   showToast('Etiqueta eliminada');
-}
-function updateTagField(id, field, val){
-  const t=DATA.tags.find(x=>x.ID===id); if(!t) return;
-  if(field==='Etiqueta'){
-    const oldName = t.Etiqueta;
-    const newName = val.trim().replace(/^#/,'').toLowerCase();
-    if(newName && newName!==oldName) renameTagEverywhere(oldName, newName).then(()=>{ t.Etiqueta=newName; saveEntity('TAGS', t).then(()=>renderAll()); });
-    return;
-  }
-  t[field]=val; saveEntity('TAGS', t).then(()=>renderSidebar());
 }
 function renderSettingsNotebooks(){
   const body = document.getElementById('settingsBody');

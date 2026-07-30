@@ -416,6 +416,12 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
         </div>
       </div>
 
+      <!-- Fuera de cualquier plegable a propósito: si tienes una búsqueda o
+           filtro de etiquetas activo, necesitas verlo aunque tengas
+           "Etiquetas" colapsado — colapsar esa sección no debe esconder qué
+           estás buscando ahora mismo. -->
+      <div id="tagFilterBar"></div>
+
       <div class="sb-section" data-sb="busquedas">
         <h3 onclick="toggleSbSection('busquedas')">Búsquedas guardadas <span class="sb-arrow">▾</span></h3>
         <div class="sb-content">
@@ -423,12 +429,6 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
           <button class="mini-btn" onclick="promptSaveSearch()">+ guardar búsqueda actual</button>
         </div>
       </div>
-
-      <!-- Fuera de cualquier plegable a propósito: si tienes una búsqueda o
-           filtro de etiquetas activo, necesitas verlo aunque tengas
-           "Etiquetas" colapsado — colapsar esa sección no debe esconder qué
-           estás buscando ahora mismo. -->
-      <div id="tagFilterBar"></div>
 
       <div class="sb-section" data-sb="banderas">
         <h3 onclick="toggleSbSection('banderas')">Banderas rápidas <span class="sb-arrow">▾</span></h3>
@@ -458,7 +458,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Torres del Paine';
+const BUILD_VERSION = 'Iguazú';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -704,8 +704,7 @@ function createNoteForEvent(eventId, summary, startIso){
   note.GCalEventId = eventId;
   if(startIso) note.Fecha = new Date(startIso).toISOString();
   DATA.notas.push(note);
-  editingNoteId = note.ID;
-  renderNoteModal(note);
+  openNoteEditor(note.ID);
 }
 function toDatetimeLocal(d){
   const pad = n=>String(n).padStart(2,'0');
@@ -924,7 +923,7 @@ async function syncNow(manual){
   finally{ _syncing=false; updateSyncIndicator(); }
 }
 function isEditingActive(){
-  return !!document.getElementById('editorOverlay');
+  return !!document.getElementById('editorOverlay') || (currentView==='split' && !!_splitOpenSide);
 }
 function updateSyncIndicator(){
   const dot = document.getElementById('syncDot'); const lbl = document.getElementById('syncLabel');
@@ -1302,12 +1301,23 @@ function renderTagFilterBar(){
   const chips = Array.from(activeTagFilters).map(t=>
     `<span class="tag-badge hit" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" onclick="toggleTagFilter('${escAttr(t)}')" title="Quitar #${escAttr(t)} del filtro">#${escHtml(t)} ✕</span>`
   ).join('');
+  // en Vista Dividida hay dos listas independientes — sin este
+  // interruptor, el filtro de etiquetas siempre se aplicaba a AMBAS a
+  // la vez, lo cual confundía cuando solo querías acotar una mitad
+  // ("busco en etiquetas y filtra en ambas mitades").
+  const splitTargetHTML = currentView==='split' ? `<div class="tag-filter-mode" style="margin-top:4px">
+      <span style="font-size:11px;color:var(--text-dim);padding:0 4px">aplicar a:</span>
+      <button class="${splitTagTarget==='both'?'active':''}" onclick="setSplitTagTarget('both')">Ambas</button>
+      <button class="${splitTagTarget==='left'?'active':''}" onclick="setSplitTagTarget('left')">Izq</button>
+      <button class="${splitTagTarget==='right'?'active':''}" onclick="setSplitTagTarget('right')">Der</button>
+    </div>` : '';
   bar.innerHTML = `<div class="tag-filter-bar">
     <div style="display:flex;flex-wrap:wrap;gap:4px;flex:1">${chips}</div>
     ${n>1 ? `<div class="tag-filter-mode">
       <button class="${tagFilterMode==='AND'?'active':''}" onclick="setTagFilterMode('AND')" title="Nota debe tener TODAS las etiquetas elegidas">Y (todas)</button>
       <button class="${tagFilterMode==='OR'?'active':''}" onclick="setTagFilterMode('OR')" title="Nota con CUALQUIERA de las etiquetas elegidas">O (cualquiera)</button>
     </div>` : ''}
+    ${splitTargetHTML}
     <button class="tag-filter-clear" onclick="clearTagFilters()">quitar todo</button>
   </div>`;
 }
@@ -1358,7 +1368,8 @@ function toggleModalFullscreen(btn){
   btn.title = on ? 'Salir de pantalla completa' : 'Pantalla completa';
 }
 
-function getFilteredSortedNotes(query){
+function getFilteredSortedNotes(query, applyTagFilters){
+  if(applyTagFilters===undefined) applyTagFilters = true;
   const q = (query!==undefined ? query : (document.getElementById('searchInput').value||'')).toLowerCase().trim();
   let notes = activeNotes().filter(n=>{
     // Inbox (activeNotebook==='') es realmente "ver TODO", como cualquier
@@ -1368,7 +1379,7 @@ function getFilteredSortedNotes(query){
     // cuaderno específico elegido, ahí sí filtra estrictamente a ese.
     if(activeNotebook){ if(n.Notebook!==activeNotebook) return false; }
     else if(n.Notebook===MEJORAS_NOTEBOOK) return false;
-    if(activeTagFilters.size){
+    if(applyTagFilters && activeTagFilters.size){
       const et = effectiveTags(n);
       const arr = Array.from(activeTagFilters);
       const match = tagFilterMode==='OR' ? arr.some(t=>et.includes(t)) : arr.every(t=>et.includes(t));
@@ -1590,7 +1601,7 @@ function renderMain(){
   const el = document.getElementById('vw'+currentView[0].toUpperCase()+currentView.slice(1)); if(el) el.classList.add('active');
 }
 
-function cardsHTML(notes, query){
+function cardsHTML(notes, query, pane){
   if(!notes.length) return '<p style="color:var(--text-dim)">Sin notas aquí todavía — crea la primera con "+ Nota".</p>';
   const q = (query!==undefined ? query : (document.getElementById('searchInput').value||'')).toLowerCase().trim();
   // las banderas rápidas / etiquetas del panel lateral también acotan qué
@@ -1614,30 +1625,30 @@ function cardsHTML(notes, query){
       if(seenTimeLogDays.has(dayKey)) return '';
       seenTimeLogDays.add(dayKey);
       const dayNotes = notes.filter(x=>x.PlantillaPropID===TIMELOG_MARKER && new Date(x.Fecha).toDateString()===dayKey);
-      return timeLogChapterHTML(new Date(n.Fecha), dayNotes, highlight, q, activeTags);
+      return timeLogChapterHTML(new Date(n.Fecha), dayNotes, highlight, q, activeTags, pane);
     }
     const pairs = extractFieldPairs(n);
-    if(!pairs.length) return noteCardHTML(n);
+    if(!pairs.length) return noteCardHTML(n, pane);
     // con búsqueda o etiqueta activa, solo se muestran los campos que
     // empatan (no la nota completa ni todo el capítulo) — si ninguno de
     // sus campos contiene el término/etiqueta, el capítulo entero se
     // oculta, aunque el título de la nota sí lo contenga.
-    if(!q && !activeTags.length) return chapterGroupHTML(n, pairs, highlight);
+    if(!q && !activeTags.length) return chapterGroupHTML(n, pairs, highlight, pane);
     const shown = pairs.filter(p=>{
       const cueL = p.cue.toLowerCase(), textoL = stripHtmlToText(p.texto).toLowerCase();
       if(q && (cueL.includes(q) || textoL.includes(q))) return true;
       return activeTags.some(t => cueL.includes('#'+t) || textoL.includes('#'+t));
     });
     if(!shown.length) return '';
-    return chapterGroupHTML(n, shown, highlight);
+    return chapterGroupHTML(n, shown, highlight, pane);
   }).filter(Boolean);
   if(!cards.length) return '<p style="color:var(--text-dim)">Nada coincide con tu búsqueda.</p>';
   return '<div class="cards-grid">' + cards.join('') + '</div>';
 }
-function noteCardHTML(n){
+function noteCardHTML(n, pane){
   const tags = effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`).join('');
   const snip = noteSnippetText(n).slice(0,140);
-  return `<div class="note-card" onclick="openNoteEditor('${n.ID}')" style="${n.Color?('border-left:4px solid '+n.Color):''}">
+  return `<div class="note-card" onclick="openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})" style="${n.Color?('border-left:4px solid '+n.Color):''}">
     <div class="nc-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}</div>
     <div class="nc-snip">${escHtml(snip)}</div>
     <div class="nc-tags">${tags}</div>
@@ -1659,7 +1670,7 @@ function tagsInText(html){
    parecía que la nota entera tenía todas esas etiquetas). Las etiquetas
    que sí están escritas dentro de cada campo se muestran como sus propios
    "circulitos" pegados a esa tarjetita nada más. */
-function chapterGroupHTML(n, pairs, highlight){
+function chapterGroupHTML(n, pairs, highlight, pane){
   highlight = highlight || [];
   const tipos = n.PlantillaPropID ? templateFieldTypes(DATA.plantillas_prop.find(pt=>pt.ID===n.PlantillaPropID)) : {};
   const nbTags = notebookInherited(n.Notebook).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`).join('');
@@ -1681,9 +1692,9 @@ function chapterGroupHTML(n, pairs, highlight){
     // nota y salta directo a este campo — antes solo abría la nota en
     // el tope, y en una nota larga (ej. con muchas transcripciones)
     // tocaba buscar a mano dónde estaba lo que se quería ver.
-    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}','${escAttr(p.cue)}')"><div class="field-card-tag">${escHtml(label)}${syncBtn}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
+    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}','${escAttr(p.cue)}'${pane?`,'${pane}'`:''})"><div class="field-card-tag">${escHtml(label)}${syncBtn}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
   }).join('');
-  return `<div class="chapter-group" onclick="openNoteEditor('${n.ID}')" style="${n.Color?('border-left:4px solid '+n.Color):''}">
+  return `<div class="chapter-group" onclick="openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})" style="${n.Color?('border-left:4px solid '+n.Color):''}">
     <div class="chapter-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}<span class="chapter-meta">${n.Notebook?(escHtml(n.Notebook)+' · '):''}${fmtDate(n.Fecha)}</span></div>
     ${nbTags?`<div class="nc-tags">${nbTags}</div>`:''}
     <div class="field-cards-row">${miniCards}</div>
@@ -1696,7 +1707,7 @@ function chapterGroupHTML(n, pairs, highlight){
    en vez del nombre de un campo. Clic en una tarjetita abre esa nota
    puntual; clic en el título del capítulo abre el Registro de tiempo
    de ese día completo. */
-function timeLogChapterHTML(dateObj, dayNotes, highlight, q, activeTags){
+function timeLogChapterHTML(dateObj, dayNotes, highlight, q, activeTags, pane){
   // dayNotes solo se usa para saber que este día tiene algo que mostrar —
   // el rango real se recalcula con timeLogRangesForDate para que se vea
   // IGUAL que en el modal de Registro de tiempo (mismo cálculo, una sola
@@ -1720,7 +1731,7 @@ function timeLogChapterHTML(dateObj, dayNotes, highlight, q, activeTags){
     const tagName = n.Tags||'';
     const hit = tagName && highlight.includes(tagName.toLowerCase());
     const innerTags = tagName ? `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(tagName)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(tagName)}')" title="Filtrar por #${escAttr(tagName)}">#${escHtml(tagName)}</span>` : '';
-    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}')"><div class="field-card-tag">${escHtml(rangeLabel)}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
+    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})"><div class="field-card-tag">${escHtml(rangeLabel)}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
   }).reverse().join(''); // más reciente primero, igual que el modal de Registro de tiempo
   const isToday = dateObj.toDateString()===new Date().toDateString();
   const label = isToday ? 'Hoy' : dateObj.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
@@ -1766,42 +1777,76 @@ function syncSortUI(){
 
 /* La vista dividida son DOS listas independientes (izquierda/derecha),
    cada una con su propia búsqueda — a pedido explícito del usuario,
-   inspirado en cómo lo resolvió en su otra app (notas_v50): antes el
-   lado derecho no era una lista, era el detalle/editor de la nota
-   elegida a la izquierda; eso hacía que "buscar a la derecha" no
-   tuviera dónde vivir. Ahora ambos lados son listas de tarjetas
-   (misma cardsHTML/getFilteredSortedNotes que Cards/Tabla) con su
-   propia búsqueda persistida aparte — dar clic a cualquier nota, en
-   cualquiera de las dos listas, abre el mismo modal/editor de siempre
-   (#editorOverlay), no reemplaza ninguna lista. Esto simplificó bastante
-   el código: ya no existe un "modo edición en el panel derecho" aparte
-   del modal — ver openNoteEditor/reopenEditorFor/isEditingActive, que
-   antes tenían una rama especial para currentView==='split'. */
+   inspirado en cómo lo resolvió en su otra app (notas_v50). Primer
+   intento (revertido): que un clic abriera el modal de siempre — el
+   usuario aclaró que eso le quita el sentido a esta vista ("el modal
+   ya lo tenemos en Cards, para qué sirve entonces Dividida") — la idea
+   es ver la nota EN SU PROPIO ESPACIO, dentro de la misma mitad donde
+   la tocaste, sin tapar la pantalla completa. Como solo existe UN
+   editor real en el DOM a la vez (los campos del editor —#noteTitle,
+   #mainArea, etc.— no son únicos por instancia, y todo el código de
+   guardado/autosave asume un solo `editingNoteId` global), solo una
+   mitad puede tener una nota abierta al mismo tiempo — abrir una nota
+   en el otro lado cierra la que estuviera abierta en este (vuelve a
+   ser lista). `_splitOpenSide` guarda cuál mitad (si acaso) es la que
+   trae el editor puesto ahorita. */
 let splitLeftQuery = localStorage.getItem('org_split_left_search') || '';
 let splitRightQuery = localStorage.getItem('org_split_right_search') || '';
+let _splitOpenSide = null;
+/* El filtro de etiquetas del panel lateral (activeTagFilters) es UNA
+   sola selección global — con dos listas independientes, aplicarlo
+   siempre a ambas a la vez confundía ("busco en etiquetas y filtra en
+   ambas mitades"). splitTagTarget decide a cuál mitad (o ambas) se le
+   aplica ese filtro; el texto escrito en cada buscador propio siempre
+   es independiente de todos modos. */
+let splitTagTarget = localStorage.getItem('org_split_tag_target') || 'both';
+function setSplitTagTarget(t){ splitTagTarget=t; localStorage.setItem('org_split_tag_target', t); renderSidebar(); renderMain(); }
+function splitPaneHTML(side){
+  if(_splitOpenSide===side && editingNoteId){
+    const note = getNote(editingNoteId);
+    if(note) return `<button class="mini-btn" style="margin-bottom:8px" onclick="closeSplitPaneNote('${side}')">← volver a la lista</button>${editorInnerHTML(note, false)}`;
+  }
+  const query = side==='left' ? splitLeftQuery : splitRightQuery;
+  const applyTagFilters = splitTagTarget==='both' || splitTagTarget===side;
+  const notes = getFilteredSortedNotes(query, applyTagFilters);
+  const inputId = side==='left' ? 'splitLeftSearchInput' : 'splitRightSearchInput';
+  const areaId = side==='left' ? 'splitLeftCardsArea' : 'splitRightCardsArea';
+  return `<input type="search" id="${inputId}" placeholder="Buscar en esta lista…" value="${escAttr(query)}" oninput="onSplitSearchInput('${side}',this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
+    <div id="${areaId}">${cardsHTML(notes, query, side)}</div>`;
+}
 function splitHTML(){
-  const leftNotes = getFilteredSortedNotes(splitLeftQuery);
-  const rightNotes = getFilteredSortedNotes(splitRightQuery);
   return `<div class="split-wrap" id="splitWrap">
-    <div class="split-left" id="splitLeft" style="flex:0 0 ${splitRatio}%">
-      <input type="search" id="splitLeftSearchInput" placeholder="Buscar en esta lista…" value="${escAttr(splitLeftQuery)}" oninput="onSplitSearchInput('left',this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
-      <div id="splitLeftCardsArea">${cardsHTML(leftNotes, splitLeftQuery)}</div>
-    </div>
+    <div class="split-left" id="splitLeft" style="flex:0 0 ${splitRatio}%">${splitPaneHTML('left')}</div>
     <div class="split-handle" id="splitHandle"></div>
-    <div class="split-right" id="splitRightPane">
-      <input type="search" id="splitRightSearchInput" placeholder="Buscar en esta lista…" value="${escAttr(splitRightQuery)}" oninput="onSplitSearchInput('right',this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
-      <div id="splitRightCardsArea">${cardsHTML(rightNotes, splitRightQuery)}</div>
-    </div>
+    <div class="split-right" id="splitRightPane">${splitPaneHTML('right')}</div>
   </div>`;
 }
+function renderSplitPane(side){
+  const container = document.getElementById(side==='left' ? 'splitLeft' : 'splitRightPane');
+  if(container) container.innerHTML = splitPaneHTML(side);
+}
+function openNoteInSplitPane(side, id, scrollToCue){
+  const otherSide = side==='left' ? 'right' : 'left';
+  const wasOpenOnOther = _splitOpenSide===otherSide;
+  _splitOpenSide = side; // fijarlo ANTES de repintar — si no, splitPaneHTML(otherSide) todavía se ve a sí mismo como "abierto" y no vuelve a la lista
+  if(wasOpenOnOther) renderSplitPane(otherSide);
+  renderSplitPane(side);
+  const note = getNote(id);
+  if(note) bindEditorEvents(note);
+  if(scrollToCue) scrollNoteToTag(scrollToCue);
+}
+function closeSplitPaneNote(side){
+  if(editingNoteId) abandonEmptyDraftIfAny();
+  editingNoteId = null;
+  _splitOpenSide = null;
+  renderSplitPane(side);
+}
 function onSplitSearchInput(side, val){
-  if(side==='left'){
-    splitLeftQuery = val; localStorage.setItem('org_split_left_search', val);
-    const area = document.getElementById('splitLeftCardsArea'); if(area) area.innerHTML = cardsHTML(getFilteredSortedNotes(splitLeftQuery), splitLeftQuery);
-  } else {
-    splitRightQuery = val; localStorage.setItem('org_split_right_search', val);
-    const area = document.getElementById('splitRightCardsArea'); if(area) area.innerHTML = cardsHTML(getFilteredSortedNotes(splitRightQuery), splitRightQuery);
-  }
+  if(side==='left'){ splitLeftQuery = val; localStorage.setItem('org_split_left_search', val); }
+  else { splitRightQuery = val; localStorage.setItem('org_split_right_search', val); }
+  const applyTagFilters = splitTagTarget==='both' || splitTagTarget===side;
+  const area = document.getElementById(side==='left' ? 'splitLeftCardsArea' : 'splitRightCardsArea');
+  if(area) area.innerHTML = cardsHTML(getFilteredSortedNotes(val, applyTagFilters), val, side);
 }
 function getNote(id){ return DATA.notas.find(n=>n.ID===id); }
 
@@ -1844,7 +1889,13 @@ function abandonEmptyDraftIfAny(){
     apiPost('deleteRow', { table:'NOTAS', id: editingNoteId });
   }
 }
-function openNoteEditor(id, scrollToCue){
+/* pane ('left'|'right') solo lo mandan los clics dentro de una de las
+   dos listas de Vista Dividida (ver cardsHTML/chapterGroupHTML/
+   timeLogChapterHTML, que reciben 'pane' según en cuál de las dos
+   listas se dibujaron) — cualquier otro llamado (Cards/Tabla, Ajustes,
+   Calendario, "+ Nota"...) lo deja undefined y sigue abriendo el modal
+   de siempre, sin cambios. */
+function openNoteEditor(id, scrollToCue, pane){
   if(editingNoteId && editingNoteId!==id) abandonEmptyDraftIfAny();
   let note;
   if(id){
@@ -1860,6 +1911,7 @@ function openNoteEditor(id, scrollToCue){
     DATA.notas.push(note);
     editingNoteId = note.ID;
   }
+  if(currentView==='split'){ openNoteInSplitPane(pane || 'right', note.ID, scrollToCue); return; }
   renderNoteModal(note, scrollToCue);
 }
 function renderNoteModal(note, scrollToCue){
@@ -1912,6 +1964,7 @@ async function closeNoteEditor(){
   const ov = document.getElementById('editorOverlay'); if(ov) ov.remove();
   abandonEmptyDraftIfAny();
   editingNoteId=null;
+  _splitOpenSide=null;
   renderMain();
 }
 /* Transcripción en vivo (Web Speech API — solo Chrome/Edge, Firefox/
@@ -2245,6 +2298,7 @@ function toggleCornell(){
   reopenEditorFor(note);
 }
 function reopenEditorFor(note){
+  if(currentView==='split' && _splitOpenSide){ renderSplitPane(_splitOpenSide); bindEditorEvents(note); return; }
   const panel = document.getElementById('editorPanel');
   if(panel){ panel.innerHTML = editorInnerHTML(note,true); bindEditorEvents(note); }
 }
@@ -4053,8 +4107,7 @@ async function createNoteForFile(i){
   note.Archivo = JSON.stringify([{ name: entry.name, kind:'file' }]);
   DATA.notas.push(note);
   await idbSet('link-'+note.ID+'-0', entry.handle);
-  editingNoteId = note.ID;
-  renderNoteModal(note);
+  openNoteEditor(note.ID);
 }
 async function openExplorerEntry(i){
   const entry = window._explorerEntries[i]; if(!entry) return;

@@ -43,7 +43,8 @@ const TABLE_DEFS = {
   BUSQUEDAS:     ['ID', 'Nombre', 'Query', 'Tags', 'Modo'],
   PERSONAS:      ['ID', 'Nombre', 'Color', 'FechaNacimiento', 'GCalEventId'],
   HABITOS:       ['ID', 'Nombre', 'Emoji', 'Color', 'Activo', 'Hora', 'Recordatorio', 'Meta', 'HorasJSON', 'Dosis', 'FechaInicio', 'FechaFin', 'Observaciones'],
-  HABITO_LOG:    ['ID', 'HabitoID', 'Fecha']
+  HABITO_LOG:    ['ID', 'HabitoID', 'Fecha'],
+  COMANDOS:      ['ID', 'Nombre', 'Tipo', 'Valor']
 };
 
 // ── Router GET (solo lectura ligera, ej. ping de conexión) ────

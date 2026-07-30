@@ -459,7 +459,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Salta';
+const BUILD_VERSION = 'Mendoza';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -943,25 +943,41 @@ function updateSyncIndicator(){
    de guardar nada extra en la cola. */
 const QUEUE_TABLE_LABELS = { NOTAS:'Nota', HABITOS:'Hábito', HABITO_LOG:'Registro de hábito', TAGS:'Etiqueta', NOTEBOOKS:'Cuaderno', PLANTILLAS:'Plantilla', HISTORIAL:'Historial', PLANTILLAS_PROP:'Plantilla de campos', PERSONAS:'Persona', FLAGS:'Bandera', BUSQUEDAS:'Búsqueda guardada', BLOQUE_TABLAS:'Tabla', DICCIONARIO:'Diccionario', FEEDBACK:'Feedback' };
 function describeQueueOp(op){
-  const p = op.params || {};
-  const tableLabel = QUEUE_TABLE_LABELS[p.table] || p.table || '?';
-  if(op.action==='saveRow'){
-    const row = p.row || {};
-    const name = row.Titulo || row.Nombre || row.Etiqueta || row.Termino || '';
-    return 'Guardar '+tableLabel+(name?': '+name:'');
+  // Blindado: una fila en cola con una forma inesperada (ej. de una
+  // versión anterior de la app, antes de que este detalle existiera)
+  // no debe tumbar TODO el modal — mejor una línea genérica que nada.
+  try{
+    const p = op.params || {};
+    const tableLabel = QUEUE_TABLE_LABELS[p.table] || p.table || '?';
+    if(op.action==='saveRow'){
+      const row = p.row || {};
+      const name = row.Titulo || row.Nombre || row.Etiqueta || row.Termino || '';
+      return 'Guardar '+tableLabel+(name?': '+name:'');
+    }
+    if(op.action==='deleteRow') return 'Eliminar '+tableLabel+(p.id?' (ID '+p.id+')':'');
+    if(op.action==='updateHistorialItems') return 'Actualizar checklist llenado';
+    return op.action || 'Cambio pendiente';
+  }catch(e){
+    return 'Cambio pendiente (sin más detalle)';
   }
-  if(op.action==='deleteRow') return 'Eliminar '+tableLabel+(p.id?' (ID '+p.id+')':'');
-  if(op.action==='updateHistorialItems') return 'Actualizar checklist llenado';
-  return op.action;
 }
 function openPendingSyncModal(){
+  // Se relee la cola y se refresca el indicador de "N pend." al abrir —
+  // si por lo que sea el botón de arriba se había quedado desactualizado
+  // (ej. una sincronización de fondo ya limpió la cola sin repintarlo),
+  // esto lo corrige en vez de mostrar un número que ya no es cierto.
   const queue = loadQueue();
+  updateSyncIndicator();
+  const rows = queue.map(op=>{
+    try{ return `<div class="settings-row">${escHtml(describeQueueOp(op))}</div>`; }
+    catch(e){ return `<div class="settings-row">Cambio pendiente (sin más detalle)</div>`; }
+  }).join('');
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(420px,100%)">
     <div class="modal-head"><b>☁️ Pendiente por sincronizar</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
       <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Estos cambios ya están guardados aquí en el dispositivo — se suben solos en cuanto haya conexión, o toca "Sincronizar" para intentarlo ahora.</p>
-      ${queue.length ? queue.map(op=>`<div class="settings-row">${escHtml(describeQueueOp(op))}</div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada pendiente 🎉</p>'}
+      ${queue.length ? rows : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada pendiente 🎉 (si arriba seguía diciendo "pend.", ya se corrigió)</p>'}
       <div style="margin-top:12px"><button class="btn" onclick="this.closest('.modal-overlay').remove();forceSync()">Sincronizar ahora</button></div>
     </div>
   </div>`;

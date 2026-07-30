@@ -535,7 +535,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Comodoro Rivadavia';
+const BUILD_VERSION = 'San Carlos de Bariloche';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2951,6 +2951,36 @@ function handleRichKeydown(e){
   if(e.key===' '){
     const sel = window.getSelection(); if(!sel.rangeCount) return;
     const anchor = sel.anchorNode; if(!anchor) return;
+    // Red de seguridad en vivo (además de la reparación automática de
+    // badgeifyInlineTags): si el cursor queda pegado al final de una
+    // píldora #etiqueta, un espacio ahí normalmente se escribiría
+    // "adentro" del span y heredaría su estilo — en vez de eso, saca el
+    // cursor a un nodo de texto neutral recién creado justo después de
+    // la píldora, y ahí sí escribe el espacio.
+    const badgeEl = anchor.nodeType===3 ? anchor.parentElement && anchor.parentElement.closest('.tag-badge') : (anchor.closest && anchor.closest('.tag-badge'));
+    if(badgeEl){
+      const atEnd = anchor.nodeType===3
+        ? (sel.anchorOffset === anchor.textContent.length && !anchor.nextSibling)
+        : sel.anchorOffset === anchor.childNodes.length;
+      if(atEnd){
+        e.preventDefault();
+        // '​' (ancho cero) + espacio normal, no solo un espacio: un
+        // espacio normal pegado justo al final de un bloque se colapsa
+        // solo en las operaciones de edición de Chrome, y el cursor
+        // terminaba cayendo de vuelta adentro de la píldora de todos
+        // modos (comprobado con Playwright). El de ancho cero no se
+        // colapsa — rompe la adyacencia de verdad — y el espacio normal
+        // después es el que se ve, para que la tecla que presionaste
+        // (espacio) sí produzca un espacio visible como cualquier otro.
+        const spacer = document.createTextNode('​ ');
+        badgeEl.parentNode.insertBefore(spacer, badgeEl.nextSibling);
+        const range = document.createRange();
+        range.setStart(spacer, 2); range.collapse(true);
+        sel.removeAllRanges(); sel.addRange(range);
+        scheduleSave();
+        return;
+      }
+    }
     // El primer texto escrito en un editor vacío queda como nodo de texto
     // suelto (sin <p> que lo envuelva) hasta que se presiona Enter — por
     // eso no se busca un elemento "bloque" envolvente, se usa directo el
@@ -3069,8 +3099,32 @@ function toggleRtTableExpand(btn){
    feedback_editor_preferences en memoria). Un TreeWalker evita tocar
    texto que ya está dentro de un badge (no lo vuelve a envolver cada
    vez) o dentro del botón de expandir/contener de una tabla anidada. */
+/* Bug real reportado (2026-07-30): cuando el "#tag" quedaba justo al
+   FINAL de una línea, la píldora terminaba siendo el último hijo de su
+   párrafo sin ningún texto neutral después — el cursor no tenía dónde
+   "salir" y quedaba atrapado dentro del estilo de la píldora: cualquier
+   cosa que se siguiera escribiendo (o cada Enter) heredaba esa misma
+   forma, apilando píldoras vacías hacia abajo sin manera de escapar
+   (captura: una fila de óvalos vacíos, uno debajo del otro). Dos partes
+   al arreglo:
+   1) Autorreparación: cualquier píldora que YA quedó rota por este bug
+      (vacía, o su texto ya no es un "#tag" válido porque se escribió/
+      borró algo adentro) se desenvuelve sola de vuelta a texto plano la
+      próxima vez que se abre o se sale de la nota — no hace falta
+      arreglarla a mano nota por nota.
+   2) Prevención: de ahora en adelante, toda píldora que llegue justo al
+      final del texto original (nada después) se le agrega un espacio
+      normal después — un lugar neutral donde el cursor SÍ puede pararse
+      sin quedar "adentro" del span. */
 function badgeifyInlineTags(container){
   if(!container) return;
+  container.querySelectorAll('.tag-badge').forEach(span=>{
+    const txt = span.textContent;
+    if(!/^#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+$/.test(txt)){
+      if(txt.trim()==='') span.remove();
+      else span.replaceWith(document.createTextNode(txt));
+    }
+  });
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
     acceptNode(node){
       if(!node.nodeValue || !/#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+/.test(node.nodeValue)) return NodeFilter.FILTER_REJECT;
@@ -3096,6 +3150,14 @@ function badgeifyInlineTags(container){
     }
     if(!found) return;
     if(lastIndex < text.length) frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+    // ​ (ancho cero) y NO un espacio normal: un espacio de verdad
+    // pegado al final de un bloque se colapsa/limpia solo en las
+    // operaciones de edición de Chrome (es "whitespace ignorable" al
+    // final), y el cursor terminaba cayendo de vuelta adentro del span
+    // de todos modos — comprobado reproduciendo el bug exacto con
+    // Playwright. El ancho cero no se colapsa, es invisible, y le da al
+    // cursor un lugar de verdad donde pararse afuera de la píldora.
+    else frag.appendChild(document.createTextNode('​'));
     node.parentNode.replaceChild(frag, node);
   });
 }
@@ -3588,23 +3650,69 @@ function renderHabitCaptureList(){
    igual que el resto de formularios de esta app (no se duplica el
    estado en JS aparte). */
 function habitFormRowHTML(i){
-  return `<div class="fill-row" style="gap:6px;margin-bottom:6px;flex-wrap:wrap">
+  return `<div class="fill-row" style="gap:6px;margin-bottom:6px;flex-wrap:wrap;align-items:flex-start">
     <input type="text" id="habitFormName${i}" placeholder="nombre (ej. tomar agua)" style="flex:2;min-width:130px">
     <input type="text" id="habitFormEmoji${i}" placeholder="✅" style="width:48px;text-align:center">
-    <input type="number" id="habitFormMeta${i}" placeholder="veces/día" min="1" style="width:80px" title="Cuántas veces al día (opcional — vacío = una vez ya cuenta como hecho; ej. pon 8 para 8 vasos de agua)" oninput="toggleHabitHoraVisibility('habitFormHoraWrap${i}','habitFormHora${i}',this.value)">
+    <input type="number" id="habitFormMeta${i}" placeholder="veces/día" min="1" style="width:80px" title="Cuántas veces al día (opcional — vacío = una vez ya cuenta como hecho; ej. pon 8 para 8 vasos de agua)" oninput="toggleHabitHoraVisibility(${i},this.value)">
     <span id="habitFormHoraWrap${i}"><input type="time" id="habitFormHora${i}" style="width:110px" title="Hora habitual (opcional) — solo tiene sentido si es una vez al día"></span>
     ${recordatorioSelectHTML('habitFormFx'+i, '')}
+    <div id="habitFormHorasWrap${i}" style="display:none;flex-basis:100%;padding:8px;border:1px dashed var(--border);border-radius:8px;margin-top:2px">
+      <div id="habitFormHorasList${i}" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"><span class="hint" style="color:var(--text-dim);font-size:12px">Sin horarios — agrega uno o genera abajo</span></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <input type="time" id="habitFormHoraNew${i}" style="width:100px">
+        <button class="btn secondary" onclick="addHabitFormHora(${i})" type="button">+ hora</button>
+        <span style="font-size:12px;color:var(--text-dim);margin-left:6px">o cada</span>
+        <input type="number" id="habitFormGenN${i}" value="8" min="1" max="24" style="width:50px">
+        <span style="font-size:12px;color:var(--text-dim)">horas</span>
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="habitFormGenAvoid${i}" checked> evitar 22:00–07:00</label>
+        <button class="btn secondary" onclick="generateHabitFormHoras(${i})" type="button">Generar</button>
+      </div>
+    </div>
   </div>`;
 }
 /* La "hora habitual" solo tiene sentido para un hábito de una sola vez
    al día (ej. meditar a las 7am) — si es de varias veces (ej. 8 vasos
-   de agua) una sola hora no representa nada, así que se esconde en
-   cuanto la meta pasa de 1 (y se limpia su valor, para no guardar algo
-   escondido/olvidado que el usuario ya no puede ver). */
-function toggleHabitHoraVisibility(wrapId, inputId, metaValue){
-  const hide = parseInt(metaValue, 10) > 1;
-  const wrap = document.getElementById(wrapId); if(wrap) wrap.style.display = hide ? 'none' : '';
-  if(hide){ const inp = document.getElementById(inputId); if(inp) inp.value = ''; }
+   de agua o un medicamento cada 8 horas) una sola hora no representa
+   nada. Antes, en este formulario de alta RÁPIDA, "veces/día">1 solo
+   escondía la hora suelta y ya — para poner horarios específicos había
+   que guardar el hábito primero y luego abrir ✏️ Editar aparte (donde
+   SÍ existía desde antes esta misma lista+generador). Pedido explícito:
+   que también esté disponible aquí mismo, al crear, no solo al editar
+   después — mismo generateHorasEveryN que ya usaba el editor. */
+function toggleHabitHoraVisibility(i, metaValue){
+  const multi = parseInt(metaValue, 10) > 1;
+  const wrap = document.getElementById('habitFormHoraWrap'+i);
+  if(wrap) wrap.style.display = multi ? 'none' : '';
+  if(multi){ const inp = document.getElementById('habitFormHora'+i); if(inp) inp.value = ''; }
+  const horasWrap = document.getElementById('habitFormHorasWrap'+i);
+  if(horasWrap) horasWrap.style.display = multi ? 'block' : 'none';
+}
+window._habitFormHoras = window._habitFormHoras || {};
+function renderHabitFormHoras(i){
+  const el = document.getElementById('habitFormHorasList'+i); if(!el) return;
+  const list = window._habitFormHoras[i] || [];
+  el.innerHTML = list.map((t,idx)=>`<span class="tag-badge" style="cursor:default">⏰ ${escHtml(t)} <span style="cursor:pointer" onclick="removeHabitFormHora(${i},${idx})" title="Quitar">✕</span></span>`).join('')
+    || '<span class="hint" style="color:var(--text-dim);font-size:12px">Sin horarios — agrega uno o genera abajo</span>';
+}
+function addHabitFormHora(i){
+  const inp = document.getElementById('habitFormHoraNew'+i); if(!inp || !inp.value) return;
+  window._habitFormHoras[i] = window._habitFormHoras[i] || [];
+  if(!window._habitFormHoras[i].includes(inp.value)) window._habitFormHoras[i].push(inp.value);
+  window._habitFormHoras[i].sort();
+  inp.value = '';
+  renderHabitFormHoras(i);
+}
+function removeHabitFormHora(i, idx){
+  if(!window._habitFormHoras[i]) return;
+  window._habitFormHoras[i].splice(idx,1);
+  renderHabitFormHoras(i);
+}
+function generateHabitFormHoras(i){
+  const n = document.getElementById('habitFormGenN'+i).value;
+  const avoid = document.getElementById('habitFormGenAvoid'+i).checked;
+  window._habitFormHoras[i] = generateHorasEveryN(n, avoid);
+  renderHabitFormHoras(i);
+  showToast('Horarios generados — ajústalos a mano si hace falta');
 }
 function renderHabitAddRows(){
   const el = document.getElementById('habitAddRows'); if(!el) return;
@@ -3626,17 +3734,22 @@ async function saveHabitFormRows(){
   for(let i=0;i<window._habitFormRowCount;i++){
     const name = (document.getElementById('habitFormName'+i)?.value||'').trim();
     if(!name) continue;
+    const meta = document.getElementById('habitFormMeta'+i)?.value || '';
+    const isMulti = parseInt(meta,10) > 1;
+    const horas = isMulti ? (window._habitFormHoras[i] || []) : [];
     rows.push({
       name,
       emoji: (document.getElementById('habitFormEmoji'+i)?.value||'').trim() || '✅',
-      meta: document.getElementById('habitFormMeta'+i)?.value || '',
+      meta,
       hora: document.getElementById('habitFormHora'+i)?.value || '',
+      horasJSON: horas.length ? JSON.stringify(horas) : '',
       recordatorio: document.getElementById('habitFormFx'+i)?.value || ''
     });
   }
   if(!rows.length){ showToast('Escribe al menos un nombre'); return; }
-  await Promise.all(rows.map(r=>saveEntity('HABITOS', { ID:uid(), Nombre:r.name, Emoji:r.emoji, Color:randomColor(), Activo:'1', Hora:r.hora, Recordatorio:r.recordatorio, Meta:r.meta })));
+  await Promise.all(rows.map(r=>saveEntity('HABITOS', { ID:uid(), Nombre:r.name, Emoji:r.emoji, Color:randomColor(), Activo:'1', Hora:r.hora, HorasJSON:r.horasJSON, Recordatorio:r.recordatorio, Meta:r.meta })));
   window._habitFormRowCount = 1;
+  window._habitFormHoras = {};
   renderHabitAddRows();
   renderHabitCaptureList();
   renderReminderBanner();
@@ -6439,7 +6552,7 @@ function renderFlagsSection(){
   return `<p style="font-weight:700;margin:0 0 6px">🚩 Banderas rápidas</p>
     <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Aparecen en el panel lateral y como botones en el editor de texto para insertar su etiqueta con un clic.</p>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
-      ${FLAG_TAGS_BASE.map(([t,emoji,label,color])=>`<span class="tag-badge" style="border-color:${color}">${emoji} ${escHtml(label)}</span>`).join('')}
+      ${FLAG_TAGS_BASE.map(([t,emoji,label,color])=>`<span class="tag-badge" style="border-color:${color}" title="Inserta #${escAttr(t)}">${emoji} ${escHtml(label)} → #${escHtml(t)}</span>`).join('')}
       ${DATA.flags.map(f=>`<span class="tag-badge" style="border-color:${f.Color};display:inline-flex;align-items:center;gap:4px">${f.Emoji} ${escHtml(f.Nombre)} <button class="icon-btn" style="padding:0 3px" onclick="deleteCustomFlag('${escAttr(f.ID)}')" title="Quitar bandera">✕</button></span>`).join('')}
     </div>
     <button class="btn secondary" onclick="openAddFlagModal()">+ agregar bandera</button>`;

@@ -535,7 +535,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Mar del Plata';
+const BUILD_VERSION = 'La Plata';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -613,7 +613,11 @@ function selectCalDay(iso){
    la lista bajo los eventos en vista de día. */
 function notesOnDate(dateObj){
   const dayStr = dateObj.toDateString();
-  return activeNotes().filter(n=>n.Fecha && new Date(n.Fecha).toDateString()===dayStr)
+  // Las entradas de ⏱ Registro de tiempo son notas normales por dentro
+  // (mismo NOTAS, con PlantillaPropID===TIMELOG_MARKER) — pedido
+  // explícito: que se queden solo en su propia pantalla de Registro de
+  // tiempo, no mezcladas en el puntito/lista de notas del Calendario.
+  return activeNotes().filter(n=>n.Fecha && n.PlantillaPropID!==TIMELOG_MARKER && new Date(n.Fecha).toDateString()===dayStr)
     .sort((a,b)=>new Date(a.Fecha)-new Date(b.Fecha));
 }
 function openNoteFromCalendar(id){
@@ -983,12 +987,27 @@ async function syncNow(manual){
   const queue = loadQueue();
   _syncing = true; updateSyncIndicator();
   try{
+    // Bug real reportado: un solo cambio que SIEMPRE falla (ej. una nota
+    // demasiado grande, o algo que el backend rechaza de verdad, no solo
+    // "sin conexión") se quedaba bloqueando TODA la cola para siempre —
+    // como este bucle cortaba (break) en el primer error, ni ese cambio
+    // ni ninguno de los que venían detrás volvían a intentarse jamás, y
+    // "N pend." nunca bajaba pese a tocar "Sincronizar ahora" una y otra
+    // vez, sin ninguna pista de qué estaba pasando. Ahora cada intento
+    // fallido guarda su propio error (visible en el modal de pendientes)
+    // y el bucle sigue con el resto de la cola en vez de rendirse ahí —
+    // un cambio atascado ya no le impide subir a los demás.
     for(const op of queue){
       try{
         const r = await apiPostReal(op.action, op.params);
         if(!(r && r.ok)) throw new Error((r&&r.error)||'error');
         saveQueue(loadQueue().filter(x=>x._opId!==op._opId));
-      }catch(e){ break; }
+      }catch(e){
+        const q2 = loadQueue();
+        const stuck = q2.find(x=>x._opId===op._opId);
+        if(stuck) stuck._lastError = (e&&e.message) || 'sin conexión';
+        saveQueue(q2);
+      }
     }
     // Con una nota abierta, ni siquiera se reemplaza DATA — solo se manda
     // la cola pendiente (arriba) y se reintenta en el siguiente ciclo. Así
@@ -1044,6 +1063,20 @@ function describeQueueOp(op){
     return 'Cambio pendiente (sin más detalle)';
   }
 }
+/* Descarta SOLO el intento de subida en cola — el cambio en sí ya vive
+   en la nota/hábito/etc local (DATA + localStorage), esto no borra nada
+   de lo que ves en la app. Pensado para un op que quedó atascado sin
+   remedio (ej. rechazado siempre por el backend) y que bloqueaba a
+   todos los demás detrás de él — la próxima edición real a esa misma
+   fila vuelve a encolar un intento nuevo, así que no se "pierde" la
+   posibilidad de subirla, solo se deja de reintentar ESTE intento viejo
+   puntual. */
+function discardQueueOp(opId){
+  if(!confirm('¿Descartar este cambio pendiente? Sigue guardado en este dispositivo, solo deja de intentar subirse — si vuelves a editar lo mismo, se vuelve a encolar.')) return;
+  saveQueue(loadQueue().filter(x=>x._opId!==opId));
+  document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#pendingSyncRows')) o.remove(); });
+  openPendingSyncModal();
+}
 function openPendingSyncModal(){
   // Se relee la cola y se refresca el indicador de "N pend." al abrir —
   // si por lo que sea el botón de arriba se había quedado desactualizado
@@ -1052,13 +1085,26 @@ function openPendingSyncModal(){
   const queue = loadQueue();
   updateSyncIndicator();
   const rows = queue.map(op=>{
-    try{ return `<div class="settings-row">${escHtml(describeQueueOp(op))}</div>`; }
-    catch(e){ return `<div class="settings-row">Cambio pendiente (sin más detalle)</div>`; }
+    // Blindado igual que describeQueueOp: una entrada de forma inesperada
+    // (null, sin params, de una versión vieja de la app) no debe tumbar
+    // el modal entero — mejor una fila genérica que romper el resto.
+    try{
+      const label = describeQueueOp(op);
+      const lastError = (op && op._lastError) || '';
+      const errLine = lastError ? `<div style="color:var(--danger,#c0392b);font-size:11px;margin-top:2px">⚠ ${escHtml(lastError)}</div>` : '';
+      const opId = op && op._opId || '';
+      return `<div class="settings-row" style="align-items:flex-start">
+        <div style="flex:1">${escHtml(label)}${errLine}</div>
+        ${lastError ? `<button class="icon-btn" onclick="discardQueueOp('${escAttr(opId)}')" title="Descartar este intento — sigue guardado en el dispositivo, solo deja de reintentar subirlo">🗑️</button>` : ''}
+      </div>`;
+    }catch(e){
+      return `<div class="settings-row">Cambio pendiente (sin más detalle)</div>`;
+    }
   }).join('');
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(420px,100%)">
     <div class="modal-head"><b>☁️ Pendiente por sincronizar</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <div class="modal-body">
+    <div class="modal-body" id="pendingSyncRows">
       <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Estos cambios ya están guardados aquí en el dispositivo — se suben solos en cuanto haya conexión, o toca "Sincronizar" para intentarlo ahora.</p>
       ${queue.length ? rows : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada pendiente 🎉 (si arriba seguía diciendo "pend.", ya se corrigió)</p>'}
       <div style="margin-top:12px"><button class="btn" onclick="this.closest('.modal-overlay').remove();forceSync()">Sincronizar ahora</button></div>

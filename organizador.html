@@ -535,7 +535,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Neuquén';
+const BUILD_VERSION = 'Comodoro Rivadavia';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2334,14 +2334,13 @@ function updateTranscribeBtn(){
    openToolbarFavPicker) junto a una flechita ▾ que despliega la barra
    completa de siempre. Sin límite de cuántas se pueden marcar — el
    usuario decide si quiere ver pocas o casi todas (antes se topaba en
-   3 a la fuerza, quitado a pedido explícito). El selector de tamaño de
-   letra sigue sin ser "favoriteable" porque es un <select>, no un
-   botón de una sola acción — no encaja en esta fila de íconos. */
+   3 a la fuerza, quitado a pedido explícito). */
 const TOOLBAR_TOOLS = [
   { key:'bold', icon:'<b>B</b>', title:'Negrita', action:"runCmd('bold')" },
   { key:'italic', icon:'<i>I</i>', title:'Cursiva', action:"runCmd('italic')" },
   { key:'underline', icon:'<u>S</u>', title:'Subrayado', action:"runCmd('underline')" },
   { key:'strike', icon:'<s>S</s>', title:'Tachado', action:"runCmd('strikeThrough')" },
+  { key:'fontsize', icon:'Aa', title:'Tamaño de letra', isSelect:true },
   { key:'h1', icon:'H1', title:'Título', action:"runCmd('formatBlock','H1')" },
   { key:'h2', icon:'H2', title:'Subtítulo', action:"runCmd('formatBlock','H2')" },
   { key:'quote', icon:'❝', title:'Cita', action:"runCmd('formatBlock','BLOCKQUOTE')" },
@@ -2358,11 +2357,24 @@ const TOOLBAR_TOOLS = [
   { key:'ai', icon:'✨', title:'Asistente IA', action:'openAIDrawer()' },
   { key:'transcribe', icon:'🎙️', title:'Transcribir', action:'openOrRestoreTranscribePanel()' }
 ];
+/* Las banderas rápidas (⚑★⚠ + las que el usuario agregue en Configuración
+   → Etiquetas) también se pueden "favoritear" — a diferencia de
+   TOOLBAR_TOOLS (fija), esta lista se arma cada vez a partir de
+   allFlags(), así que si agregas/quitas una bandera después, aparece o
+   desaparece sola del picker sin tener que tocar código. */
+function toolbarFlagTools(){
+  return allFlags().map(([tag,emoji,label,color])=>({ key:'flag_'+tag, icon:emoji, title:label, action:`quickFlag('${escAttr(tag)}')`, color }));
+}
+function allToolbarPickableTools(){ return TOOLBAR_TOOLS.concat(toolbarFlagTools()); }
+function toolbarToolByKey(key){ return allToolbarPickableTools().find(t=>t.key===key) || null; }
 let toolbarFavs = (() => { try{ return JSON.parse(localStorage.getItem('org_toolbar_favs')) || ['bold','check','tag']; }catch(e){ return ['bold','check','tag']; } })();
 function toolbarFavButtonsHTML(){
   return toolbarFavs.map(key=>{
-    const t = TOOLBAR_TOOLS.find(x=>x.key===key); if(!t) return '';
-    return `<button class="icon-btn" onmousedown="event.preventDefault()" onclick="${t.action}" title="${escAttr(t.title)}">${t.icon}</button>`;
+    const t = toolbarToolByKey(key); if(!t) return '';
+    if(t.isSelect) return `<select style="width:auto;padding:6px 4px;font-size:12px" onchange="setFontSize(this.value)" title="${escAttr(t.title)}">
+      <option value="">Tamaño</option><option value="2">Chico</option><option value="3">Normal</option><option value="5">Grande</option><option value="7">Enorme</option>
+    </select>`;
+    return `<button class="icon-btn" onmousedown="event.preventDefault()" onclick="${t.action}" title="${escAttr(t.title)}"${t.color?` style="color:${escAttr(t.color)}"`:''}>${t.icon}</button>`;
   }).join('');
 }
 function toggleToolbarExpanded(btn){
@@ -2385,8 +2397,8 @@ function openToolbarFavPicker(){
     <div class="modal-body">
       <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Elige las que quieras — son las que se quedan visibles junto a la flechita ▾, sin tener que desplegar toda la barra. Sin límite: tú decides si ver pocas o casi todas.</p>
       <div id="toolbarFavCheckboxes" style="display:flex;flex-wrap:wrap;gap:8px">
-        ${TOOLBAR_TOOLS.map(t=>`<label style="display:flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:8px;padding:5px 9px;font-size:13px;cursor:pointer">
-          <input type="checkbox" value="${t.key}" ${toolbarFavs.includes(t.key)?'checked':''}> ${t.icon} ${escHtml(t.title)}
+        ${allToolbarPickableTools().map(t=>`<label style="display:flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:8px;padding:5px 9px;font-size:13px;cursor:pointer">
+          <input type="checkbox" value="${t.key}" ${toolbarFavs.includes(t.key)?'checked':''}> <span${t.color?` style="color:${escAttr(t.color)}"`:''}>${t.icon}</span> ${escHtml(t.title)}
         </label>`).join('')}
       </div>
       <div style="margin-top:14px"><button class="btn" onclick="saveToolbarFavs()">Guardar</button></div>
@@ -5973,9 +5985,7 @@ function openAIDrawer(){
         <input type="checkbox" id="aiEnglishFeedback"> 🇬🇧 Darme también feedback de mi inglés
       </label>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">
-        <button class="btn secondary" onclick="runAI('organizar')" title="Reordena y limpia TU texto tal cual (párrafos, puntuación, claridad) sin cambiar lo que dice ni reestructurarlo">Organizar párrafo</button>
         <button class="btn secondary" onclick="runAI('redaccion')">Redacción</button>
-        <button class="btn secondary" onclick="runAI('tesis')" title="Propone una estructura NUEVA (introducción, puntos clave, conclusión) a partir de tu texto — no limpia, arma un esqueleto/argumento distinto">Estructurar tesis</button>
         <button class="btn secondary" onclick="runAI('procesar')">Resumir</button>
         <button class="btn secondary" onclick="runTranslate('es->en')">Traducir ES→EN</button>
         <button class="btn secondary" onclick="runTranslate('en->es')">Traducir EN→ES</button>
@@ -6048,12 +6058,18 @@ function appendAiEntry(label, original, result, isTranslate){
   aiConversation.push({ label, original, result, isTranslate: !!isTranslate });
   renderAiThread();
 }
+/* La IA responde en Markdown (**negrita**, # encabezados, tablas |...|)
+   — antes se mostraba como texto plano con los asteriscos/gatos/barras
+   literales a la vista, feo y difícil de leer. mdToHtml es el mismo
+   parser que ya usa el resto de la app (reusa las clases .md-h1/.md-
+   table/etc, ya con su propio estilo), así que se ve igual de "bonito"
+   que cualquier nota normal, sin escribir nada nuevo. */
 function renderAiThread(){
   const el = document.getElementById('aiThread'); if(!el) return;
   el.innerHTML = aiConversation.map((e,i)=>`
     <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
       <div style="font-size:11px;color:var(--text-dim);font-weight:600;margin-bottom:4px">${escHtml(e.label)}</div>
-      <div style="white-space:pre-wrap;font-size:13.5px">${escHtml(e.result)}</div>
+      <div style="font-size:13.5px">${mdToHtml(e.result)}</div>
       <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
         <button class="btn" onclick="acceptAiEntry(${i})">Guardar respuesta</button>
         <button class="btn secondary" onclick="insertAiEntryIntoNote(${i})">Insertar en nota</button>
@@ -6065,7 +6081,7 @@ async function runAI(mode){
   const text = document.getElementById('aiInput').value.trim();
   if(!text){ showToast('Escribe algo primero'); return; }
   if(!navigator.onLine){ showToast('El asistente necesita conexión'); return; }
-  const labels = { organizar:'Organizar párrafo', redaccion:'Redacción', tesis:'Estructurar tesis', procesar:'Resumir' };
+  const labels = { redaccion:'Redacción', procesar:'Resumir' };
   setAiStatus('Pensando…');
   const r = await apiPost('aiAssist', { mode, text });
   if(r && r.ok){ setAiStatus(''); appendAiEntry(labels[mode]||mode, text, r.text); }
@@ -6173,8 +6189,10 @@ function insertAiEntryIntoNote(i){
     sel.removeAllRanges();
     try{ sel.addRange(_aiInsertRange); }catch(e){}
   }
-  const html = escHtml(entry.result).split(/\n+/).map(line=>'<p>'+line+'</p>').join('');
-  document.execCommand('insertHTML', false, html);
+  // mdToHtml (no solo escHtml línea por línea) para que negritas/tablas/
+  // encabezados lleguen a la nota como formato real, igual que se ven en
+  // el hilo de la conversación — no como texto plano con asteriscos.
+  document.execCommand('insertHTML', false, mdToHtml(entry.result));
   scheduleSave();
   showToast('Insertado en la nota');
 }

@@ -523,7 +523,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Puerto Madryn';
+const BUILD_VERSION = 'El Calafate';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2480,7 +2480,7 @@ function editorInnerHTML(note, isModal){
   </div>
   <div id="swatchBar" class="swatch-row hidden"></div>
   <div id="routeHints" class="hidden"></div>
-  ${editingCornell ? '<div class="cornell-bar">📐 Modo Cornell <button class="mini-btn" style="width:auto" onclick="addCornellRowDirect()">+ agregar fila</button></div>' : ''}
+  ${editingCornell ? '<div class="cornell-bar"><span class="desktop-only">📐 Modo Cornell — cada fila: columna izq. = pista/palabra clave, columna der. = desarrollo</span><span class="mobile-only">📐 Modo Cornell</span> <button class="mini-btn" style="width:auto" onclick="addCornellRowDirect()">+ agregar fila</button></div>' : ''}
   <div class="editor-body" id="editorBody">
     <div id="mainArea" class="rich-editor" contenteditable="true" data-placeholder="Escribe aquí…">${note.Contenido||''}</div>
   </div>
@@ -6098,17 +6098,7 @@ function openSettings(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
     <div class="modal-head"><b>⚙️ Configuración</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
-    <select id="settingsTabSelect" class="mobile-only" onchange="settingsTabFromSelect(this.value)" style="margin:8px 12px;width:calc(100% - 24px)">
-      <option value="tags">🏷️ Etiquetas</option>
-      <option value="comandos">/ Comandos</option>
-      <option value="notebooks">📓 Cuadernos</option>
-      <option value="plantillas">📋 Plantillas</option>
-      <option value="appearance">🎨 Apariencia</option>
-      <option value="connection">☁️ Conexión</option>
-      <option value="trash">🗑️ Papelera</option>
-      <option value="mejoras">💡 Mejoras</option>
-    </select>
-    <div class="tabs desktop-only">
+    <div class="tabs">
       <button class="active" onclick="settingsTab(this,'tags')">Etiquetas</button>
       <button onclick="settingsTab(this,'comandos')">Comandos</button>
       <button onclick="settingsTab(this,'notebooks')">Cuadernos</button>
@@ -6124,15 +6114,11 @@ function openSettings(){
   document.body.appendChild(overlay);
   renderSettingsTags();
 }
-/* La barra de pestañas con scroll horizontal (.tabs, ver CSS) se veía
-   bien en el emulador de escritorio, pero un usuario reportó que en su
-   celular de verdad (Android) el renglón de pestañas se veía vacío —
-   probablemente una rareza de cómo ese navegador calcula el alto de un
-   contenedor con overflow-x + hijos inline. En vez de perseguir esa
-   rareza específica, se agrega un <select> nativo como alternativa en
-   celular — un <select> SIEMPRE funciona en cualquier navegador, sin
-   depender de overflow/scroll/flex en absoluto. Desktop sigue usando
-   las pestañas de siempre (ver .mobile-only/.desktop-only en el CSS). */
+/* Vuelto a pestañas nomás (con scroll horizontal, ver .tabs en el CSS)
+   a pedido explícito — se había probado un <select> como alternativa
+   en celular por un reporte de que las pestañas no se veían en un
+   Android real, pero el usuario prefiere quedarse con las pestañas de
+   toda la vida. */
 function settingsRenderTab(tab){
   if(tab==='tags') renderSettingsTags();
   if(tab==='comandos') renderSettingsComandos();
@@ -6145,10 +6131,6 @@ function settingsRenderTab(tab){
 }
 function settingsTab(btn, tab){
   btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
-  const sel = document.getElementById('settingsTabSelect'); if(sel) sel.value = tab;
-  settingsRenderTab(tab);
-}
-function settingsTabFromSelect(tab){
   settingsRenderTab(tab);
 }
 /* Todas las plantillas (checklist y de campos) juntas y editables desde

@@ -174,6 +174,7 @@ table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{backgrou
    media query de .transcribe-side-panel), así que ahí no aplica. */
 @media (min-width:821px){
   body.has-transcribe-panel #editorOverlay{ right:320px; }
+  body.has-ai-panel #editorOverlay{ right:380px; }
 }
 [data-theme="eink"] #editorOverlay{background:rgba(0,0,0,.15)}
 #editorPanel{background:var(--bg-elev);width:min(760px,100%);max-width:100%;display:flex;flex-direction:column;box-shadow:var(--shadow);height:100%}
@@ -277,14 +278,19 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .drawer{background:var(--bg-elev);width:min(420px,100%);height:100%;box-shadow:var(--shadow);display:flex;flex-direction:column}
 .drawer-head{display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid var(--border)}
 .drawer-body{flex:1;overflow-y:auto;padding:12px}
-/* a diferencia del drawer del Asistente IA (que sí bloquea el fondo a
-   propósito, es un modal), este panel vive DENTRO de #editorOverlay
-   como otro hijo flex más, sin fondo oscuro propio — así la nota que
-   ya tienes abierta a su izquierda se queda totalmente interactiva
-   mientras el panel escucha. */
+/* .drawer/.drawer-overlay ya no se usan para paneles que deben quedar
+   usables junto con el resto de la app (Transcribir, Asistente IA) —
+   .drawer-overlay tiene fondo oscuro de página completa y bloquea todo
+   detrás, útil solo para modales de verdad. Transcribir y el Asistente
+   IA usan su propio panel position:fixed SIN overlay (.transcribe-
+   side-panel / .ai-side-panel) para que la nota abierta a su izquierda
+   se quede totalmente interactiva mientras el panel sigue ahí. */
 .transcribe-side-panel{background:var(--bg-elev);width:320px;height:100vh;position:fixed;top:0;right:0;box-shadow:var(--shadow);display:flex;flex-direction:column;border-left:1px solid var(--border);z-index:210}
 @media (max-width:820px){ .transcribe-side-panel{width:100%;inset:0} }
 .transcribe-min-chip{position:fixed;right:20px;bottom:20px;z-index:250;background:var(--accent);color:var(--accent-text);border:none;border-radius:20px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:var(--shadow);cursor:pointer}
+.ai-side-panel{background:var(--bg-elev);width:380px;height:100vh;position:fixed;top:0;right:0;box-shadow:var(--shadow);display:flex;flex-direction:column;border-left:1px solid var(--border);z-index:210}
+@media (max-width:820px){ .ai-side-panel{width:100%;inset:0} }
+.ai-min-chip{position:fixed;right:20px;bottom:76px;z-index:250;background:var(--accent);color:var(--accent-text);border:none;border-radius:20px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:var(--shadow);cursor:pointer}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px}
 .modal{background:var(--bg-elev);border-radius:var(--radius);box-shadow:var(--shadow);width:min(640px,100%);max-height:90vh;display:flex;flex-direction:column}
 .modal.fullscreen{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0}
@@ -529,7 +535,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Formosa';
+const BUILD_VERSION = 'Neuquén';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -868,9 +874,16 @@ let tagFilterMode = localStorage.getItem('org_tag_filter_mode') || 'AND';
 let sortState = { col:'Fecha', dir:'desc' };
 let editingNoteId = null;
 let editingCornell = false;
-let aiLastResult = '';
-let aiLastOriginal = '';
-let aiLastMode = '';
+/* Asistente IA (2026-07-30, panel no-bloqueante con hilo de conversación):
+   antes había 1 sola respuesta a la vez (aiLastResult/aiLastOriginal/
+   aiLastMode, sobrescritos en cada petición) — ahora aiConversation
+   guarda TODAS las respuestas de la sesión, cada una con lo que se le
+   pidió, así se puede "seguir la conversación" (runFollowUpAI) y elegir
+   cuál insertar sin perder las anteriores. _aiInsertRange guarda el
+   cursor exacto de la nota en el momento en que se abrió el panel (✨),
+   para que "Insertar en nota" pegue ahí y no al final/inicio. */
+let aiConversation = [];
+let _aiInsertRange = null;
 let splitRatio = parseFloat(localStorage.getItem('org_split_ratio')||'38');
 let editorWidth = parseInt(localStorage.getItem('org_editor_width')||'760',10);
 
@@ -2319,10 +2332,11 @@ function updateTranscribeBtn(){
    botones de la barra completa (mucho para una pantalla de celular),
    por defecto solo se ven 3 (elegibles por el usuario, ver
    openToolbarFavPicker) junto a una flechita ▾ que despliega la barra
-   completa de siempre. Solo cubre botones de una sola acción — el
-   selector de tamaño, el menú de tabla, resaltar/color y las banderas
-   se quedan siempre dentro de la barra completa (desplegable), no son
-   "favoriteables" individualmente para no complicar el picker. */
+   completa de siempre. Sin límite de cuántas se pueden marcar — el
+   usuario decide si quiere ver pocas o casi todas (antes se topaba en
+   3 a la fuerza, quitado a pedido explícito). El selector de tamaño de
+   letra sigue sin ser "favoriteable" porque es un <select>, no un
+   botón de una sola acción — no encaja en esta fila de íconos. */
 const TOOLBAR_TOOLS = [
   { key:'bold', icon:'<b>B</b>', title:'Negrita', action:"runCmd('bold')" },
   { key:'italic', icon:'<i>I</i>', title:'Cursiva', action:"runCmd('italic')" },
@@ -2334,6 +2348,9 @@ const TOOLBAR_TOOLS = [
   { key:'bullet', icon:'•', title:'Viñeta', action:"runCmd('insertUnorderedList')" },
   { key:'check', icon:'☑', title:'Casilla', action:'insertChecklistItem()' },
   { key:'image', icon:'🖼️', title:'Imagen', action:'triggerImage()' },
+  { key:'table', icon:'▦', title:'Insertar tabla', action:'insertRichTable()' },
+  { key:'mark', icon:'🖍️', title:'Resaltar', action:"toggleSwatches('mark')" },
+  { key:'color', icon:'🎨', title:'Color de texto', action:"toggleSwatches('color')" },
   { key:'fieldtpl', icon:'🏷️', title:'Plantilla de campos', action:'openFieldTemplatePicker()' },
   { key:'dic', icon:'📖', title:'Diccionario', action:'sendSelectionToDic()' },
   { key:'timestamp', icon:'🕐', title:'Fecha y hora', action:'insertTimestamp()' },
@@ -2366,20 +2383,16 @@ function openToolbarFavPicker(){
   overlay.innerHTML = `<div class="modal" style="width:min(380px,100%)">
     <div class="modal-head"><b>⭐ Herramientas favoritas</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Elige hasta 3 — son las que se quedan visibles junto a la flechita ▾, sin tener que desplegar toda la barra.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Elige las que quieras — son las que se quedan visibles junto a la flechita ▾, sin tener que desplegar toda la barra. Sin límite: tú decides si ver pocas o casi todas.</p>
       <div id="toolbarFavCheckboxes" style="display:flex;flex-wrap:wrap;gap:8px">
         ${TOOLBAR_TOOLS.map(t=>`<label style="display:flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:8px;padding:5px 9px;font-size:13px;cursor:pointer">
-          <input type="checkbox" value="${t.key}" ${toolbarFavs.includes(t.key)?'checked':''} onchange="enforceToolbarFavLimit(this)"> ${t.icon} ${escHtml(t.title)}
+          <input type="checkbox" value="${t.key}" ${toolbarFavs.includes(t.key)?'checked':''}> ${t.icon} ${escHtml(t.title)}
         </label>`).join('')}
       </div>
       <div style="margin-top:14px"><button class="btn" onclick="saveToolbarFavs()">Guardar</button></div>
     </div>
   </div>`;
   document.body.appendChild(overlay);
-}
-function enforceToolbarFavLimit(changedCheckbox){
-  const boxes = Array.from(document.querySelectorAll('#toolbarFavCheckboxes input:checked'));
-  if(boxes.length>3){ changedCheckbox.checked = false; showToast('Máximo 3 favoritas'); }
 }
 function saveToolbarFavs(){
   const keys = Array.from(document.querySelectorAll('#toolbarFavCheckboxes input:checked')).map(i=>i.value);
@@ -2431,6 +2444,7 @@ function editorInnerHTML(note, isModal){
     <input type="datetime-local" id="noteFecha" value="${toDatetimeLocal(new Date(note.Fecha))}" title="Fecha de la nota — con esta se ubica en Calendario, así que una tarea con fecha futura aparece ese día" style="width:auto">
     <button class="icon-btn" onclick="pickFilesForNote()" title="Vincular archivo(s)">📎</button>
     <button class="icon-btn" onclick="pickFolderForNote()" title="Vincular carpeta">📁</button>
+    <button class="icon-btn" id="fileChipToggleBtn" onclick="toggleFileChips(this)" title="Ocultar archivos vinculados" style="${getNoteLinks(note).length?'':'display:none'}">▾</button>
   </div>
   <div class="editor-meta" id="fileChipWrap" style="flex-wrap:wrap">${linksChipsHTML(getNoteLinks(note))}</div>
   <div class="editor-toolbar-fav">
@@ -4195,6 +4209,18 @@ function linksChipsHTML(links){
     <a href="#" onclick="event.preventDefault();openNoteLink(${i})">${l.kind==='folder'?'explorar':'abrir'}</a>
     <a href="#" onclick="event.preventDefault();removeNoteLink(${i})">✕</a></span>`).join('');
 }
+/* Una nota con varios archivos/carpetas vinculados podía volverse una
+   fila larga y siempre visible entre los datos de la nota y la barra
+   de herramientas — ahora se puede ocultar (▾↔▸ junto a 📁), y al
+   ocultarla no deja un hueco vacío (fileChipWrap simplemente
+   desaparece con .hidden, la barra de herramientas queda pegada
+   justo debajo de la fila de datos). */
+function toggleFileChips(btn){
+  const wrap = document.getElementById('fileChipWrap'); if(!wrap) return;
+  const hidden = wrap.classList.toggle('hidden');
+  btn.textContent = hidden ? '▸' : '▾';
+  btn.title = hidden ? 'Mostrar archivos vinculados' : 'Ocultar archivos vinculados';
+}
 async function ensureEditingNoteSaved(){
   if(editingNoteId) return editingNoteId;
   const note = collectNoteFromForm();
@@ -4206,6 +4232,8 @@ async function saveNoteLinks(links){
   const note = Object.assign({}, getNote(editingNoteId), { Archivo: JSON.stringify(links) });
   await saveEntity('NOTAS', note);
   const wrap = document.getElementById('fileChipWrap'); if(wrap) wrap.innerHTML = linksChipsHTML(links);
+  const toggleBtn = document.getElementById('fileChipToggleBtn');
+  if(toggleBtn) toggleBtn.style.display = links.length ? '' : 'none';
 }
 async function pickFilesForNote(){
   await ensureEditingNoteSaved();
@@ -5905,23 +5933,49 @@ function blockTableRenderHTML(tagFiltro){
 }
 
 /* ============ Panel de IA / traducción / feedback ============ */
+/* Guarda el cursor exacto de #mainArea (si el foco estaba ahí) antes de
+   que abrir el panel se lo robe — así "Insertar en nota" puede pegar
+   ahí de verdad en vez de al final/inicio (pedido explícito: "que se
+   pegue dnd esté el cursor"). Se revalida en el momento de insertar
+   (document.contains) por si mientras tanto se cerró esa nota o se
+   abrió otra — el Range viejo ya no serviría. */
+function captureAiInsertRange(){
+  const mainArea = document.getElementById('mainArea');
+  const sel = window.getSelection();
+  _aiInsertRange = (mainArea && sel.rangeCount && mainArea.contains(sel.anchorNode)) ? sel.getRangeAt(0).cloneRange() : null;
+}
+/* Antes: modal centrado con fondo oscuro que tapaba/bloqueaba toda la
+   app (drawer-overlay), una sola respuesta a la vez, y cada clic en ✨
+   creaba un panel nuevo desde cero. Ahora, mismo patrón que el panel de
+   transcripción: vive suelto en document.body (position:fixed, no
+   overlay), así se puede seguir usando el resto de la app con el panel
+   abierto; si ya hay uno abierto (conversación en curso), un segundo
+   clic en ✨ solo lo trae al frente/actualiza el texto seleccionado en
+   vez de perder el hilo — eso es lo que permite "seguir la
+   conversación" (ver runFollowUpAI). */
 function openAIDrawer(){
-  // si tenías texto seleccionado (en la nota o donde sea) al darle a ✨, se
-  // pone solo aquí — así no hay que copiar/pegar a mano cada vez.
+  captureAiInsertRange();
   const selectedText = (window.getSelection().toString()||'').trim();
-  const overlay = document.createElement('div'); overlay.className='drawer-overlay no-print';
-  overlay.innerHTML = `<div class="drawer">
-    <div class="drawer-head"><b>✨ Asistente</b><button class="icon-btn" onclick="this.closest('.drawer-overlay').remove()">✕</button></div>
-    <div class="drawer-body">
-      <textarea id="aiInput" rows="6" placeholder="Pega o escribe el texto…">${escHtml(selectedText)}</textarea>
+  let panel = document.getElementById('aiPanel');
+  if(panel){
+    if(panel.style.display==='none') restoreAIPanel();
+    if(selectedText){ const ta=document.getElementById('aiInput'); if(ta) ta.value = selectedText; }
+    return;
+  }
+  panel = document.createElement('div');
+  panel.id = 'aiPanel'; panel.className = 'ai-side-panel no-print';
+  panel.innerHTML = `
+    <div class="drawer-head"><b>✨ Asistente</b><span><button class="icon-btn" onclick="minimizeAIPanel()" title="Minimizar — la conversación sigue aquí cuando vuelvas">➖</button><button class="icon-btn" onclick="closeAIPanel()">✕</button></span></div>
+    <div style="padding:12px;overflow-y:auto;flex:1">
+      <textarea id="aiInput" rows="5" placeholder="Pega o escribe el texto…">${escHtml(selectedText)}</textarea>
       <button class="mini-btn" style="margin-top:6px" onclick="pullFromActiveNote()">↙ usar texto de la nota abierta</button>
       <label style="font-size:12.5px;display:flex;align-items:center;gap:6px;margin-top:10px;cursor:pointer" title="Además de lo que pidas con cualquier botón de abajo, analiza el texto en inglés y guarda una lección aparte (nota en el cuaderno Inglés)">
         <input type="checkbox" id="aiEnglishFeedback"> 🇬🇧 Darme también feedback de mi inglés
       </label>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">
-        <button class="btn secondary" onclick="runAI('organizar')">Organizar párrafo</button>
+        <button class="btn secondary" onclick="runAI('organizar')" title="Reordena y limpia TU texto tal cual (párrafos, puntuación, claridad) sin cambiar lo que dice ni reestructurarlo">Organizar párrafo</button>
         <button class="btn secondary" onclick="runAI('redaccion')">Redacción</button>
-        <button class="btn secondary" onclick="runAI('tesis')">Estructurar tesis</button>
+        <button class="btn secondary" onclick="runAI('tesis')" title="Propone una estructura NUEVA (introducción, puntos clave, conclusión) a partir de tu texto — no limpia, arma un esqueleto/argumento distinto">Estructurar tesis</button>
         <button class="btn secondary" onclick="runAI('procesar')">Resumir</button>
         <button class="btn secondary" onclick="runTranslate('es->en')">Traducir ES→EN</button>
         <button class="btn secondary" onclick="runTranslate('en->es')">Traducir EN→ES</button>
@@ -5930,8 +5984,12 @@ function openAIDrawer(){
         <input type="text" id="aiCustomInstruction" placeholder="Otra petición… (ej. hazlo más formal)" style="flex:1">
         <button class="btn secondary" onclick="runCustomAI()">Enviar</button>
       </div>
-      <div id="aiOutput" style="border:1px solid var(--border);border-radius:8px;padding:10px;min-height:60px;white-space:pre-wrap;font-size:13.5px;margin-top:10px"></div>
-      <div id="aiActions" style="display:flex;gap:6px;margin-top:8px"></div>
+      <p id="aiStatus" style="font-size:12.5px;color:var(--text-dim);margin:8px 0 0"></p>
+      <div id="aiThread" style="margin-top:8px"></div>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:8px;position:sticky;bottom:-12px;background:var(--bg-elev);padding:8px 0">
+        <input type="text" id="aiFollowUpInput" placeholder="Seguir pidiendo sobre la última respuesta…" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();runFollowUpAI();}">
+        <button class="btn secondary" onclick="runFollowUpAI()" title="Le sigue pidiendo a la IA sobre su última respuesta, en vez de empezar de cero">↩️ Responder</button>
+      </div>
       <h3 style="margin-top:20px">📖 Diccionario personal</h3>
       <div style="display:flex;gap:6px"><input type="text" id="dicTerm" placeholder="palabra"><input type="text" id="dicTrans" placeholder="traducción"><button class="icon-btn" onclick="addDicManual()">+</button></div>
       <div id="dicList" style="margin-top:8px;max-height:160px;overflow-y:auto"></div>
@@ -5939,11 +5997,34 @@ function openAIDrawer(){
       <div id="fbList" style="max-height:160px;overflow-y:auto"></div>
       <h3 style="margin-top:20px">🇬🇧 Historial de correcciones de inglés</h3>
       <div id="englishLessonList" style="max-height:160px;overflow-y:auto"></div>
-    </div>
-  </div>`;
-  overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
-  document.body.appendChild(overlay);
-  renderDicList(); renderFeedbackList(); renderEnglishLessonHistory();
+    </div>`;
+  document.body.appendChild(panel);
+  document.body.classList.add('has-ai-panel');
+  renderDicList(); renderFeedbackList(); renderEnglishLessonHistory(); renderAiThread();
+}
+function minimizeAIPanel(){
+  const panel = document.getElementById('aiPanel'); if(!panel) return;
+  panel.style.display = 'none';
+  document.body.classList.remove('has-ai-panel');
+  let chip = document.getElementById('aiMinChip');
+  if(!chip){
+    chip = document.createElement('button');
+    chip.id = 'aiMinChip'; chip.className = 'ai-min-chip no-print';
+    chip.onclick = restoreAIPanel;
+    document.body.appendChild(chip);
+  }
+  chip.textContent = '✨ Asistente — tocar para ver';
+}
+function restoreAIPanel(){
+  const panel = document.getElementById('aiPanel'); if(panel) panel.style.display = '';
+  document.body.classList.add('has-ai-panel');
+  const chip = document.getElementById('aiMinChip'); if(chip) chip.remove();
+}
+function closeAIPanel(){
+  const panel = document.getElementById('aiPanel'); if(panel) panel.remove();
+  const chip = document.getElementById('aiMinChip'); if(chip) chip.remove();
+  document.body.classList.remove('has-ai-panel');
+  aiConversation = []; _aiInsertRange = null;
 }
 /* #mainArea es un <div contenteditable>, no un <textarea> — no tiene
    .value (eso siempre devolvía undefined y el cuadro de IA se llenaba
@@ -5953,26 +6034,52 @@ function pullFromActiveNote(){
   const ta = document.getElementById('mainArea');
   document.getElementById('aiInput').value = ta ? stripHtmlToText(ta.innerHTML) : '';
 }
+const AI_STATUS_ERROR_MS = 6000;
+function setAiStatus(text, isError){
+  const el = document.getElementById('aiStatus'); if(!el) return;
+  el.textContent = text; el.style.color = isError ? 'var(--danger, #c0392b)' : 'var(--text-dim)';
+  if(isError) setTimeout(()=>{ if(el.textContent===text) el.textContent=''; }, AI_STATUS_ERROR_MS);
+}
+/* Cada respuesta se agrega como una tarjeta nueva al hilo (aiConversation)
+   en vez de pisar la anterior — así queda un registro de toda la sesión,
+   cada una con su propio "Insertar en nota"/"Guardar"/"Enviar a
+   diccionario", y runFollowUpAI puede referirse a la última. */
+function appendAiEntry(label, original, result, isTranslate){
+  aiConversation.push({ label, original, result, isTranslate: !!isTranslate });
+  renderAiThread();
+}
+function renderAiThread(){
+  const el = document.getElementById('aiThread'); if(!el) return;
+  el.innerHTML = aiConversation.map((e,i)=>`
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px">
+      <div style="font-size:11px;color:var(--text-dim);font-weight:600;margin-bottom:4px">${escHtml(e.label)}</div>
+      <div style="white-space:pre-wrap;font-size:13.5px">${escHtml(e.result)}</div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn" onclick="acceptAiEntry(${i})">Guardar respuesta</button>
+        <button class="btn secondary" onclick="insertAiEntryIntoNote(${i})">Insertar en nota</button>
+        ${e.isTranslate?`<button class="btn secondary" onclick="sendAiEntryToDic(${i})">Enviar a diccionario</button>`:''}
+      </div>
+    </div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Las respuestas van a aparecer aquí.</p>';
+}
 async function runAI(mode){
   const text = document.getElementById('aiInput').value.trim();
   if(!text){ showToast('Escribe algo primero'); return; }
   if(!navigator.onLine){ showToast('El asistente necesita conexión'); return; }
-  document.getElementById('aiOutput').textContent = 'Pensando…';
+  const labels = { organizar:'Organizar párrafo', redaccion:'Redacción', tesis:'Estructurar tesis', procesar:'Resumir' };
+  setAiStatus('Pensando…');
   const r = await apiPost('aiAssist', { mode, text });
-  aiLastOriginal = text; aiLastMode = mode;
-  if(r && r.ok){ aiLastResult = r.text; document.getElementById('aiOutput').textContent = r.text; renderAiActions(); }
-  else { document.getElementById('aiOutput').textContent = 'Error: '+((r&&r.error)||'sin respuesta'); }
+  if(r && r.ok){ setAiStatus(''); appendAiEntry(labels[mode]||mode, text, r.text); }
+  else setAiStatus('Error: '+((r&&r.error)||'sin respuesta'), true);
   maybeRunEnglishFeedback(text);
 }
 async function runTranslate(direction){
   const text = document.getElementById('aiInput').value.trim();
   if(!text){ showToast('Escribe algo primero'); return; }
   if(!navigator.onLine){ showToast('La traducción necesita conexión'); return; }
-  document.getElementById('aiOutput').textContent = 'Traduciendo…';
+  setAiStatus('Traduciendo…');
   const r = await apiPost('translate', { text, direction });
-  aiLastOriginal = text; aiLastMode = 'traducir';
-  if(r && r.ok){ aiLastResult = r.text; document.getElementById('aiOutput').textContent = r.text; renderAiActions(true); }
-  else { document.getElementById('aiOutput').textContent = 'Error: '+((r&&r.error)||'sin respuesta'); }
+  if(r && r.ok){ setAiStatus(''); appendAiEntry(direction==='es->en'?'Traducir ES→EN':'Traducir EN→ES', text, r.text, true); }
+  else setAiStatus('Error: '+((r&&r.error)||'sin respuesta'), true);
   maybeRunEnglishFeedback(text);
 }
 /* Petición libre: en vez de un modo fijo (organizar/tesis/...), el
@@ -5984,21 +6091,34 @@ async function runCustomAI(){
   if(!text){ showToast('Escribe algo primero'); return; }
   if(!instruction){ showToast('Escribe qué quieres que haga'); return; }
   if(!navigator.onLine){ showToast('El asistente necesita conexión'); return; }
-  document.getElementById('aiOutput').textContent = 'Pensando…';
+  setAiStatus('Pensando…');
   const r = await apiPost('aiAssist', { mode:'personalizada', text, instruction });
-  aiLastOriginal = text; aiLastMode = instruction.slice(0,60);
-  if(r && r.ok){ aiLastResult = r.text; document.getElementById('aiOutput').textContent = r.text; renderAiActions(); }
-  else { document.getElementById('aiOutput').textContent = 'Error: '+((r&&r.error)||'sin respuesta'); }
+  if(r && r.ok){ setAiStatus(''); appendAiEntry(instruction.slice(0,60), text, r.text); }
+  else setAiStatus('Error: '+((r&&r.error)||'sin respuesta'), true);
   maybeRunEnglishFeedback(text);
 }
-function renderAiActions(isTranslate){
-  document.getElementById('aiActions').innerHTML = `
-    <button class="btn" onclick="acceptAiResult()">Guardar respuesta</button>
-    <button class="btn secondary" onclick="insertAiIntoNote()">Insertar en nota</button>
-    ${isTranslate?'<button class="btn secondary" onclick="sendToDicFromAI()">Enviar a diccionario</button>':''}`;
+/* "Derecho a réplica": sigue la conversación a partir de la ÚLTIMA
+   respuesta del hilo (no del texto original de aiInput) — el backend no
+   guarda historial de mensajes, así que el contexto (qué contestó antes
+   + qué se le pide ahora) se arma acá mismo y se manda como una sola
+   instrucción con mode:'personalizada'. */
+async function runFollowUpAI(){
+  if(!aiConversation.length){ showToast('Primero pide algo arriba'); return; }
+  const input = document.getElementById('aiFollowUpInput');
+  const followUp = input.value.trim();
+  if(!followUp){ showToast('Escribe tu petición'); return; }
+  if(!navigator.onLine){ showToast('El asistente necesita conexión'); return; }
+  const last = aiConversation[aiConversation.length-1];
+  const instruction = `Ya generaste este resultado antes:\n"""${last.result}"""\n\nAhora, sobre ese resultado: ${followUp}`;
+  input.value = '';
+  setAiStatus('Pensando…');
+  const r = await apiPost('aiAssist', { mode:'personalizada', text: last.original, instruction });
+  if(r && r.ok){ setAiStatus(''); appendAiEntry('↩️ '+followUp.slice(0,50), last.original, r.text); }
+  else setAiStatus('Error: '+((r&&r.error)||'sin respuesta'), true);
 }
-function acceptAiResult(){
-  saveEntity('FEEDBACK', { ID:uid(), Fecha:new Date().toISOString(), Original:aiLastOriginal, Correccion:aiLastResult, Contexto:aiLastMode });
+function acceptAiEntry(i){
+  const e = aiConversation[i]; if(!e) return;
+  saveEntity('FEEDBACK', { ID:uid(), Fecha:new Date().toISOString(), Original:e.original, Correccion:e.result, Contexto:e.label });
   showToast('Guardado en el historial de respuestas'); renderFeedbackList();
 }
 /* Feedback de inglés (2026-07-30): además de lo que pida cualquier
@@ -6036,22 +6156,32 @@ function renderEnglishLessonHistory(){
   const notes = activeNotes().filter(n=>n.Notebook==='Inglés').sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha))).slice(0,15);
   el.innerHTML = notes.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteEditor('${n.ID}')"><span style="flex:1;font-size:12.5px">${escHtml(stripHtmlToText(n.Contenido||'').slice(0,90))}</span></div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Aún no hay lecciones</p>';
 }
-/* Mismo bug que pullFromActiveNote tenía antes: #mainArea es un div
-   contenteditable, no un <textarea> — .value no existe ahí, así que
-   "insertar" no hacía nada visible (solo creaba una propiedad JS suelta
-   que nadie renderiza). Ahora sí inserta de verdad en el cursor. */
-function insertAiIntoNote(){
+/* Inserta EXACTAMENTE donde estaba el cursor cuando se abrió el panel
+   (_aiInsertRange, ver captureAiInsertRange) en vez de al final/inicio.
+   Se revalida que ese Range siga "vivo" en el documento — si mientras
+   tanto se cerró esa nota o se abrió otra, el Range viejo apunta a
+   nodos que ya no existen, y se cae de vuelta al comportamiento simple
+   (insertar donde sea que el navegador ponga el cursor por defecto) en
+   vez de tronar. */
+function insertAiEntryIntoNote(i){
+  const entry = aiConversation[i]; if(!entry) return;
   const ta = document.getElementById('mainArea');
   if(!ta){ showToast('Abre una nota primero'); return; }
   focusMainEditor();
-  const html = escHtml(aiLastResult).split(/\n+/).map(line=>'<p>'+line+'</p>').join('');
+  if(_aiInsertRange && document.contains(_aiInsertRange.startContainer)){
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    try{ sel.addRange(_aiInsertRange); }catch(e){}
+  }
+  const html = escHtml(entry.result).split(/\n+/).map(line=>'<p>'+line+'</p>').join('');
   document.execCommand('insertHTML', false, html);
   scheduleSave();
   showToast('Insertado en la nota');
 }
-function sendToDicFromAI(){
-  const term = aiLastOriginal.split('\n')[0].slice(0,60);
-  saveEntity('DICCIONARIO', { ID:uid(), Termino:term, Traduccion:aiLastResult.split('\n')[0].slice(0,60), Notas:'', Fecha:new Date().toISOString() });
+function sendAiEntryToDic(i){
+  const entry = aiConversation[i]; if(!entry) return;
+  const term = entry.original.split('\n')[0].slice(0,60);
+  saveEntity('DICCIONARIO', { ID:uid(), Termino:term, Traduccion:entry.result.split('\n')[0].slice(0,60), Notas:'', Fecha:new Date().toISOString() });
   showToast('Enviado al diccionario'); renderDicList();
 }
 function addDicManual(){

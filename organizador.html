@@ -447,7 +447,6 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     </div>
     <button class="icon-btn no-print" onclick="toggleViewFullscreen()" title="Ver esta vista a pantalla completa">⛶</button>
     <div class="spacer"></div>
-    <button class="icon-btn no-print" onclick="openHelpSheet()" title="Comandos y etiquetas (/ayuda)">❔</button>
     <button class="icon-btn no-print desktop-only" onclick="openBlockTables()" title="Tablas por bloque">🧩</button>
     <button class="icon-btn no-print desktop-only" onclick="openGeneralExplorer()" title="Explorador de archivos — guarda varias carpetas como accesos rápidos, etiqueta y busca dentro de ellas">📁</button>
     <button class="icon-btn no-print" onclick="openAIDrawer()" title="Asistente IA">✨</button>
@@ -5898,31 +5897,6 @@ function blockTableRenderHTML(tagFiltro){
   return '<div style="overflow:auto;margin-top:8px"><table class="org-table"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
-/* ============ /ayuda — diccionario de comandos y etiquetas ============ */
-function openHelpSheet(){
-  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  const etiquetas = DATA.tags;
-  overlay.innerHTML = `<div class="modal">
-    <div class="modal-head"><b>❔ Comandos y etiquetas</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
-    <div class="modal-body">
-      <details open>
-        <summary style="font-weight:700;cursor:pointer;margin-bottom:6px">🚩 Banderas rápidas</summary>
-        ${allFlags().map(([t,emoji,label,color])=>`<div class="settings-row"><span class="nb-dot" style="background:${color}"></span> ${emoji} #${t} — ${escHtml(label)}</div>`).join('')}
-      </details>
-      <details open style="margin-top:10px">
-        <summary style="font-weight:700;cursor:pointer;margin-bottom:6px">/ Comandos (${DATA.comandos.length})</summary>
-        <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 6px">Escribe "/nombre" dentro de una nota: 📝 inserta una frase guardada, 🎨 aplica un estilo a lo que escribas después.</p>
-        ${DATA.comandos.map(c=>`<div class="settings-row">${c.Tipo==='formato'?'🎨':'📝'} /${escHtml(c.Nombre)}</div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Crea uno en ⚙️ Configuración → Comandos</p>'}
-      </details>
-      <details open style="margin-top:10px">
-        <summary style="font-weight:700;cursor:pointer;margin-bottom:6px"># Etiquetas (${etiquetas.length})</summary>
-        ${etiquetas.map(t=>`<div class="settings-row"><span class="nb-dot" style="background:${t.Color||'#8a5a3b'}"></span> #${escHtml(t.Etiqueta)} ${t.Descripcion?('— '+escHtml(t.Descripcion)):''}</div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Sin etiquetas todavía</p>'}
-      </details>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-}
-
 /* ============ Panel de IA / traducción / feedback ============ */
 function openAIDrawer(){
   // si tenías texto seleccionado (en la nota o donde sea) al darle a ✨, se
@@ -6090,7 +6064,25 @@ function deleteDicEntryUI(id){
 }
 function renderFeedbackList(){
   const el = document.getElementById('fbList'); if(!el) return;
-  el.innerHTML = DATA.feedback.slice().reverse().slice(0,20).map(f=>`<div style="border-bottom:1px solid var(--border);padding:4px 0;font-size:12.5px"><span style="color:var(--text-dim)">${fmtDate(f.Fecha)} · ${escHtml(f.Contexto)}</span><br>${escHtml((f.Original||'').slice(0,60))} → ${escHtml((f.Correccion||'').slice(0,60))}</div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Aún no hay historial</p>';
+  el.innerHTML = DATA.feedback.slice().reverse().slice(0,20).map(f=>`<div style="border-bottom:1px solid var(--border);padding:4px 0;font-size:12.5px;cursor:pointer" onclick="openFeedbackEntryModal('${escAttr(f.ID)}')"><span style="color:var(--text-dim)">${fmtDate(f.Fecha)} · ${escHtml(f.Contexto)}</span><br>${escHtml((f.Original||'').slice(0,60))} → ${escHtml((f.Correccion||'').slice(0,60))}</div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Aún no hay historial</p>';
+}
+// La lista de arriba trunca a 60 caracteres para que quepa en una línea;
+// al hacer clic se abre esto, que muestra Original/Correccion completos
+// (antes no había forma de ver una respuesta larga entera).
+function openFeedbackEntryModal(id){
+  const f = DATA.feedback.find(x=>x.ID===id); if(!f) return;
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-head"><b>🧠 ${escHtml(fmtDate(f.Fecha))} · ${escHtml(f.Contexto)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <p style="font-weight:700;margin:0 0 4px">Original</p>
+      <div style="white-space:pre-wrap;font-size:13.5px;border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:12px">${escHtml(f.Original||'')}</div>
+      <p style="font-weight:700;margin:0 0 4px">Resultado</p>
+      <div style="white-space:pre-wrap;font-size:13.5px;border:1px solid var(--border);border-radius:8px;padding:10px">${escHtml(f.Correccion||'')}</div>
+    </div>
+  </div>`;
+  overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
 }
 
 /* ============ Configuración ============ */
@@ -6100,7 +6092,6 @@ function openSettings(){
     <div class="modal-head"><b>⚙️ Configuración</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="tabs">
       <button class="active" onclick="settingsTab(this,'tags')">Etiquetas</button>
-      <button onclick="settingsTab(this,'comandos')">Comandos</button>
       <button onclick="settingsTab(this,'notebooks')">Cuadernos</button>
       <button onclick="settingsTab(this,'plantillas')">Plantillas</button>
       <button onclick="settingsTab(this,'appearance')">Apariencia</button>
@@ -6121,7 +6112,6 @@ function openSettings(){
    toda la vida. */
 function settingsRenderTab(tab){
   if(tab==='tags') renderSettingsTags();
-  if(tab==='comandos') renderSettingsComandos();
   if(tab==='notebooks') renderSettingsNotebooks();
   if(tab==='plantillas') renderSettingsPlantillas();
   if(tab==='appearance') renderSettingsAppearance();
@@ -6216,24 +6206,6 @@ function deletePersonaUI(id){
    "/" (nunca "#"): "texto" inserta una frase guardada tal cual (ej.
    /introduccion), "formato" aplica un estilo (tamaño/color/negritas) a
    lo que escribas después (ej. /titulo). Ver confirmComandoSuggest. */
-function renderSettingsComandos(){
-  const body = document.getElementById('settingsBody'); if(!body) return;
-  const rows = DATA.comandos.map(c=>{
-    const preview = c.Tipo==='formato'
-      ? (()=>{ let s; try{ s=JSON.parse(c.Valor||'{}'); }catch(e){ s={}; } return 'tamaño '+(s.fontSize||'normal')+(s.color?', color '+s.color:'')+(s.bold?', negritas':''); })()
-      : (c.Valor||'').slice(0,50);
-    return `<div class="settings-row">
-      <span style="flex:1"><b>/${escHtml(c.Nombre)}</b> ${c.Tipo==='formato'?'🎨':'📝'} <span style="color:var(--text-dim);font-size:12px">${escHtml(preview)}</span></span>
-      <button class="icon-btn" onclick="openEditComandoModal('${escAttr(c.ID)}')" title="Editar">✏️</button>
-      <button class="icon-btn" onclick="deleteComandoUI('${escAttr(c.ID)}')" title="Eliminar">🗑️</button>
-    </div>`;
-  }).join('');
-  body.innerHTML = `
-    <p style="font-weight:700;margin:0 0 6px">/ Comandos</p>
-    <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Escribe "/nombre" dentro de una nota para insertar una frase guardada o aplicar un estilo a lo que escribas después — distinto de las etiquetas (#), que solo clasifican.</p>
-    <button class="btn secondary" style="margin-bottom:8px" onclick="openEditComandoModal()">+ nuevo comando</button>
-    ${rows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin comandos todavía.</p>'}`;
-}
 function openEditComandoModal(id){
   const c = id ? DATA.comandos.find(x=>x.ID===id) : null;
   let style = {}; try{ style = c && c.Tipo==='formato' ? JSON.parse(c.Valor||'{}') : {}; }catch(e){}
@@ -6296,13 +6268,13 @@ function saveComandoFromModal(id){
   const row = Object.assign({}, existing, { ID: id||uid(), Nombre:name, Tipo:tipo, Valor:valor });
   saveEntity('COMANDOS', row).then(()=>{
     document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#cmdName')) o.remove(); });
-    renderSettingsComandos();
+    renderSettingsTags();
     showToast('Comando /'+name+' guardado');
   });
 }
 function deleteComandoUI(id){
   if(!confirm('¿Eliminar este comando?')) return;
-  deleteEntity('COMANDOS', id).then(renderSettingsComandos);
+  deleteEntity('COMANDOS', id).then(renderSettingsTags);
 }
 /* Las banderas rápidas (⚑★⚠ + las que agregues) se guardan en este mismo
    dispositivo (localStorage), no en el Sheet — son un atajo de la
@@ -6379,9 +6351,24 @@ function saveNewFlag(){
    que renombrar/eliminar desde el panel lateral ya hacían. */
 function renderSettingsTags(){
   const body = document.getElementById('settingsBody');
+  const comandoRows = DATA.comandos.map(c=>{
+    const preview = c.Tipo==='formato'
+      ? (()=>{ let s; try{ s=JSON.parse(c.Valor||'{}'); }catch(e){ s={}; } return 'tamaño '+(s.fontSize||'normal')+(s.color?', color '+s.color:'')+(s.bold?', negritas':''); })()
+      : (c.Valor||'').slice(0,50);
+    return `<div class="settings-row">
+      <span style="flex:1"><b>/${escHtml(c.Nombre)}</b> ${c.Tipo==='formato'?'🎨':'📝'} <span style="color:var(--text-dim);font-size:12px">${escHtml(preview)}</span></span>
+      <button class="icon-btn" onclick="openEditComandoModal('${escAttr(c.ID)}')" title="Editar">✏️</button>
+      <button class="icon-btn" onclick="deleteComandoUI('${escAttr(c.ID)}')" title="Eliminar">🗑️</button>
+    </div>`;
+  }).join('');
   body.innerHTML = renderFlagsSection() + `<hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+    <p style="font-weight:700;margin:0 0 6px">/ Comandos</p>
+    <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Escribe "/nombre" dentro de una nota para insertar una frase guardada o aplicar un estilo a lo que escribas después — distinto de las etiquetas (#), que solo clasifican.</p>
+    <button class="btn secondary" style="margin-bottom:8px" onclick="openEditComandoModal()">+ nuevo comando</button>
+    ${comandoRows || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin comandos todavía.</p>'}
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn secondary" onclick="promptNewTag()">+ nueva etiqueta / comando</button>
+      <button class="btn secondary" onclick="promptNewTag()">+ nueva etiqueta</button>
       <button class="btn secondary" onclick="mergeDuplicateTagsUI()" title="Si por alguna razón quedaron dos etiquetas con el mismo nombre (ej. creadas casi al mismo tiempo desde dos notas), combínalas en una sola">🧹 Combinar duplicadas</button>
     </div>
     <div id="tagsRows" style="margin-top:10px"></div>`;

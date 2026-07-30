@@ -522,7 +522,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Ushuaia';
+const BUILD_VERSION = 'Salta';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -568,7 +568,7 @@ function openCalendarModal(){
   _calViewDate = new Date();
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(640px,100%)">
-    <div class="modal-head"><b>📅 Calendario</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
+    <div class="modal-head"><b>📅 Calendario</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="modal-body">
       <div id="calAuthBar"></div>
       <div class="tag-filter-mode" style="margin-top:10px;width:fit-content">
@@ -4008,7 +4008,7 @@ function openTimeLogModal(dateObj){
   _timeLogViewDate = dateObj || new Date();
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(560px,100%)">
-    <div class="modal-head"><b>⏱ Registro de tiempo y sueño</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="hideGlobalTagSuggest();this.closest('.modal-overlay').remove()">✕</button></span></div>
+    <div class="modal-head"><b>⏱ Registro de tiempo y sueño</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="hideGlobalTagSuggest();this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="modal-body">
       <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">"#etiqueta, qué acabas de hacer, #sueño" — describe el tramo que acaba de pasar (desde tu registro anterior hasta ahora); el tramo de ahora en adelante queda pendiente hasta tu siguiente registro.</p>
       <input type="text" id="timeLogInput" placeholder="#trabajo escribiendo la tesis">
@@ -4323,7 +4323,7 @@ function renderExplorerFavorites(){
   const favs = explorerFavorites();
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print'; overlay.id='explorerFavOverlay';
   overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
-    <div class="modal-head"><b>📁 Explorador de archivos</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
+    <div class="modal-head"><b>📁 Explorador de archivos</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="modal-body">
       <p class="hint" style="margin:0 0 10px">El navegador no deja elegir todo el disco ni carpetas de sistema de una sola vez (por seguridad) — agrega aquí las carpetas que sí uses seguido, como accesos rápidos.</p>
       <div id="explorerFavList">${favs.length ? favs.map(f=>`<div class="fill-row" style="justify-content:space-between;cursor:pointer" onclick="openExplorerFavorite('${f.id}')"><span>📁 ${escHtml(f.label)}</span><button class="icon-btn" onclick="event.stopPropagation();removeExplorerFavorite('${f.id}')" title="Quitar acceso rápido">✕</button></div>`).join('') : '<p class="hint">Sin carpetas guardadas todavía.</p>'}</div>
@@ -4536,7 +4536,7 @@ async function insertImage(file){
 function openChecklists(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
-    <div class="modal-head"><b>☑️ Checklists</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
+    <div class="modal-head"><b>☑️ Checklists</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="modal-body" id="checklistBody"></div>
   </div>`;
   overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
@@ -5602,7 +5602,7 @@ function openFieldTemplatePicker(){
   const editorOpen = !!document.getElementById('mainArea');
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(460px,100%)">
-    <div class="modal-head"><b>🏷️ Plantillas de campos</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
+    <div class="modal-head"><b>🏷️ Plantillas de campos</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="modal-body">
       <button class="btn secondary" style="margin-bottom:10px" onclick="this.closest('.modal-overlay').remove();openFieldTemplateModal()">+ Nueva plantilla de campos</button>
       ${DATA.plantillas_prop.map(pt=>`
@@ -6089,7 +6089,7 @@ function openFeedbackEntryModal(id){
 function openSettings(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
-    <div class="modal-head"><b>⚙️ Configuración</b><span><button class="icon-btn" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
+    <div class="modal-head"><b>⚙️ Configuración</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="tabs">
       <button class="active" onclick="settingsTab(this,'tags')">Etiquetas</button>
       <button onclick="settingsTab(this,'notebooks')">Cuadernos</button>

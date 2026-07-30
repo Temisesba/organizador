@@ -183,6 +183,13 @@ table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{backgrou
 #noteTitle:focus{outline:none;background:var(--bg-soft);border-radius:6px}
 .editor-meta{display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
 .editor-meta select{max-width:160px}
+/* En celular, el <input type=color> sin estilo propio (ancho "por
+   defecto" del navegador, más grande de lo que hace falta) más la
+   fecha empujaban 📎/📁/▾ a una segunda línea aparte — angosto a
+   propósito (mismo tamaño que .settings-row input[type=color], que ya
+   se veía bien) para que quepan los 3 iconos junto a la fecha. */
+.editor-meta input[type=color]{width:34px;height:30px;padding:0;border:1px solid var(--border);border-radius:6px;flex:none}
+.editor-meta .icon-btn{padding:6px 7px}
 #tagsInputWrap{position:relative;flex:1;min-width:160px}
 .tag-suggest{position:absolute;top:100%;left:0;right:0;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);z-index:20;max-height:160px;overflow-y:auto}
 .tag-suggest div{padding:6px 10px;font-size:13px;cursor:pointer}
@@ -535,7 +542,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'La Plata';
+const BUILD_VERSION = 'Corrientes';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2700,6 +2707,37 @@ function ensureTagsRegistered(tagsStr){
     if(!findTagByName(name)) saveEntity('TAGS', { ID:uid(), Etiqueta:name, Color:randomColor(), EsComando:'', Descripcion:'' });
   });
 }
+/* Pellizcar-para-zoom en el cuerpo de la nota — pedido explícito para
+   poder acercarse a tablas/Cornell que se cortan en pantallas chicas
+   ("ver la nota completa, o de cerca"). Usa la propiedad CSS `zoom`
+   (no `transform:scale`) a propósito: `zoom` sí reacomoda el layout y
+   el scroll nativo del contenedor (overflow-y:auto de .rich-editor)
+   sigue funcionando solo, sin tener que reimplementar paneo a mano
+   como haría falta con transform. Doble toque restaura el 100%. */
+function attachPinchZoom(el){
+  if(!el || el._pinchAttached) return;
+  el._pinchAttached = true;
+  const dist = (touches) => Math.hypot(touches[0].clientX-touches[1].clientX, touches[0].clientY-touches[1].clientY);
+  let startDist = 0, startZoom = 1, lastTapTime = 0;
+  el.addEventListener('touchstart', e=>{
+    if(e.touches.length===2){
+      startDist = dist(e.touches);
+      startZoom = parseFloat(el.style.zoom) || 1;
+    } else if(e.touches.length===1){
+      const now = Date.now();
+      if(now - lastTapTime < 300){ el.style.zoom = ''; }
+      lastTapTime = now;
+    }
+  }, { passive:true });
+  el.addEventListener('touchmove', e=>{
+    if(e.touches.length===2 && startDist){
+      e.preventDefault();
+      const z = Math.min(2.5, Math.max(0.6, startZoom * (dist(e.touches)/startDist)));
+      el.style.zoom = z;
+    }
+  }, { passive:false });
+  el.addEventListener('touchend', e=>{ if(e.touches.length<2) startDist = 0; });
+}
 function bindEditorEvents(note){
   ['noteTitle','noteNotebook','noteTags','noteColor','noteFecha'].forEach(id=>{
     const el = document.getElementById(id); if(!el) return;
@@ -2711,6 +2749,7 @@ function bindEditorEvents(note){
   if(mainEl){
     wrapRtTables(mainEl);
     badgeifyInlineTags(mainEl);
+    attachPinchZoom(mainEl);
     mainEl.addEventListener('input', ()=>{ scheduleSave(); scheduleRouteHints(); updateTagSuggestFromEditable(); });
     mainEl.addEventListener('blur', ()=>{ badgeifyInlineTags(mainEl); doSaveNow(); scheduleHideGlobalTagSuggest(); });
     mainEl.addEventListener('keydown', handleRichKeydown);
@@ -6168,8 +6207,7 @@ function openAIDrawer(){
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">
         <button class="btn secondary" onclick="runAI('redaccion')">Redacción</button>
         <button class="btn secondary" onclick="runAI('procesar')">Resumir</button>
-        <button class="btn secondary" onclick="runTranslate('es->en')">Traducir ES→EN</button>
-        <button class="btn secondary" onclick="runTranslate('en->es')">Traducir EN→ES</button>
+        <button class="btn secondary" onclick="runTranslate('auto')" title="Detecta solo si el texto está en español o inglés y lo traduce al otro">🌐 Traducir ES↔EN</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center">
         <input type="text" id="aiCustomInstruction" placeholder="Otra petición… (ej. hazlo más formal)" style="flex:1">
@@ -6275,7 +6313,7 @@ async function runTranslate(direction){
   if(!navigator.onLine){ showToast('La traducción necesita conexión'); return; }
   setAiStatus('Traduciendo…');
   const r = await apiPost('translate', { text, direction });
-  if(r && r.ok){ setAiStatus(''); appendAiEntry(direction==='es->en'?'Traducir ES→EN':'Traducir EN→ES', text, r.text, true); }
+  if(r && r.ok){ setAiStatus(''); appendAiEntry('🌐 Traducir ES↔EN', text, r.text, true); }
   else setAiStatus('Error: '+((r&&r.error)||'sin respuesta'), true);
   maybeRunEnglishFeedback(text);
 }
@@ -6400,7 +6438,14 @@ function deleteDicEntryUI(id){
 }
 function renderFeedbackList(){
   const el = document.getElementById('fbList'); if(!el) return;
-  el.innerHTML = DATA.feedback.slice().reverse().slice(0,20).map(f=>`<div style="border-bottom:1px solid var(--border);padding:4px 0;font-size:12.5px;cursor:pointer" onclick="openFeedbackEntryModal('${escAttr(f.ID)}')"><span style="color:var(--text-dim)">${fmtDate(f.Fecha)} · ${escHtml(f.Contexto)}</span><br>${escHtml((f.Original||'').slice(0,60))} → ${escHtml((f.Correccion||'').slice(0,60))}</div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Aún no hay historial</p>';
+  el.innerHTML = DATA.feedback.slice().reverse().slice(0,20).map(f=>`<div style="display:flex;align-items:center;gap:4px;border-bottom:1px solid var(--border);padding:4px 0">
+    <div style="flex:1;font-size:12.5px;cursor:pointer;min-width:0" onclick="openFeedbackEntryModal('${escAttr(f.ID)}')"><span style="color:var(--text-dim)">${fmtDate(f.Fecha)} · ${escHtml(f.Contexto)}</span><br>${escHtml((f.Original||'').slice(0,60))} → ${escHtml((f.Correccion||'').slice(0,60))}</div>
+    <button class="icon-btn" style="flex:none" onclick="event.stopPropagation();deleteFeedbackEntryUI('${escAttr(f.ID)}')" title="Eliminar esta entrada del historial">🗑️</button>
+  </div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Aún no hay historial</p>';
+}
+function deleteFeedbackEntryUI(id){
+  if(!confirm('¿Eliminar esta entrada del historial de respuestas?')) return;
+  deleteEntity('FEEDBACK', id).then(renderFeedbackList);
 }
 // La lista de arriba trunca a 60 caracteres para que quepa en una línea;
 // al hacer clic se abre esto, que muestra Original/Correccion completos

@@ -341,7 +341,15 @@ function aiAssist(mode, text, instruction) {
 
 function translate(text, direction) {
   if (!text) return { ok: false, error: 'Sin texto' };
-  const dir = direction === 'en->es' ? 'del inglés al español' : 'del español al inglés';
+  // "auto" (un solo botón "Traducir ES↔EN", pedido explícito en vez de
+  // dos botones ES→EN/EN→ES separados): el propio modelo detecta en qué
+  // de los dos idiomas está el texto y traduce al otro — no hace falta
+  // un paso de detección de idioma aparte, un LLM ya lo hace bien con
+  // una instrucción clara.
+  let dir;
+  if (direction === 'en->es') dir = 'del inglés al español';
+  else if (direction === 'es->en') dir = 'del español al inglés';
+  else dir = 'detectando tú mismo si está en español o en inglés, y tradúcelo al OTRO idioma (si está en español, tradúcelo a inglés; si está en inglés, tradúcelo a español)';
   const systemPrompt = 'Traduce el siguiente texto ' + dir + '. Devuelve ÚNICAMENTE la traducción, sin explicaciones ni comillas.';
   return askAI(systemPrompt, text);
 }

@@ -416,6 +416,20 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
         </div>
       </div>
 
+      <div class="sb-section" data-sb="busquedas">
+        <h3 onclick="toggleSbSection('busquedas')">Búsquedas guardadas <span class="sb-arrow">▾</span></h3>
+        <div class="sb-content">
+          <div id="savedSearchList"></div>
+          <button class="mini-btn" onclick="promptSaveSearch()">+ guardar búsqueda actual</button>
+        </div>
+      </div>
+
+      <!-- Fuera de cualquier plegable a propósito: si tienes una búsqueda o
+           filtro de etiquetas activo, necesitas verlo aunque tengas
+           "Etiquetas" colapsado — colapsar esa sección no debe esconder qué
+           estás buscando ahora mismo. -->
+      <div id="tagFilterBar"></div>
+
       <div class="sb-section" data-sb="banderas">
         <h3 onclick="toggleSbSection('banderas')">Banderas rápidas <span class="sb-arrow">▾</span></h3>
         <div class="sb-content"><div id="flagCloud"></div></div>
@@ -424,16 +438,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
       <div class="sb-section" data-sb="etiquetas">
         <h3 onclick="toggleSbSection('etiquetas')">Etiquetas <span class="sb-arrow">▾</span></h3>
         <div class="sb-content">
-          <div id="tagFilterBar"></div>
           <div id="tagCloud"></div>
-        </div>
-      </div>
-
-      <div class="sb-section" data-sb="busquedas">
-        <h3 onclick="toggleSbSection('busquedas')">Búsquedas guardadas <span class="sb-arrow">▾</span></h3>
-        <div class="sb-content">
-          <div id="savedSearchList"></div>
-          <button class="mini-btn" onclick="promptSaveSearch()">+ guardar búsqueda actual</button>
         </div>
       </div>
 
@@ -453,7 +458,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Isla de Pascua';
+const BUILD_VERSION = 'Torres del Paine';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -700,8 +705,7 @@ function createNoteForEvent(eventId, summary, startIso){
   if(startIso) note.Fecha = new Date(startIso).toISOString();
   DATA.notas.push(note);
   editingNoteId = note.ID;
-  if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = noteDetailHTML(note); }
-  else renderNoteModal(note);
+  renderNoteModal(note);
 }
 function toDatetimeLocal(d){
   const pad = n=>String(n).padStart(2,'0');
@@ -920,7 +924,7 @@ async function syncNow(manual){
   finally{ _syncing=false; updateSyncIndicator(); }
 }
 function isEditingActive(){
-  return !!document.getElementById('editorOverlay') || (currentView==='split' && !!editingNoteId);
+  return !!document.getElementById('editorOverlay');
 }
 function updateSyncIndicator(){
   const dot = document.getElementById('syncDot'); const lbl = document.getElementById('syncLabel');
@@ -1262,7 +1266,10 @@ function applySavedSearch(id){
   activeTagFilters = new Set(parseTagsText(s.Tags));
   tagFilterMode = s.Modo||'AND'; localStorage.setItem('org_tag_filter_mode', tagFilterMode);
   const el = document.getElementById('searchInput'); if(el) el.value = s.Query||'';
-  const splitEl = document.getElementById('splitSearchInput'); if(splitEl){ splitEl.value = s.Query||''; splitSearchQuery = s.Query||''; localStorage.setItem('org_split_search', splitSearchQuery); }
+  // en vista Dividida (dos listas independientes), una búsqueda guardada
+  // se aplica a la lista IZQUIERDA — la derecha se queda con lo que sea
+  // que el usuario haya puesto ahí por su cuenta, a propósito.
+  splitLeftQuery = s.Query||''; localStorage.setItem('org_split_left_search', splitLeftQuery);
   renderSidebar(); renderMain();
 }
 function deleteSavedSearch(id){
@@ -1757,25 +1764,44 @@ function syncSortUI(){
   const btn = document.getElementById('sortDirBtn'); if(btn) btn.textContent = sortState.dir==='asc' ? '▲' : '▼';
 }
 
-/* La vista dividida tiene su PROPIA búsqueda para la lista de la
-   izquierda, separada de la del header — así puedes tener algo escrito
-   arriba para otra cosa sin que te mueva la lista que ya tienes abierta. */
-let splitSearchQuery = localStorage.getItem('org_split_search') || '';
+/* La vista dividida son DOS listas independientes (izquierda/derecha),
+   cada una con su propia búsqueda — a pedido explícito del usuario,
+   inspirado en cómo lo resolvió en su otra app (notas_v50): antes el
+   lado derecho no era una lista, era el detalle/editor de la nota
+   elegida a la izquierda; eso hacía que "buscar a la derecha" no
+   tuviera dónde vivir. Ahora ambos lados son listas de tarjetas
+   (misma cardsHTML/getFilteredSortedNotes que Cards/Tabla) con su
+   propia búsqueda persistida aparte — dar clic a cualquier nota, en
+   cualquiera de las dos listas, abre el mismo modal/editor de siempre
+   (#editorOverlay), no reemplaza ninguna lista. Esto simplificó bastante
+   el código: ya no existe un "modo edición en el panel derecho" aparte
+   del modal — ver openNoteEditor/reopenEditorFor/isEditingActive, que
+   antes tenían una rama especial para currentView==='split'. */
+let splitLeftQuery = localStorage.getItem('org_split_left_search') || '';
+let splitRightQuery = localStorage.getItem('org_split_right_search') || '';
 function splitHTML(){
-  const notes = getFilteredSortedNotes(splitSearchQuery);
+  const leftNotes = getFilteredSortedNotes(splitLeftQuery);
+  const rightNotes = getFilteredSortedNotes(splitRightQuery);
   return `<div class="split-wrap" id="splitWrap">
     <div class="split-left" id="splitLeft" style="flex:0 0 ${splitRatio}%">
-      <input type="search" id="splitSearchInput" placeholder="Buscar en esta lista…" value="${escAttr(splitSearchQuery)}" oninput="onSplitSearchInput(this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
-      <div id="splitCardsArea">${cardsHTML(notes, splitSearchQuery)}</div>
+      <input type="search" id="splitLeftSearchInput" placeholder="Buscar en esta lista…" value="${escAttr(splitLeftQuery)}" oninput="onSplitSearchInput('left',this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
+      <div id="splitLeftCardsArea">${cardsHTML(leftNotes, splitLeftQuery)}</div>
     </div>
     <div class="split-handle" id="splitHandle"></div>
-    <div class="split-right" id="splitDetail">${editingNoteId ? noteDetailHTML(getNote(editingNoteId)) : '<p style="color:var(--text-dim)">Selecciona una nota para editarla aquí.</p>'}</div>
+    <div class="split-right" id="splitRightPane">
+      <input type="search" id="splitRightSearchInput" placeholder="Buscar en esta lista…" value="${escAttr(splitRightQuery)}" oninput="onSplitSearchInput('right',this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
+      <div id="splitRightCardsArea">${cardsHTML(rightNotes, splitRightQuery)}</div>
+    </div>
   </div>`;
 }
-function onSplitSearchInput(val){
-  splitSearchQuery = val; localStorage.setItem('org_split_search', val);
-  const area = document.getElementById('splitCardsArea'); if(!area) return;
-  area.innerHTML = cardsHTML(getFilteredSortedNotes(splitSearchQuery), splitSearchQuery);
+function onSplitSearchInput(side, val){
+  if(side==='left'){
+    splitLeftQuery = val; localStorage.setItem('org_split_left_search', val);
+    const area = document.getElementById('splitLeftCardsArea'); if(area) area.innerHTML = cardsHTML(getFilteredSortedNotes(splitLeftQuery), splitLeftQuery);
+  } else {
+    splitRightQuery = val; localStorage.setItem('org_split_right_search', val);
+    const area = document.getElementById('splitRightCardsArea'); if(area) area.innerHTML = cardsHTML(getFilteredSortedNotes(splitRightQuery), splitRightQuery);
+  }
 }
 function getNote(id){ return DATA.notas.find(n=>n.ID===id); }
 
@@ -1834,10 +1860,8 @@ function openNoteEditor(id, scrollToCue){
     DATA.notas.push(note);
     editingNoteId = note.ID;
   }
-  if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = noteDetailHTML(note); if(scrollToCue) scrollNoteToTag(scrollToCue); return; }
   renderNoteModal(note, scrollToCue);
 }
-function noteDetailHTML(note){ return editorInnerHTML(note, false); }
 function renderNoteModal(note, scrollToCue){
   const overlay = document.createElement('div'); overlay.id='editorOverlay'; overlay.className='no-print';
   overlay.innerHTML = `<div class="split-handle" id="editorResizeHandle"></div><div id="editorPanel" style="width:${editorWidth}px">${editorInnerHTML(note, true)}</div>`;
@@ -2221,7 +2245,6 @@ function toggleCornell(){
   reopenEditorFor(note);
 }
 function reopenEditorFor(note){
-  if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = editorInnerHTML(note,false); bindEditorEvents(note); return; }
   const panel = document.getElementById('editorPanel');
   if(panel){ panel.innerHTML = editorInnerHTML(note,true); bindEditorEvents(note); }
 }
@@ -4031,8 +4054,7 @@ async function createNoteForFile(i){
   DATA.notas.push(note);
   await idbSet('link-'+note.ID+'-0', entry.handle);
   editingNoteId = note.ID;
-  if(currentView==='split'){ document.getElementById('splitDetail').innerHTML = noteDetailHTML(note); }
-  else renderNoteModal(note);
+  renderNoteModal(note);
 }
 async function openExplorerEntry(i){
   const entry = window._explorerEntries[i]; if(!entry) return;
@@ -5792,6 +5814,7 @@ function openAddFlagModal(){
       <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px" id="flagEmojiGrid">
         ${FLAG_EMOJI_CHOICES.map((e,i)=>`<button type="button" class="icon-btn${i===0?' active':''}" style="font-size:18px" onclick="pickFlagEmoji(this,'${e}')">${e}</button>`).join('')}
       </div>
+      <input type="text" id="flagEmojiCustom" placeholder="¿ninguno te gusta? pon tu propio emoji aquí" maxlength="4" style="margin-top:8px" oninput="pickFlagEmoji(null,this.value)">
       <input type="color" id="flagColor" value="${randomColor()}" style="margin-top:10px">
       <div style="margin-top:12px;display:flex;justify-content:flex-end">
         <button class="btn" onclick="saveNewFlag()">Agregar</button>
@@ -5806,13 +5829,20 @@ function openAddFlagModal(){
 function pickFlagEmoji(btn, emoji){
   window._pickedFlagEmoji = emoji;
   document.getElementById('flagEmojiGrid').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
+  if(btn) btn.classList.add('active');
+  // si estás escribiendo tu propio emoji, elegir uno de la cuadrícula
+  // debe limpiar lo que hayas tecleado (y viceversa) — que no queden
+  // dos fuentes contradiciéndose sobre cuál es el emoji elegido.
+  const custom = document.getElementById('flagEmojiCustom');
+  if(custom && btn) custom.value = '';
+  else if(custom && !btn) custom.value = emoji;
 }
 function saveNewFlag(){
   const name = (document.getElementById('flagName').value||'').trim().replace(/^#/,'').toLowerCase();
   if(!name){ showToast('Ponle un nombre a la bandera'); return; }
   const color = document.getElementById('flagColor').value;
-  const emoji = window._pickedFlagEmoji || FLAG_EMOJI_CHOICES[0];
+  const custom = (document.getElementById('flagEmojiCustom').value||'').trim();
+  const emoji = custom || window._pickedFlagEmoji || FLAG_EMOJI_CHOICES[0];
   document.getElementById('flagName').closest('.modal-overlay').remove();
   saveEntity('FLAGS', { ID:uid(), Nombre:name, Emoji:emoji, Color:color }).then(()=>{
     renderSettingsTags(); renderSidebar();

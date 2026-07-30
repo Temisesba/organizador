@@ -35,7 +35,7 @@ const TABLE_DEFS = {
   NOTEBOOKS:     ['ID', 'Nombre', 'TagsHeredados', 'Color', 'TagAuto'],
   PLANTILLAS:    ['ID', 'Nombre', 'ItemsJSON', 'Tags', 'Recordatorio', 'ColumnasJSON', 'Papelera'],
   HISTORIAL:     ['ID', 'PlantillaID', 'Fecha', 'ItemsJSON', 'NotaID', 'Nombre'],
-  DICCIONARIO:   ['ID', 'Termino', 'Traduccion', 'Notas', 'Fecha'],
+  DICCIONARIO:   ['ID', 'Termino', 'Traduccion', 'Notas', 'Fecha', 'Favorito'],
   FEEDBACK:      ['ID', 'Fecha', 'Original', 'Correccion', 'Contexto'],
   BLOQUE_TABLAS: ['ID', 'Nombre', 'TagFiltro', 'CampoFiltro', 'ValorFiltro', 'Columnas', 'Carpeta'],
   PLANTILLAS_PROP: ['ID', 'Nombre', 'CamposJSON', 'UsaPersona', 'Recordatorio', 'Notebook', 'TiposJSON'],

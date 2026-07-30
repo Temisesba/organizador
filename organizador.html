@@ -304,11 +304,19 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
    se quede totalmente interactiva mientras el panel sigue ahí. */
 .transcribe-side-panel{background:var(--bg-elev);width:320px;height:100vh;position:fixed;top:0;right:0;box-shadow:var(--shadow);display:flex;flex-direction:column;border-left:1px solid var(--border);z-index:210}
 @media (max-width:820px){ .transcribe-side-panel{width:100%;inset:0} }
-.transcribe-min-chip{position:fixed;right:20px;bottom:20px;z-index:250;background:var(--accent);color:var(--accent-text);border:none;border-radius:20px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:var(--shadow);cursor:pointer}
+/* transcribe-min-chip / ai-min-chip: la píldora flotante para RESTAURAR
+   un panel minimizado tiene que poder tocarse SIEMPRE, sin importar qué
+   tanto haya subido de z-index el editor/otro panel por bringToFront
+   (ver arriba) — 1000 es a propósito muy por encima de lo que ese
+   contador podría alcanzar en una sesión real. modal-overlay (usado
+   por Configuración, Explorador, etc. — modales de verdad, bloqueantes)
+   sube a 2000 por la misma razón: deben quedar SIEMPRE arriba de
+   cualquier editor/panel abierto de fondo, nunca taparlos ellos. */
+.transcribe-min-chip{position:fixed;right:20px;bottom:20px;z-index:1000;background:var(--accent);color:var(--accent-text);border:none;border-radius:20px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:var(--shadow);cursor:pointer}
 .ai-side-panel{background:var(--bg-elev);width:380px;height:100vh;position:fixed;top:0;right:0;box-shadow:var(--shadow);display:flex;flex-direction:column;border-left:1px solid var(--border);z-index:210}
 @media (max-width:820px){ .ai-side-panel{width:100%;inset:0} }
-.ai-min-chip{position:fixed;right:20px;bottom:76px;z-index:250;background:var(--accent);color:var(--accent-text);border:none;border-radius:20px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:var(--shadow);cursor:pointer}
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:300;display:flex;align-items:center;justify-content:center;padding:16px}
+.ai-min-chip{position:fixed;right:20px;bottom:76px;z-index:1000;background:var(--accent);color:var(--accent-text);border:none;border-radius:20px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:var(--shadow);cursor:pointer}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:2000;display:flex;align-items:center;justify-content:center;padding:16px}
 .modal{background:var(--bg-elev);border-radius:var(--radius);box-shadow:var(--shadow);width:min(640px,100%);max-height:90vh;display:flex;flex-direction:column}
 .modal.fullscreen{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0}
 .modal-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
@@ -461,8 +469,8 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 
 <div id="app" class="hidden">
   <header>
-    <span class="brand">🗂️ Organizador</span>
     <button class="icon-btn no-print" id="btnMenu" onclick="toggleSidebar()" title="Cuadernos y etiquetas">☰</button>
+    <span class="brand">🗂️ Organizador</span>
     <div class="search-wrap"><input type="search" id="searchInput" placeholder="Buscar notas, #etiquetas…" oninput="renderMain();updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()"></div>
     <select id="sortSelect" class="no-print" style="width:auto" onchange="sortBy(this.value)" title="Ordenar">
       <option value="Fecha">Fecha</option>
@@ -552,7 +560,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Posadas';
+const BUILD_VERSION = 'Resistencia';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -925,6 +933,18 @@ function isGridNote(note){ return /<table[^>]*\bclass="[^"]*\bgrid-table\b/i.tes
    sin que el usuario tenga que escribir el # a mano en cada encabezado. */
 function slugTag(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_áéíóúñ-]/g,''); }
 function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._toastT); window._toastT=setTimeout(()=>t.classList.remove('show'),2400); }
+/* Bug real reportado: el editor de nota y los paneles de Transcribir/
+   Asistente IA pueden estar abiertos los tres al mismo tiempo (ninguno
+   bloquea a los demás) — con un z-index FIJO por CSS, cualquiera que
+   quedara "de base" más arriba (ej. el editor, después de arreglar que
+   se abriera tapado detrás de los paneles) terminaba tapando a los
+   otros ella misma cuando el orden real debía ser "el que se acaba de
+   abrir/tocar es el que se ve". bringToFront sube el z-index de lo que
+   sea que se abra/restaure por encima de TODO lo anterior — sin
+   importar el z-index "de base" que traiga por CSS — así siempre gana
+   el más reciente, no uno fijo de antemano. */
+let _topZCounter = 300;
+function bringToFront(el){ if(el) el.style.zIndex = ++_topZCounter; }
 /* Botones de "crear/guardar" que arman una fila NUEVA (ID vacío) no son
    idempotentes — si no hay ninguna señal de que ya está guardando, es muy
    fácil darle Enter/clic varias veces (sobre todo porque antes no pasaba
@@ -2131,6 +2151,7 @@ function renderNoteModal(note, scrollToCue){
   overlay.innerHTML = `<div class="split-handle" id="editorResizeHandle"></div><div id="editorPanel" style="width:${editorWidth}px">${editorInnerHTML(note, true)}</div>`;
   overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) closeNoteEditor(); });
   document.body.appendChild(overlay);
+  bringToFront(overlay);
   bindEditorEvents(note);
   if(scrollToCue) scrollNoteToTag(scrollToCue);
 }
@@ -2208,6 +2229,7 @@ function openOrRestoreTranscribePanel(){
   let panel = document.getElementById('transcribePanel');
   if(panel){
     if(panel.style.display==='none') restoreTranscribePanel();
+    else bringToFront(panel);
     return;
   }
   if(!editingNoteId) return;
@@ -2234,6 +2256,7 @@ function openOrRestoreTranscribePanel(){
       </div>
     </div>`;
   document.body.appendChild(panel);
+  bringToFront(panel);
   document.body.classList.add('has-transcribe-panel');
   _transcribeTargetNoteId = editingNoteId;
 }
@@ -2281,7 +2304,7 @@ function minimizeTranscribePanel(){
   chip.textContent = (_transcribing?'🎙️':'⏸️') + ' ' + (_transcribing?'Transcribiendo':'En pausa') + ' — tocar para ver';
 }
 function restoreTranscribePanel(){
-  const panel = document.getElementById('transcribePanel'); if(panel) panel.style.display = '';
+  const panel = document.getElementById('transcribePanel'); if(panel){ panel.style.display = ''; bringToFront(panel); }
   document.body.classList.add('has-transcribe-panel');
   const chip = document.getElementById('transcribeMinChip'); if(chip) chip.remove();
 }
@@ -6210,6 +6233,7 @@ function openAIDrawer(){
   let panel = document.getElementById('aiPanel');
   if(panel){
     if(panel.style.display==='none') restoreAIPanel();
+    else bringToFront(panel);
     if(selectedText){ const ta=document.getElementById('aiInput'); if(ta) ta.value = selectedText; }
     return;
   }
@@ -6247,6 +6271,7 @@ function openAIDrawer(){
       <div id="englishLessonList" style="max-height:160px;overflow-y:auto"></div>
     </div>`;
   document.body.appendChild(panel);
+  bringToFront(panel);
   document.body.classList.add('has-ai-panel');
   renderDicList(); renderFeedbackList(); renderEnglishLessonHistory(); renderAiThread();
 }
@@ -6264,7 +6289,7 @@ function minimizeAIPanel(){
   chip.textContent = '✨ Asistente — tocar para ver';
 }
 function restoreAIPanel(){
-  const panel = document.getElementById('aiPanel'); if(panel) panel.style.display = '';
+  const panel = document.getElementById('aiPanel'); if(panel){ panel.style.display = ''; bringToFront(panel); }
   document.body.classList.add('has-ai-panel');
   const chip = document.getElementById('aiMinChip'); if(chip) chip.remove();
 }
@@ -6405,10 +6430,27 @@ async function saveEnglishLessonNote(original, lessonText){
     Titulo: titulo, Contenido: contenido, Tags:'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'', PlantillaPropID:''
   });
 }
+/* Favoritos en Historial de correcciones de inglés — pedido explícito.
+   Estas entradas ya son notas normales (cuaderno "Inglés"), así que se
+   reusa el campo Pinned que las notas ya tienen (mismo que 📌 en el
+   editor) en vez de inventar un campo nuevo — toggleNoteFavoriteUI es
+   la versión "por ID" de togglePin() (esa solo sirve para la nota
+   ABIERTA en ese momento, acá hace falta marcar una de la lista sin
+   necesidad de abrirla primero). Favoritas primero, luego por fecha. */
+function toggleNoteFavoriteUI(id){
+  const note = getNote(id); if(!note) return;
+  note.Pinned = note.Pinned ? '' : '1';
+  saveEntity('NOTAS', note);
+}
 function renderEnglishLessonHistory(){
   const el = document.getElementById('englishLessonList'); if(!el) return;
-  const notes = activeNotes().filter(n=>n.Notebook==='Inglés').sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha))).slice(0,15);
-  el.innerHTML = notes.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteEditor('${n.ID}')"><span style="flex:1;font-size:12.5px">${escHtml(stripHtmlToText(n.Contenido||'').slice(0,90))}</span></div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Aún no hay lecciones</p>';
+  const notes = activeNotes().filter(n=>n.Notebook==='Inglés')
+    .sort((a,b)=>(b.Pinned?1:0)-(a.Pinned?1:0) || String(b.Fecha).localeCompare(String(a.Fecha)))
+    .slice(0,15);
+  el.innerHTML = notes.map(n=>`<div class="settings-row" style="align-items:center">
+    <button class="icon-btn" style="padding:2px 4px" onclick="event.stopPropagation();toggleNoteFavoriteUI('${escAttr(n.ID)}');renderEnglishLessonHistory()" title="${n.Pinned?'Quitar de favoritos':'Marcar como favorita'}">${n.Pinned?'⭐':'☆'}</button>
+    <span style="flex:1;font-size:12.5px;cursor:pointer" onclick="openNoteEditor('${n.ID}')">${escHtml(stripHtmlToText(n.Contenido||'').slice(0,90))}</span>
+  </div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Aún no hay lecciones</p>';
 }
 /* Inserta EXACTAMENTE donde estaba el cursor cuando se abrió el panel
    (_aiInsertRange, ver captureAiInsertRange) en vez de al final/inicio.
@@ -6447,9 +6489,24 @@ function addDicManual(){
   document.getElementById('dicTerm').value=''; document.getElementById('dicTrans').value='';
   renderDicList();
 }
+/* Favoritos en Diccionario personal — pedido explícito, para marcar
+   qué términos repasar. Nueva columna Favorito en DICCIONARIO
+   (Código.js); las filas viejas simplemente no la traen todavía
+   (queda '' hasta que se marque una vez, se guarda entera igual que
+   cualquier otro campo). */
+function toggleDicFavoriteUI(id){
+  const d = DATA.diccionario.find(x=>x.ID===id); if(!d) return;
+  d.Favorito = d.Favorito ? '' : '1';
+  saveEntity('DICCIONARIO', d);
+  renderDicList();
+}
 function renderDicList(){
   const el = document.getElementById('dicList'); if(!el) return;
-  el.innerHTML = DATA.diccionario.slice().reverse().map(d=>`<div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border);padding:3px 0;font-size:13px"><span>${escHtml(d.Termino)} → ${escHtml(d.Traduccion)}</span><button class="icon-btn" onclick="deleteDicEntryUI('${d.ID}')">🗑️</button></div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Vacío</p>';
+  const sorted = DATA.diccionario.slice().reverse().sort((a,b)=>(b.Favorito?1:0)-(a.Favorito?1:0));
+  el.innerHTML = sorted.map(d=>`<div style="display:flex;align-items:center;gap:4px;justify-content:space-between;border-bottom:1px solid var(--border);padding:3px 0;font-size:13px">
+    <span style="flex:1;min-width:0"><button class="icon-btn" style="padding:2px 4px" onclick="toggleDicFavoriteUI('${escAttr(d.ID)}')" title="${d.Favorito?'Quitar de favoritos':'Marcar como favorito'}">${d.Favorito?'⭐':'☆'}</button> ${escHtml(d.Termino)} → ${escHtml(d.Traduccion)}</span>
+    <button class="icon-btn" onclick="deleteDicEntryUI('${d.ID}')">🗑️</button>
+  </div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Vacío</p>';
 }
 function deleteDicEntryUI(id){
   if(!confirm('¿Eliminar esta entrada del diccionario?')) return;
@@ -6495,9 +6552,9 @@ function openSettings(){
       <button onclick="settingsTab(this,'notebooks')">Cuadernos</button>
       <button onclick="settingsTab(this,'plantillas')">Plantillas</button>
       <button onclick="settingsTab(this,'appearance')">Apariencia</button>
-      <button onclick="settingsTab(this,'connection')">Conexión</button>
       <button onclick="settingsTab(this,'trash')">Papelera</button>
       <button onclick="settingsTab(this,'mejoras')">Mejoras</button>
+      <button onclick="settingsTab(this,'connection')">Conexión</button>
     </div>
     <div class="modal-body" id="settingsBody"></div>
   </div>`;

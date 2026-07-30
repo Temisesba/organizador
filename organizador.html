@@ -194,10 +194,23 @@ table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{backgrou
    propio distinto al de .mobile-only genérico (que fuerza "block",
    no le sirve a algo que debe ser flex cuando se muestra). */
 .editor-toolbar-fav{display:none;gap:4px;padding:6px 10px;border-bottom:1px solid var(--border);align-items:center}
-@media (max-width:820px){
+/* "Modo celular" se decide por TIPO DE DISPOSITIVO (¿es táctil, sin
+   mouse/trackpad de verdad?), no por el ancho de la ventana — un
+   ancho angosto puede pasar en una computadora normal con zoom del
+   navegador alto o con escalado de pantalla de Windows activado (ej.
+   125%/150%), sin que eso la vuelva un celular. hover:none+
+   pointer:coarse es justo lo contrario de "tiene mouse/trackpad" —
+   verdadero en teléfonos/tablets, falso en cualquier computadora sin
+   importar el ancho de su ventana o su nivel de zoom. Bug real
+   reportado: en una laptop maximizada a pantalla completa con zoom en
+   100% igual se veía el modo celular — la ventana SÍ media ≤820px de
+   verdad (por escalado de Windows), aunque a la vista se viera "de
+   tamaño normal"; por ancho de ventana esto nunca se puede distinguir
+   de un celular. Por tipo de dispositivo, sí. */
+@media (hover:none) and (pointer:coarse){
   .editor-toolbar-fav{display:flex}
 }
-@media (min-width:821px){ .editor-toolbar.hidden{display:flex!important} }
+@media (hover:hover) and (pointer:fine){ .editor-toolbar.hidden{display:flex!important} }
 .editor-toolbar .sep{width:1px;background:var(--border);align-self:stretch;margin:0 4px}
 .swatch-row{display:flex;gap:4px;padding:4px 8px}
 #routeHints{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:4px 12px;font-size:12px}
@@ -340,21 +353,30 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .file-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:4px 8px;font-size:12px;background:var(--bg-soft)}
 
 /* .mobile-only / .desktop-only: par genérico para mostrar una versión
-   distinta de algo según el tamaño de pantalla (ej. el selector
+   distinta de algo según el TIPO DE DISPOSITIVO (ej. el selector
    <select> de pestañas de Configuración en vez de las pestañas con
    scroll, o el menú "⋮" del editor en vez de los botones sueltos de
    siempre) — a propósito NO se fija un display en el lado "normal"
    (.desktop-only en escritorio, .mobile-only en celular), así cada
    elemento conserva el display que ya traía de su propia clase (ej.
    .tabs{display:flex} o .icon-btn{display:inline-flex}) — solo se
-   fuerza display:none del lado que NO aplica. Mismo punto de corte
-   (820px) que ya usa el panel lateral para volverse deslizable, para
-   que "modo celular" signifique lo mismo en toda la app. */
+   fuerza display:none del lado que NO aplica.
+   Deliberadamente NO es un @media de ancho (ej. max-width:820px) —
+   bug real reportado: en una laptop maximizada a pantalla completa
+   veía el modo celular igual, porque su ventana SÍ medía ≤820px de
+   verdad (escalado de pantalla de Windows, o zoom del navegador) sin
+   ser, para nada, un teléfono. Por ancho eso es indistinguible de un
+   celular real; por TIPO DE PUNTERO sí: hover:none + pointer:coarse
+   es "sin mouse/trackpad de verdad", cierto en teléfonos/tablets,
+   falso en cualquier computadora sin importar el ancho de su ventana
+   o su nivel de zoom/escalado. (El panel lateral deslizable, más
+   abajo, sigue usando max-width:820px a propósito — ese SÍ es un caso
+   legítimo de "la ventana está angosta", no de "esto es un celular".) */
 .mobile-only{display:none}
 @media (min-width:821px){
   aside.desktop-hidden{display:none}
 }
-@media (max-width:820px){
+@media (hover:none) and (pointer:coarse){
   .mobile-only{display:block!important}
   .desktop-only{display:none!important}
 }
@@ -501,7 +523,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Bahía Blanca';
+const BUILD_VERSION = 'Puerto Madryn';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.

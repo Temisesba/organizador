@@ -163,7 +163,17 @@ table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{backgrou
 .split-right{flex:1;min-width:220px;overflow-y:auto;padding-left:6px}
 
 /* editor */
-#editorOverlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:stretch;justify-content:flex-end;z-index:200}
+/* z-index 220, por ENCIMA de .transcribe-side-panel/.ai-side-panel
+   (210) — bug real reportado: un enlace "abrir nota" DENTRO de esos
+   paneles (ej. Historial de correcciones de inglés, dentro del panel
+   del Asistente IA) sí llamaba a openNoteEditor(), pero con z-index
+   200 el editor se abría DETRÁS del panel (que en celular ocupa toda
+   la pantalla) — parecía que el clic "no hacía nada". En escritorio
+   esto no cambia nada a la vista (el editor y el panel no se
+   encimaban ahí, gracias al margen derecho de body.has-*-panel más
+   abajo) — el problema era solo en celular, donde el panel es
+   pantalla completa. */
+#editorOverlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:stretch;justify-content:flex-end;z-index:220}
 /* Con el panel de transcripción fuera del editor (position:fixed, ver
    .transcribe-side-panel) ya no lo "empuja" solo por estar en el mismo
    flex — sin esto se monta encima del editor y tapa el fondo (bug
@@ -542,7 +552,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Corrientes';
+const BUILD_VERSION = 'Posadas';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2443,6 +2453,15 @@ function toggleEditorFullscreen(btn){
 function toggleEditorMoreMenu(btn){
   const menu = btn.nextElementSibling; if(menu) menu.classList.toggle('hidden');
 }
+// Antes solo se cerraba tocando ⋮ otra vez — pedido explícito: que un
+// toque afuera (en cualquier otra parte) también lo cierre, como
+// cualquier menú desplegable normal.
+document.addEventListener('click', e=>{
+  const menu = document.querySelector('.editor-more-menu:not(.hidden)');
+  if(!menu) return;
+  if(menu.contains(e.target) || e.target.closest('button[onclick^="toggleEditorMoreMenu"]')) return;
+  menu.classList.add('hidden');
+});
 function openToolbarFavPicker(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(380px,100%)">
@@ -6457,9 +6476,9 @@ function openFeedbackEntryModal(id){
     <div class="modal-head"><b>🧠 ${escHtml(fmtDate(f.Fecha))} · ${escHtml(f.Contexto)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
       <p style="font-weight:700;margin:0 0 4px">Original</p>
-      <div style="white-space:pre-wrap;font-size:13.5px;border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:12px">${escHtml(f.Original||'')}</div>
+      <div style="font-size:13.5px;border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:12px">${mdToHtml(f.Original||'')}</div>
       <p style="font-weight:700;margin:0 0 4px">Resultado</p>
-      <div style="white-space:pre-wrap;font-size:13.5px;border:1px solid var(--border);border-radius:8px;padding:10px">${escHtml(f.Correccion||'')}</div>
+      <div style="font-size:13.5px;border:1px solid var(--border);border-radius:8px;padding:10px">${mdToHtml(f.Correccion||'')}</div>
     </div>
   </div>`;
   overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });

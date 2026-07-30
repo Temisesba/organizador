@@ -78,8 +78,9 @@ function doPost(e) {
     else if (action === 'fillTemplate')         result = fillTemplate(body.sheetId, body.plantillaId);
     else if (action === 'toggleHistorialItem')  result = toggleHistorialItem(body.sheetId, body.historialId, body.index);
     else if (action === 'updateHistorialItems') result = updateHistorialItems(body.sheetId, body.historialId, body.items);
-    else if (action === 'aiAssist')             result = aiAssist(body.mode, body.text);
+    else if (action === 'aiAssist')             result = aiAssist(body.mode, body.text, body.instruction);
     else if (action === 'translate')            result = translate(body.text, body.direction);
+    else if (action === 'aiEnglishLesson')      result = aiEnglishLesson(body.text);
     else if (action === 'ocrImage')             result = ocrImage(body.imageBase64, body.mimeType);
     else if (action === 'uploadImage')          result = uploadImage(body.sheetId, body.imageBase64, body.mimeType, body.fileName);
     else                                        result = { error: 'Acción no reconocida' };
@@ -282,14 +283,18 @@ function askAI(systemPrompt, userText) {
   }
 }
 
-function aiAssist(mode, text) {
+function aiAssist(mode, text, instruction) {
   if (!text) return { ok: false, error: 'Sin texto' };
   const prompts = {
     organizar: 'Eres un asistente de redacción. Reordena y limpia el siguiente texto (párrafos, puntuación, claridad) SIN cambiar el sentido ni el idioma. Devuelve únicamente el texto resultante, sin explicaciones ni comentarios.',
+    redaccion: 'Eres un corrector de redacción. Mejora la redacción, ortografía y gramática del siguiente texto EN EL MISMO IDIOMA en que está escrito (no lo traduzcas). No cambies el sentido. Devuelve únicamente el texto corregido, sin explicaciones.',
     tesis: 'Eres un asistente académico. A partir del siguiente texto, propón una estructura de tesis/argumento (introducción, puntos clave, conclusión) usando Markdown con encabezados y viñetas. Devuelve únicamente el resultado.',
     procesar: 'Eres un asistente que resume y extrae los puntos clave del siguiente texto en una lista de viñetas Markdown. Devuelve únicamente el resultado.'
   };
-  const systemPrompt = prompts[mode] || prompts.organizar;
+  // "personalizada": el usuario escribe su propia instrucción en vez de
+  // elegir uno de los modos fijos de arriba — se usa tal cual como
+  // prompt del sistema.
+  const systemPrompt = (mode === 'personalizada' && instruction) ? instruction : (prompts[mode] || prompts.organizar);
   return askAI(systemPrompt, text);
 }
 
@@ -297,6 +302,18 @@ function translate(text, direction) {
   if (!text) return { ok: false, error: 'Sin texto' };
   const dir = direction === 'en->es' ? 'del inglés al español' : 'del español al inglés';
   const systemPrompt = 'Traduce el siguiente texto ' + dir + '. Devuelve ÚNICAMENTE la traducción, sin explicaciones ni comillas.';
+  return askAI(systemPrompt, text);
+}
+
+// Feedback de inglés: revisa gramática/ortografía en un texto en inglés y
+// devuelve una "lección" breve en español, en un formato fijo que el
+// frontend guarda como nota en el cuaderno "Inglés".
+function aiEnglishLesson(text) {
+  if (!text) return { ok: false, error: 'Sin texto' };
+  const systemPrompt = 'Eres un profesor de inglés. Analiza el siguiente texto en inglés (puede tener errores) y da retroalimentación breve EN ESPAÑOL, en este formato exacto:\n' +
+    '❌ Escribiste: <el texto original o un fragmento representativo, máximo 200 caracteres>\n' +
+    '📘 Lección: <lista numerada breve de los errores encontrados y cómo corregirlos — gramática, ortografía, preposiciones, tiempos verbales, etc.>\n' +
+    'Si el texto no tiene errores relevantes, dilo brevemente en la Lección. Devuelve ÚNICAMENTE ese formato de dos líneas, sin texto adicional.';
   return askAI(systemPrompt, text);
 }
 

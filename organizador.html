@@ -459,7 +459,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Ushuaia';
+const BUILD_VERSION = 'Bariloche';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -5688,25 +5688,35 @@ function openAIDrawer(){
     <div class="drawer-body">
       <textarea id="aiInput" rows="6" placeholder="Pega o escribe el texto…">${escHtml(selectedText)}</textarea>
       <button class="mini-btn" style="margin-top:6px" onclick="pullFromActiveNote()">↙ usar texto de la nota abierta</button>
+      <label style="font-size:12.5px;display:flex;align-items:center;gap:6px;margin-top:10px;cursor:pointer" title="Además de lo que pidas con cualquier botón de abajo, analiza el texto en inglés y guarda una lección aparte (nota en el cuaderno Inglés)">
+        <input type="checkbox" id="aiEnglishFeedback"> 🇬🇧 Darme también feedback de mi inglés
+      </label>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">
         <button class="btn secondary" onclick="runAI('organizar')">Organizar párrafo</button>
+        <button class="btn secondary" onclick="runAI('redaccion')">Redacción</button>
         <button class="btn secondary" onclick="runAI('tesis')">Estructurar tesis</button>
         <button class="btn secondary" onclick="runAI('procesar')">Resumir</button>
         <button class="btn secondary" onclick="runTranslate('es->en')">Traducir ES→EN</button>
         <button class="btn secondary" onclick="runTranslate('en->es')">Traducir EN→ES</button>
       </div>
-      <div id="aiOutput" style="border:1px solid var(--border);border-radius:8px;padding:10px;min-height:60px;white-space:pre-wrap;font-size:13.5px"></div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="text" id="aiCustomInstruction" placeholder="Otra petición… (ej. hazlo más formal)" style="flex:1">
+        <button class="btn secondary" onclick="runCustomAI()">Enviar</button>
+      </div>
+      <div id="aiOutput" style="border:1px solid var(--border);border-radius:8px;padding:10px;min-height:60px;white-space:pre-wrap;font-size:13.5px;margin-top:10px"></div>
       <div id="aiActions" style="display:flex;gap:6px;margin-top:8px"></div>
       <h3 style="margin-top:20px">📖 Diccionario personal</h3>
       <div style="display:flex;gap:6px"><input type="text" id="dicTerm" placeholder="palabra"><input type="text" id="dicTrans" placeholder="traducción"><button class="icon-btn" onclick="addDicManual()">+</button></div>
       <div id="dicList" style="margin-top:8px;max-height:160px;overflow-y:auto"></div>
-      <h3 style="margin-top:20px">🧠 Historial de correcciones</h3>
+      <h3 style="margin-top:20px">🧠 Historial de respuestas</h3>
       <div id="fbList" style="max-height:160px;overflow-y:auto"></div>
+      <h3 style="margin-top:20px">🇬🇧 Historial de correcciones de inglés</h3>
+      <div id="englishLessonList" style="max-height:160px;overflow-y:auto"></div>
     </div>
   </div>`;
   overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
   document.body.appendChild(overlay);
-  renderDicList(); renderFeedbackList();
+  renderDicList(); renderFeedbackList(); renderEnglishLessonHistory();
 }
 /* #mainArea es un <div contenteditable>, no un <textarea> — no tiene
    .value (eso siempre devolvía undefined y el cuadro de IA se llenaba
@@ -5725,6 +5735,7 @@ async function runAI(mode){
   aiLastOriginal = text; aiLastMode = mode;
   if(r && r.ok){ aiLastResult = r.text; document.getElementById('aiOutput').textContent = r.text; renderAiActions(); }
   else { document.getElementById('aiOutput').textContent = 'Error: '+((r&&r.error)||'sin respuesta'); }
+  maybeRunEnglishFeedback(text);
 }
 async function runTranslate(direction){
   const text = document.getElementById('aiInput').value.trim();
@@ -5735,16 +5746,68 @@ async function runTranslate(direction){
   aiLastOriginal = text; aiLastMode = 'traducir';
   if(r && r.ok){ aiLastResult = r.text; document.getElementById('aiOutput').textContent = r.text; renderAiActions(true); }
   else { document.getElementById('aiOutput').textContent = 'Error: '+((r&&r.error)||'sin respuesta'); }
+  maybeRunEnglishFeedback(text);
+}
+/* Petición libre: en vez de un modo fijo (organizar/tesis/...), el
+   usuario escribe con sus propias palabras qué quiere que se haga con
+   el texto — el backend usa ese texto directo como instrucción. */
+async function runCustomAI(){
+  const text = document.getElementById('aiInput').value.trim();
+  const instruction = document.getElementById('aiCustomInstruction').value.trim();
+  if(!text){ showToast('Escribe algo primero'); return; }
+  if(!instruction){ showToast('Escribe qué quieres que haga'); return; }
+  if(!navigator.onLine){ showToast('El asistente necesita conexión'); return; }
+  document.getElementById('aiOutput').textContent = 'Pensando…';
+  const r = await apiPost('aiAssist', { mode:'personalizada', text, instruction });
+  aiLastOriginal = text; aiLastMode = instruction.slice(0,60);
+  if(r && r.ok){ aiLastResult = r.text; document.getElementById('aiOutput').textContent = r.text; renderAiActions(); }
+  else { document.getElementById('aiOutput').textContent = 'Error: '+((r&&r.error)||'sin respuesta'); }
+  maybeRunEnglishFeedback(text);
 }
 function renderAiActions(isTranslate){
   document.getElementById('aiActions').innerHTML = `
-    <button class="btn" onclick="acceptAiResult()">Aceptar y guardar en feedback</button>
+    <button class="btn" onclick="acceptAiResult()">Guardar respuesta</button>
     <button class="btn secondary" onclick="insertAiIntoNote()">Insertar en nota</button>
     ${isTranslate?'<button class="btn secondary" onclick="sendToDicFromAI()">Enviar a diccionario</button>':''}`;
 }
 function acceptAiResult(){
   saveEntity('FEEDBACK', { ID:uid(), Fecha:new Date().toISOString(), Original:aiLastOriginal, Correccion:aiLastResult, Contexto:aiLastMode });
-  showToast('Guardado en el historial de correcciones'); renderFeedbackList();
+  showToast('Guardado en el historial de respuestas'); renderFeedbackList();
+}
+/* Feedback de inglés (2026-07-30): además de lo que pida cualquier
+   botón/petición libre, si la casilla está marcada se manda el MISMO
+   texto por otro camino — un prompt aparte enfocado solo en gramática
+   inglesa — y el resultado se guarda como nota propia en el cuaderno
+   "Inglés" (no solo en el historial de FEEDBACK, para poder repasarlo
+   como cualquier otra nota normal). */
+async function maybeRunEnglishFeedback(text){
+  const chk = document.getElementById('aiEnglishFeedback');
+  if(!chk || !chk.checked || !text) return;
+  const r = await apiPost('aiEnglishLesson', { text });
+  if(r && r.ok){
+    await saveEnglishLessonNote(text, r.text);
+    renderEnglishLessonHistory();
+    showToast('🇬🇧 Lección de inglés guardada');
+  }
+}
+async function ensureInglesNotebook(){
+  let nb = DATA.notebooks.find(n=>n.Nombre==='Inglés');
+  if(!nb) nb = await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:'Inglés', TagsHeredados:'', Color: randomColor(), TagAuto:'' });
+  return nb;
+}
+async function saveEnglishLessonNote(original, lessonText){
+  const nb = await ensureInglesNotebook();
+  const titulo = 'Lección de inglés — ' + fmtDate(new Date().toISOString());
+  const contenido = '<p><b>lección de inglés</b></p>' + lessonText.split('\n').filter(l=>l.trim()).map(l=>'<p>'+escHtml(l)+'</p>').join('');
+  await saveEntity('NOTAS', {
+    ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(),
+    Titulo: titulo, Contenido: contenido, Tags:'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'', PlantillaPropID:''
+  });
+}
+function renderEnglishLessonHistory(){
+  const el = document.getElementById('englishLessonList'); if(!el) return;
+  const notes = activeNotes().filter(n=>n.Notebook==='Inglés').sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha))).slice(0,15);
+  el.innerHTML = notes.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteEditor('${n.ID}')"><span style="flex:1;font-size:12.5px">${escHtml(stripHtmlToText(n.Contenido||'').slice(0,90))}</span></div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Aún no hay lecciones</p>';
 }
 /* Mismo bug que pullFromActiveNote tenía antes: #mainArea es un div
    contenteditable, no un <textarea> — .value no existe ahí, así que

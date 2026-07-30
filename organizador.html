@@ -400,6 +400,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
     <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel">Sync</span></button>
+    <button class="icon-btn no-print hidden" id="pendingInfoBtn" onclick="openPendingSyncModal()" title="Ver qué falta por sincronizar">ℹ️</button>
     <button class="btn no-print" onclick="openNoteEditor(null)">+ Nota</button>
     <button class="btn no-print" onclick="openCreateMenu()" title="Dato general, plantilla o registro de tiempo">+</button>
   </header>
@@ -458,7 +459,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Iguazú';
+const BUILD_VERSION = 'Ushuaia';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -932,6 +933,39 @@ function updateSyncIndicator(){
   const offline = !navigator.onLine;
   dot.className = _syncing ? 'busy' : ((pending||offline) ? 'off' : '');
   lbl.textContent = _syncing ? '…' : (pending ? pending+' pend.' : (offline ? 'Sin conexión' : 'Sync'));
+  const infoBtn = document.getElementById('pendingInfoBtn');
+  if(infoBtn) infoBtn.classList.toggle('hidden', !pending);
+}
+/* "N pend." solo decía CUÁNTOS cambios faltan por subir, no CUÁLES —
+   el usuario pidió poder ver el detalle. Cada item en cola (enqueue())
+   guarda la action + los params tal cual se le mandarían al backend;
+   se arma una descripción legible a partir de esa forma, sin necesidad
+   de guardar nada extra en la cola. */
+const QUEUE_TABLE_LABELS = { NOTAS:'Nota', HABITOS:'Hábito', HABITO_LOG:'Registro de hábito', TAGS:'Etiqueta', NOTEBOOKS:'Cuaderno', PLANTILLAS:'Plantilla', HISTORIAL:'Historial', PLANTILLAS_PROP:'Plantilla de campos', PERSONAS:'Persona', FLAGS:'Bandera', BUSQUEDAS:'Búsqueda guardada', BLOQUE_TABLAS:'Tabla', DICCIONARIO:'Diccionario', FEEDBACK:'Feedback' };
+function describeQueueOp(op){
+  const p = op.params || {};
+  const tableLabel = QUEUE_TABLE_LABELS[p.table] || p.table || '?';
+  if(op.action==='saveRow'){
+    const row = p.row || {};
+    const name = row.Titulo || row.Nombre || row.Etiqueta || row.Termino || '';
+    return 'Guardar '+tableLabel+(name?': '+name:'');
+  }
+  if(op.action==='deleteRow') return 'Eliminar '+tableLabel+(p.id?' (ID '+p.id+')':'');
+  if(op.action==='updateHistorialItems') return 'Actualizar checklist llenado';
+  return op.action;
+}
+function openPendingSyncModal(){
+  const queue = loadQueue();
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(420px,100%)">
+    <div class="modal-head"><b>☁️ Pendiente por sincronizar</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Estos cambios ya están guardados aquí en el dispositivo — se suben solos en cuanto haya conexión, o toca "Sincronizar" para intentarlo ahora.</p>
+      ${queue.length ? queue.map(op=>`<div class="settings-row">${escHtml(describeQueueOp(op))}</div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada pendiente 🎉</p>'}
+      <div style="margin-top:12px"><button class="btn" onclick="this.closest('.modal-overlay').remove();forceSync()">Sincronizar ahora</button></div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
 }
 window.addEventListener('offline', updateSyncIndicator);
 window.addEventListener('online', ()=>syncNow(false));
@@ -1031,9 +1065,14 @@ function tagColor(name){
    siempre desde 🗑️ Papelera. getNote(id) sigue viendo TODAS las notas,
    trashed o no, porque la propia Papelera necesita poder encontrarlas. */
 function activeNotes(){ return DATA.notas.filter(n=>!n.Papelera); }
+/* Mayús/minús no debería importar para una etiqueta ("#Dengue" y
+   "#dengue" son la misma cosa) — se agrupa por su forma en minúsculas
+   para que el panel lateral/Configuración muestren un solo renglón
+   combinado (no dos etiquetas "distintas" con el mismo significado),
+   siempre en minúsculas sin importar cómo se haya escrito cada una. */
 function allTagsWithCounts(){
   const counts = {};
-  activeNotes().forEach(n=>effectiveTags(n).forEach(t=>counts[t]=(counts[t]||0)+1));
+  activeNotes().forEach(n=>effectiveTags(n).forEach(t=>{ const key=t.toLowerCase(); counts[key]=(counts[key]||0)+1; }));
   return Object.entries(counts).sort((a,b)=>b[1]-a[1]);
 }
 /* soporte de etiquetas tipo #clave:valor para columnas dinámicas en tabla */
@@ -1262,7 +1301,7 @@ function promptSaveSearch(){
 }
 function applySavedSearch(id){
   const s = DATA.busquedas.find(x=>x.ID===id); if(!s) return;
-  activeTagFilters = new Set(parseTagsText(s.Tags));
+  activeTagFilters = new Set(parseTagsText(s.Tags).map(t=>t.toLowerCase()));
   tagFilterMode = s.Modo||'AND'; localStorage.setItem('org_tag_filter_mode', tagFilterMode);
   const el = document.getElementById('searchInput'); if(el) el.value = s.Query||'';
   // en vista Dividida (dos listas independientes), una búsqueda guardada
@@ -1282,7 +1321,14 @@ function renderSavedSearches(){
       <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();deleteSavedSearch('${s.ID}')" title="Borrar búsqueda guardada">✕</button>
     </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin búsquedas guardadas</p>';
 }
-function toggleTagFilter(t){ activeTagFilters.has(t) ? activeTagFilters.delete(t) : activeTagFilters.add(t); renderSidebar(); renderMain(); }
+function toggleTagFilter(t){
+  // sin importar el caso con el que se haya escrito la etiqueta en la
+  // nota/tarjeta donde se dio clic (ej. "#Dengue" adentro del cuerpo),
+  // el filtro activo siempre se guarda en minúsculas — así responde
+  // igual sin importar mayús/minús en cualquier lado que se compare.
+  t = String(t).toLowerCase();
+  activeTagFilters.has(t) ? activeTagFilters.delete(t) : activeTagFilters.add(t); renderSidebar(); renderMain();
+}
 /* Las banderas rápidas son un buscador global a propósito — si estás
    parado dentro de un cuaderno específico y le das a una bandera, primero
    te saca a "ver todo" (Inbox) para que el filtro busque en TODAS tus
@@ -1380,7 +1426,11 @@ function getFilteredSortedNotes(query, applyTagFilters){
     if(activeNotebook){ if(n.Notebook!==activeNotebook) return false; }
     else if(n.Notebook===MEJORAS_NOTEBOOK) return false;
     if(applyTagFilters && activeTagFilters.size){
-      const et = effectiveTags(n);
+      // activeTagFilters ya siempre está en minúsculas (toggleTagFilter lo
+      // normaliza) — hay que bajar effectiveTags igual, porque una nota
+      // puede tener la etiqueta escrita con mayúsculas (ej. "#Dengue" tal
+      // cual se tecleó) y aun así debe contar como el mismo filtro.
+      const et = effectiveTags(n).map(t=>t.toLowerCase());
       const arr = Array.from(activeTagFilters);
       const match = tagFilterMode==='OR' ? arr.some(t=>et.includes(t)) : arr.every(t=>et.includes(t));
       if(!match) return false;
@@ -5586,7 +5636,8 @@ function openTagCompendium(tag){
   document.body.appendChild(overlay);
 }
 function blockTableRenderHTML(tagFiltro){
-  const blocks = allBlocks().filter(b=>b.effectiveTags.includes(tagFiltro));
+  const tagFiltroL = tagFiltro.toLowerCase();
+  const blocks = allBlocks().filter(b=>b.effectiveTags.some(t=>t.toLowerCase()===tagFiltroL));
   if(!blocks.length) return '<p style="color:var(--text-dim);font-size:13px;margin-top:8px">Sin bloques con #'+escHtml(tagFiltro)+' todavía.</p>';
   const extraKeys = new Set();
   blocks.forEach(b=>Object.keys(blockKeyValueTags(b)).forEach(k=>extraKeys.add(k)));
@@ -5596,7 +5647,7 @@ function blockTableRenderHTML(tagFiltro){
     const kv = blockKeyValueTags(b);
     return '<tr><td class="title-cell" onclick="openNoteEditor(\''+b.noteId+'\')">'+escHtml(b.noteTitle)+'</td><td>'+escHtml(b.text.slice(0,140))+'</td>'
       + keys.map(k=>'<td>'+escHtml(kv[k]||'')+'</td>').join('')
-      + '<td>'+b.effectiveTags.filter(t=>t!==tagFiltro).map(t=>'#'+escHtml(t)).join(' ')+'</td></tr>';
+      + '<td>'+b.effectiveTags.filter(t=>t.toLowerCase()!==tagFiltroL).map(t=>'#'+escHtml(t)).join(' ')+'</td></tr>';
   }).join('');
   return '<div style="overflow:auto;margin-top:8px"><table class="org-table"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
 }

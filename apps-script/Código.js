@@ -94,6 +94,20 @@ function getSS(sheetId) {
   return SpreadsheetApp.openById(sheetId);
 }
 
+// Columnas que GUARDAN texto con pinta de fecha/hora ("22:00") pero que
+// deben tratarse SIEMPRE como texto literal, nunca como celda de
+// Fecha/Hora real de Sheets — de lo contrario Sheets auto-detecta el
+// valor al escribirlo y lo convierte a su propio tipo Hora (un número
+// serie interno). Sheets.getValues() entonces devuelve un objeto Date
+// de Apps Script (anclado a 1899-12-30/31 en la zona horaria DEL
+// SPREADSHEET), que al viajar a JSON se serializa como ISO en UTC (ej.
+// "1899-12-31T01:36:36.000Z") — si el navegador de quien lee está en
+// OTRA zona horaria que la del spreadsheet, la hora reconstruida sale
+// corrida (bug real reportado: "puse 22:00 y sale 13:36"). Forzar
+// formato de texto ("@") en estas columnas evita que Sheets convierta
+// el valor en primer lugar — nunca se guarda como Hora-de-Sheets, así
+// que nunca hay nada que reconstruir/adivinar en zona horaria alguna.
+const TEXT_FORMAT_COLUMNS = { HABITOS: ['Hora', 'HorasJSON'] };
 function getTable(ss, tableName) {
   const headers = TABLE_DEFS[tableName];
   if (!headers) throw new Error('Tabla desconocida: ' + tableName);
@@ -102,18 +116,44 @@ function getTable(ss, tableName) {
     sh = ss.insertSheet(tableName);
     sh.appendRow(headers);
     sh.setFrozenRows(1);
-    return sh;
+  } else {
+    const lastCol = Math.max(sh.getLastColumn(), 1);
+    const existing = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    headers.forEach((h, i) => { if (existing[i] !== h) sh.getRange(1, i + 1).setValue(h); });
   }
-  const lastCol = Math.max(sh.getLastColumn(), 1);
-  const existing = sh.getRange(1, 1, 1, lastCol).getValues()[0];
-  headers.forEach((h, i) => { if (existing[i] !== h) sh.getRange(1, i + 1).setValue(h); });
+  const textCols = TEXT_FORMAT_COLUMNS[tableName];
+  if (textCols) {
+    textCols.forEach(colName => {
+      const colIdx = headers.indexOf(colName) + 1;
+      if (colIdx > 0) sh.getRange(1, colIdx, sh.getMaxRows(), 1).setNumberFormat('@');
+    });
+  }
   return sh;
 }
 
-function sheetToObjects(sh, headers) {
+function sheetToObjects(sh, headers, tableName) {
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return [];
   const values = sh.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  // Forzar la columna a texto (ver TEXT_FORMAT_COLUMNS en getTable) evita
+  // que Sheets vuelva a convertir un valor NUEVO a su tipo Hora interno —
+  // pero un valor que YA se guardó ANTES de aplicar ese formato sigue
+  // siendo, por dentro, una celda de tipo Hora real hasta que se
+  // reescriba; getValues() la sigue devolviendo como Date de Apps
+  // Script mientras tanto. Acá se reconstruye el texto correcto para
+  // esos casos ya existentes, usando la zona horaria DEL SPREADSHEET
+  // (Utilities.formatDate con ese tz es exactamente el inverso de cómo
+  // Sheets/Apps Script generó ese Date en primer lugar) — no la del
+  // navegador de quien esté leyendo, que es lo que causaba la hora
+  // corrida en el bug real reportado.
+  const textCols = TEXT_FORMAT_COLUMNS[tableName];
+  if (textCols) {
+    const tz = sh.getParent().getSpreadsheetTimeZone();
+    const colIdxs = textCols.map(c => headers.indexOf(c)).filter(i => i >= 0);
+    values.forEach(r => {
+      colIdxs.forEach(i => { if (r[i] instanceof Date) r[i] = Utilities.formatDate(r[i], tz, 'HH:mm'); });
+    });
+  }
   return values
     .filter(r => r.some(c => c !== ''))
     .map(r => {
@@ -142,7 +182,7 @@ function getAllData(sheetId) {
   const out = {};
   Object.keys(TABLE_DEFS).forEach(t => {
     const sh = getTable(ss, t);
-    out[t.toLowerCase()] = sheetToObjects(sh, TABLE_DEFS[t]);
+    out[t.toLowerCase()] = sheetToObjects(sh, TABLE_DEFS[t], t);
   });
   return { ok: true, data: out };
 }

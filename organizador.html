@@ -535,7 +535,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'San Carlos de Bariloche';
+const BUILD_VERSION = 'Mar del Plata';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3600,7 +3600,7 @@ function openHabitCapture(){
         <div id="habitAddRows" style="margin-top:4px"></div>
         <div style="display:flex;gap:6px;margin-top:8px">
           <button class="btn secondary" onclick="addHabitFormRow()">+ otra fila</button>
-          <button class="btn" onclick="saveHabitFormRows()">Guardar</button>
+          <button class="btn" onclick="saveHabitFormRows(this)">Guardar</button>
         </div>
       </details>
     </div>
@@ -3729,36 +3729,58 @@ function addHabitFormRow(){
   window._habitFormRowCount++;
   el.insertAdjacentHTML('beforeend', habitFormRowHTML(i));
 }
-async function saveHabitFormRows(){
-  const rows = [];
-  for(let i=0;i<window._habitFormRowCount;i++){
-    const name = (document.getElementById('habitFormName'+i)?.value||'').trim();
-    if(!name) continue;
-    const meta = document.getElementById('habitFormMeta'+i)?.value || '';
-    const isMulti = parseInt(meta,10) > 1;
-    const horas = isMulti ? (window._habitFormHoras[i] || []) : [];
-    rows.push({
-      name,
-      emoji: (document.getElementById('habitFormEmoji'+i)?.value||'').trim() || '✅',
-      meta,
-      hora: document.getElementById('habitFormHora'+i)?.value || '',
-      horasJSON: horas.length ? JSON.stringify(horas) : '',
-      recordatorio: document.getElementById('habitFormFx'+i)?.value || ''
-    });
-  }
-  if(!rows.length){ showToast('Escribe al menos un nombre'); return; }
-  await Promise.all(rows.map(r=>saveEntity('HABITOS', { ID:uid(), Nombre:r.name, Emoji:r.emoji, Color:randomColor(), Activo:'1', Hora:r.hora, HorasJSON:r.horasJSON, Recordatorio:r.recordatorio, Meta:r.meta })));
-  window._habitFormRowCount = 1;
-  window._habitFormHoras = {};
-  renderHabitAddRows();
-  renderHabitCaptureList();
-  renderReminderBanner();
-  showToast(rows.length>1 ? (rows.length+' hábitos agregados') : 'Hábito agregado');
+/* Bug real reportado (2026-07-30, captura: 5 "dormir" duplicados): este
+   botón no tenía feedback visual mientras guardaba — como saveEntity va
+   a la red, un usuario que no ve nada cambiar en la pantalla (sobre
+   todo con conexión lenta) reintenta a golpes, y cada clic vuelve a
+   crear TODOS los hábitos de la lista otra vez. withSavingFeedback ya
+   se usa para exactamente este mismo patrón en otras partes de la app
+   (+Dato general, Mejoras, 🧩 Tablas "+Crear") — aquí faltaba. */
+async function saveHabitFormRows(btn){
+  await withSavingFeedback(btn, async ()=>{
+    const rows = [];
+    for(let i=0;i<window._habitFormRowCount;i++){
+      const name = (document.getElementById('habitFormName'+i)?.value||'').trim();
+      if(!name) continue;
+      const meta = document.getElementById('habitFormMeta'+i)?.value || '';
+      const isMulti = parseInt(meta,10) > 1;
+      const horas = isMulti ? (window._habitFormHoras[i] || []) : [];
+      rows.push({
+        name,
+        emoji: (document.getElementById('habitFormEmoji'+i)?.value||'').trim() || '✅',
+        meta,
+        hora: document.getElementById('habitFormHora'+i)?.value || '',
+        horasJSON: horas.length ? JSON.stringify(horas) : '',
+        recordatorio: document.getElementById('habitFormFx'+i)?.value || ''
+      });
+    }
+    if(!rows.length){ showToast('Escribe al menos un nombre'); return; }
+    await Promise.all(rows.map(r=>saveEntity('HABITOS', { ID:uid(), Nombre:r.name, Emoji:r.emoji, Color:randomColor(), Activo:'1', Hora:r.hora, HorasJSON:r.horasJSON, Recordatorio:r.recordatorio, Meta:r.meta })));
+    window._habitFormRowCount = 1;
+    window._habitFormHoras = {};
+    renderHabitAddRows();
+    renderHabitCaptureList();
+    renderReminderBanner();
+    showToast(rows.length>1 ? (rows.length+' hábitos agregados') : 'Hábito agregado');
+  });
 }
+/* Bug real reportado (2026-07-30): la fila se quedaba en pantalla hasta
+   que deleteEntity terminaba de ir y volver a la red — con varios
+   hábitos duplicados e idénticos en pantalla (mismo caso de "dormir"
+   x5), esa demora invitaba a tocar 🗑️ de más pensando que el primer
+   toque no había hecho nada, arriesgando borrar hábitos que sí quería
+   conservar. deleteEntity ya actualiza DATA[key] de forma SÍNCRONA
+   (antes de su propio await a la red, ver deleteEntity) — no hace
+   falta esperar la respuesta del servidor para poder repintar la
+   lista ya sin esta fila; el guardado real sigue su curso solo, en
+   segundo plano (con reintento automático si no hay conexión, como
+   cualquier otro guardado de la app). */
 function deleteHabitUI(id){
   if(!confirm('¿Eliminar este hábito? Se borra también su historial de días marcados.')) return;
   const logs = DATA.habito_log.filter(l=>l.HabitoID===id);
-  Promise.all(logs.map(l=>deleteEntity('HABITO_LOG', l.ID))).then(()=>deleteEntity('HABITOS', id)).then(renderHabitCaptureList);
+  logs.forEach(l=>deleteEntity('HABITO_LOG', l.ID));
+  deleteEntity('HABITOS', id);
+  renderHabitCaptureList();
 }
 /* La lista de horarios (una toma/vez cada una) vive en memoria mientras
    se edita, igual que las filas del alta rápida — se pinta aparte con

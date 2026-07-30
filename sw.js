@@ -24,8 +24,21 @@ self.addEventListener('fetch', (event) => {
   const esMismoOrigen = new URL(req.url).origin === self.location.origin;
   if (req.method !== 'GET' || !esMismoOrigen) return;
 
+  // GitHub Pages manda Cache-Control: max-age=600 en el HTML — un fetch()
+  // normal respeta eso y puede devolver la copia en disco del navegador
+  // sin tocar la red siquiera, aunque esta lógica "parezca" red-primero.
+  // Real bug encontrado: la app instalada (ícono de inicio, sin el
+  // parámetro ?_r= que sí usa "🔄 Recargar app" para forzar bypass) podía
+  // quedarse viendo una versión de hasta 10 minutos de vieja. cache:
+  // 'no-store' en la petición del documento principal (la navegación en
+  // sí, o el archivo del shell) fuerza que ESA petición puntual sí vaya
+  // siempre a la red de verdad — el resto de peticiones (íconos, manifest)
+  // se dejan con el comportamiento normal del navegador.
+  const esDocumentoPrincipal = req.mode === 'navigate' || req.url.includes(SHELL_FILE);
+  const opciones = esDocumentoPrincipal ? { cache: 'no-store' } : {};
+
   event.respondWith(
-    fetch(req)
+    fetch(req, opciones)
       .then((res) => {
         const copia = res.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(req, copia));

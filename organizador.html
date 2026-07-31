@@ -639,7 +639,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'San Rafael';
+const BUILD_VERSION = 'Comodoro Rivadavia';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1335,6 +1335,25 @@ async function fetchGoogleEvent(eventId){
    recalcula el fin manteniendo esa misma duración de 1h — antes el fin
    quedaba fijo en "hoy" aunque movieras el inicio a otro día. */
 function roundToNextHour(d){ const r = new Date(d); r.setMinutes(0,0,0); r.setHours(r.getHours()+1); return r; }
+/* Antes "+ Nuevo evento" siempre arrancaba en el día de HOY sin
+   importar qué día del Calendario estuvieras viendo (ej. parado en
+   14 de agosto, el formulario igual proponía la fecha actual) — el
+   punto de partida por defecto debe ser el día que se está viendo
+   (_calViewDate), conservando la misma hora "en punto, la que sigue"
+   de siempre (misma hora del reloj real, no medianoche). */
+function nextHourOnViewedDate(){
+  // roundToNextHour(now) puede "rodar" al día siguiente si ya es casi
+  // medianoche (23:47 -> 00:00 del día real que sigue) — eso es correcto
+  // para saber la HORA, pero si luego se suma esa misma hora encima de
+  // _calViewDate, el rodado empuja la fecha un día más allá del día que
+  // se está viendo. Por eso solo se toma .getHours() del resultado (0-23,
+  // ya sin más rodado posible) y se aplica sobre _calViewDate, nunca
+  // sumando horas de nuevo.
+  const nextHour = roundToNextHour(new Date());
+  const r = new Date(_calViewDate);
+  r.setHours(nextHour.getHours(),0,0,0);
+  return r;
+}
 function syncEventEndOnStartChange(){
   const startEl = document.getElementById('evStart'); const endEl = document.getElementById('evEnd');
   if(!startEl.value) return;
@@ -1343,8 +1362,8 @@ function syncEventEndOnStartChange(){
 function openEventForm(existingEvent){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   const isEdit = !!existingEvent;
-  const startVal = isEdit && existingEvent.start.dateTime ? toDatetimeLocal(new Date(existingEvent.start.dateTime)) : toDatetimeLocal(roundToNextHour(new Date()));
-  const endVal = isEdit && existingEvent.end.dateTime ? toDatetimeLocal(new Date(existingEvent.end.dateTime)) : toDatetimeLocal(new Date(roundToNextHour(new Date()).getTime()+60*60*1000));
+  const startVal = isEdit && existingEvent.start.dateTime ? toDatetimeLocal(new Date(existingEvent.start.dateTime)) : toDatetimeLocal(nextHourOnViewedDate());
+  const endVal = isEdit && existingEvent.end.dateTime ? toDatetimeLocal(new Date(existingEvent.end.dateTime)) : toDatetimeLocal(new Date(nextHourOnViewedDate().getTime()+60*60*1000));
   overlay.innerHTML = `<div class="modal" style="width:min(420px,100%)">
     <div class="modal-head"><b>${isEdit?'✏️ Editar':'+ Nuevo'} evento</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
@@ -2344,6 +2363,7 @@ function dismissReminder(key){
 function openReminderTarget(type, id){
   if(type==='plantilla_prop') openQuickFieldFill(id);
   else if(type==='habito') openHabitCapture();
+  else if(type==='tarea_urgente') openNoteEditor(id);
   else openFillModal(id);
 }
 /* Cumpleaños próximos (próximos 7 días) de las Personas que tengan
@@ -2437,7 +2457,12 @@ function renderReminderBanner(){
   const dismissed = dismissedReminderIds();
   const pending = pendingRemindersToday().filter(r=>!dismissed.has(r.type+':'+r.id));
   const birthdays = upcomingBirthdays(7).filter(b=>!dismissed.has('cumple:'+b.persona.ID));
-  if(!pending.length && !birthdays.length){ el.innerHTML=''; return; }
+  const urgentTasks = urgentPendingTasks().filter(n=>!dismissed.has('tarea_urgente:'+n.ID));
+  if(!pending.length && !birthdays.length && !urgentTasks.length){ el.innerHTML=''; return; }
+  const urgentChips = urgentTasks.map(n=>`<span class="reminder-chip" style="border-color:var(--danger)">
+      <span style="cursor:pointer" onclick="openReminderTarget('tarea_urgente','${escAttr(n.ID)}')">🔥 ${escHtml(n.Titulo||'(sin título)')}</span>
+      <button class="icon-btn" style="padding:0 3px" title="Ocultar por hoy" onclick="dismissReminder('tarea_urgente:${escAttr(n.ID)}')">✕</button>
+    </span>`).join('');
   const pendingChips = pending.map(r=>`<span class="reminder-chip">
       <span style="cursor:pointer" onclick="openReminderTarget('${r.type}','${escAttr(r.id)}')">${escHtml(r.nombre)}</span>
       <button class="icon-btn" style="padding:0 3px" title="Ocultar por hoy" onclick="dismissReminder('${r.type}:${escAttr(r.id)}')">✕</button>
@@ -2448,7 +2473,7 @@ function renderReminderBanner(){
     </span>`).join('');
   el.innerHTML = `<div class="reminder-bar">
     <b>⏰ Pendiente:</b>
-    <span class="reminder-chips">${pendingChips}${birthdayChips}</span>
+    <span class="reminder-chips">${urgentChips}${pendingChips}${birthdayChips}</span>
   </div>`;
 }
 
@@ -2494,12 +2519,12 @@ function cardsHTML(notes, query, pane){
     // una — pedido explícito tras ver la vista principal llena de
     // tarjetitas de #task sueltas.
     if(n.Notebook===TAREAS_NOTEBOOK){
-      const chapterTag = taskTagList(n).find(t=>t!=='task' && t!=='hecho') || '';
+      const chapterTag = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente') || '';
       if(seenTaskChapters.has(chapterTag)) return '';
       seenTaskChapters.add(chapterTag);
       const chapterNotes = notes.filter(x=>{
         if(x.Notebook!==TAREAS_NOTEBOOK) return false;
-        return (taskTagList(x).find(t=>t!=='task' && t!=='hecho')||'')===chapterTag;
+        return (taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente')||'')===chapterTag;
       });
       return taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane);
     }
@@ -2626,7 +2651,7 @@ function timeLogChapterHTML(dateObj, dayNotes, highlight, q, activeTags, pane){
     return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})"><div class="field-card-tag">${escHtml(rangeLabel)}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
   }).reverse().join(''); // más reciente primero, igual que el modal de Registro de tiempo
   const isToday = dateObj.toDateString()===new Date().toDateString();
-  const label = isToday ? 'Hoy' : dateObj.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
+  const label = isToday ? 'Hoy' : fmtDateWithWeekday(dateObj);
   // No hay una nota-ID única para "todo el día" (son varios bloques) —
   // se usa una llave propia por fecha para el estado de plegado, sin
   // chocar con IDs reales de notas.
@@ -2653,15 +2678,17 @@ function taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pan
     });
     if(!rows.length) return '';
   }
-  rows = rows.slice().sort((a,b)=>String(a.Fecha).localeCompare(String(b.Fecha)));
+  rows = sortTasksUrgentFirst(rows);
   const miniCards = rows.map(n=>{
     const tagName = chapterTag;
     const hit = tagName && highlight.includes(tagName.toLowerCase());
     const innerTags = tagName ? `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(tagName)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(tagName)}')" title="Filtrar por #${escAttr(tagName)}">#${escHtml(tagName)}</span>` : '';
     const done = isTaskDone(n);
-    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})">
+    const urgent = isTaskUrgent(n);
+    return `<div class="field-card"${urgent&&!done?' style="border-color:var(--danger)"':''} onclick="event.stopPropagation();openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})">
       <div class="field-card-tag" style="display:flex;align-items:center;gap:6px">
         <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}')" title="Marcar como cumplida">
+        <button class="icon-btn" style="padding:0 3px;opacity:${urgent?'1':'.35'}" onclick="event.stopPropagation();toggleTaskUrgent('${n.ID}')" title="${urgent?'Quitar urgente':'Marcar como urgente'}">🔥</button>
         <span>${escHtml(fmtDate(n.Fecha))}</span>
       </div>
       <div class="field-card-text"${done?' style="text-decoration:line-through;opacity:.6"':''}>${escHtml(n.Titulo||'(sin título)')}</div>
@@ -2675,6 +2702,12 @@ function taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pan
   </div>`;
 }
 function fmtDate(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return String(iso).slice(0,10); return d.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'2-digit'}); }
+/* Igual que fmtDate pero con el día de la semana adelante — solo para
+   títulos de "capítulo" (Seguimiento diario, Registro de tiempo) donde
+   el usuario pidió verlo; fmtDate a secas se sigue usando en todos los
+   demás lugares (pie de tarjeta, meta de capítulo de campos, tabla)
+   para no llenar de texto cada fecha suelta de la app. */
+function fmtDateWithWeekday(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return fmtDate(iso); return d.toLocaleDateString('es-MX',{weekday:'long'})+' '+fmtDate(iso); }
 function fmtTime(d){ return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }
 
 function sortArrow(col){ return sortState.col===col ? (sortState.dir==='asc'?' ▲':' ▼') : ''; }
@@ -5037,6 +5070,34 @@ function toggleTaskDone(id){
   saveEntity('NOTAS', n);
   renderAll();
 }
+/* Prioridad de tareas — mismo mecanismo de #etiqueta que "hecho", nada
+   de columna nueva. #urgente se excluye de convertirse en "capítulo"
+   (#familia/#trabajo) en taskChapterHTML/renderQuickTaskList, igual
+   que ya se hacía con #hecho. Las urgentes se ordenan primero (antes
+   de la fecha límite) en ambos listados, y también se asoman en la
+   misma barra de "⏰ Pendiente" donde ya salían los avisos de hábitos
+   — pedido explícito: "que salgan dnd salen las alarmas de mis
+   hábitos", en vez de inventar una barra aparte. */
+function isTaskUrgent(n){ return taskTagList(n).includes('urgente'); }
+function toggleTaskUrgent(id){
+  const n = DATA.notas.find(x=>x.ID===id); if(!n) return;
+  const tags = taskTagList(n);
+  const idx = tags.indexOf('urgente');
+  if(idx>=0) tags.splice(idx,1); else { tags.push('urgente'); ensureTagsRegistered('#urgente'); }
+  n.Tags = tags.map(t=>'#'+t).join(' ');
+  saveEntity('NOTAS', n);
+  renderAll();
+}
+function sortTasksUrgentFirst(rows){
+  return rows.slice().sort((a,b)=>{
+    const au = isTaskUrgent(a), bu = isTaskUrgent(b);
+    if(au!==bu) return au ? -1 : 1;
+    return String(a.Fecha).localeCompare(String(b.Fecha));
+  });
+}
+function urgentPendingTasks(){
+  return activeNotes().filter(n=>n.Notebook===TAREAS_NOTEBOOK && isTaskUrgent(n) && !isTaskDone(n));
+}
 function openQuickTaskModal(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
@@ -5056,6 +5117,7 @@ function openQuickTaskModal(){
       </div>
       <label style="font-size:12px;font-weight:600;display:block;margin-top:10px">Etiquetas extra (opcional)</label>
       <input type="text" id="quickTaskExtraTags" placeholder="#familia #trabajo" oninput="updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()">
+      <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;cursor:pointer"><input type="checkbox" id="quickTaskUrgent"> 🔥 Urgente (se ordena arriba y avisa junto con tus hábitos)</label>
       <div style="margin-top:12px"><button class="btn" id="quickTaskSaveBtn" onclick="saveQuickTask()">Guardar</button></div>
       <div id="quickTaskList" style="margin-top:14px"></div>
     </div>
@@ -5075,6 +5137,7 @@ async function saveQuickTask(){
     const dateInp = document.getElementById('quickTaskDate');
     const horaInp = document.getElementById('quickTaskHora');
     const extraInp = document.getElementById('quickTaskExtraTags');
+    const urgentInp = document.getElementById('quickTaskUrgent');
     // Nunca se inventa una hora: si no se puso ninguna, la tarea queda
     // en medianoche local — el sentinel que taskHasHour() reconoce como
     // "sin hora" (cae en "⚑ Pendientes sin hora" en vez de la agenda a
@@ -5083,6 +5146,7 @@ async function saveQuickTask(){
     const dueDate = new Date(baseDateStr+'T'+(horaInp.value||'00:00')+':00').toISOString();
     const extraTags = (extraInp.value||'').split(/\s+/).map(s=>s.replace(/^#/,'').trim()).filter(Boolean);
     const allTags = ['task'].concat(extraTags.filter(t=>t && t!=='task'));
+    if(urgentInp && urgentInp.checked && !allTags.includes('urgente')) allTags.push('urgente');
     const nb = await ensureTareasNotebook();
     const note = {
       ID:uid(), Fecha: dueDate, FechaEdicion: new Date().toISOString(),
@@ -5099,7 +5163,7 @@ async function saveQuickTask(){
     allTags.forEach(t=>ensureTagsRegistered('#'+t));
     renderAll();
     showToast('⚑ Tarea guardada');
-    inp.value=''; dateInp.value=''; horaInp.value=''; extraInp.value=''; inp.focus();
+    inp.value=''; dateInp.value=''; horaInp.value=''; extraInp.value=''; if(urgentInp) urgentInp.checked=false; inp.focus();
     renderQuickTaskList();
   });
 }
@@ -5115,19 +5179,21 @@ function renderQuickTaskList(){
   if(!items.length){ wrap.innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin tareas todavía — la primera que guardes aparece arriba.</p>'; return; }
   const groups = {}; const order = [];
   items.forEach(n=>{
-    const chapter = taskTagList(n).find(t=>t!=='task' && t!=='hecho') || 'Sin categoría';
+    const chapter = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente') || 'Sin categoría';
     if(!groups[chapter]){ groups[chapter]=[]; order.push(chapter); }
     groups[chapter].push(n);
   });
   order.sort((a,b)=> a==='Sin categoría' ? 1 : b==='Sin categoría' ? -1 : a.localeCompare(b,'es'));
   wrap.innerHTML = order.map(chapter=>{
-    const rows = groups[chapter].slice().sort((a,b)=>String(a.Fecha).localeCompare(String(b.Fecha)));
+    const rows = sortTasksUrgentFirst(groups[chapter]);
     return `<div class="fill-section">
       <div class="fill-section-title">${chapter==='Sin categoría'?chapter:'#'+escHtml(chapter)}</div>
       ${rows.map(n=>{
         const done = isTaskDone(n);
+        const urgent = isTaskUrgent(n);
         return `<div class="settings-row" style="cursor:pointer" onclick="openNoteEditor('${n.ID}')">
         <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}');renderQuickTaskList()" title="Marcar como cumplida">
+        <button class="icon-btn" style="padding:0 3px;opacity:${urgent?'1':'.35'}" onclick="event.stopPropagation();toggleTaskUrgent('${n.ID}');renderQuickTaskList()" title="${urgent?'Quitar urgente':'Marcar como urgente'}">🔥</button>
         <span style="flex:1;font-size:13px${done?';text-decoration:line-through;opacity:.6':''}">${escHtml(n.Titulo)}</span>
         <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
       </div>`;
@@ -7102,7 +7168,7 @@ function openQuickFieldFill(id){
         <option value="__new__">+ nueva persona…</option>
       </select>` : ''}
       <label style="font-size:12px;font-weight:600;display:block;margin:12px 0 4px">Título de esta nota</label>
-      <input type="text" id="qffTitle" value="${escAttr(pt.Nombre+' — '+fmtDate(new Date().toISOString()))}">
+      <input type="text" id="qffTitle" value="${escAttr(pt.Nombre+' — '+fmtDateWithWeekday(new Date().toISOString()))}">
       ${campos.map((c,i)=>`
         <label style="font-size:12px;font-weight:600;display:block;margin:12px 0 4px">${escHtml(prettyFieldLabel(c))}${tipos[c]==='fecha_anual'?' <span style="font-weight:400;color:var(--text-dim);font-size:11px">(solo día y mes, se repite cada año)</span>':''}</label>
         ${tipos[c]==='fecha' ? `<input type="date" id="qffField${i}">` : tipos[c]==='fecha_anual' ? fechaAnualSelectHTML(i) : `<textarea id="qffField${i}" rows="2" style="width:100%;resize:vertical"></textarea>`}`).join('')}

@@ -89,10 +89,10 @@ header .spacer{flex:1}
 @media (hover:none) and (pointer:coarse){
   header .spacer{display:none}
   #headerNewNoteBtn{margin-left:0}
-  header .icon-btn{padding:6px 6px}
-  header .btn{padding:6px 8px;font-size:13px}
-  header .view-switch button{padding:6px 6px}
-  header{gap:4px;padding:8px 8px}
+  header .icon-btn{padding:5px 4px}
+  header .btn{padding:5px 6px;font-size:12.5px}
+  header .view-switch button{padding:5px 5px}
+  header{gap:2px;padding:8px 5px}
 }
 #syncDot{width:9px;height:9px;border-radius:50%;background:var(--success);display:inline-block}
 #syncDot.off{background:var(--danger)}
@@ -522,7 +522,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print desktop-only" onclick="openBlockTables()" title="Tablas por bloque">🧩</button>
     <button class="icon-btn no-print desktop-only" onclick="openGeneralExplorer()" title="Explorador de archivos — guarda varias carpetas como accesos rápidos, etiqueta y busca dentro de ellas">📁</button>
     <button class="icon-btn no-print" onclick="openAIDrawer()" title="Asistente IA">✨</button>
-    <button class="icon-btn no-print desktop-only" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
+    <button class="icon-btn no-print" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
     <button class="icon-btn no-print" id="syncBtn" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel" class="desktop-only">Sync</span></button>
     <button class="icon-btn no-print hidden" id="pendingInfoBtn" onclick="openPendingSyncModal()" title="Ver qué falta por sincronizar">ℹ️</button>
@@ -624,7 +624,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'La Plata';
+const BUILD_VERSION = 'Salta';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.

@@ -463,6 +463,23 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .cal-cell .cal-wd{font-size:10px;text-transform:uppercase;color:var(--text-dim)}
 .cal-dot{width:5px;height:5px;border-radius:50%;background:var(--accent)}
 
+/* Calendario → Día como tablero: agenda (izq, ~65-70%) + notas del día
+   (der, ~30-35%) en escritorio, apiladas en celular — mismo criterio de
+   tipo de puntero (no ancho de ventana) que el resto de la app. */
+.cal-day-board{display:flex;gap:16px;align-items:flex-start;margin-top:14px}
+.cal-day-agenda-col{flex:0 1 66%;min-width:0}
+.cal-day-notes-col{flex:1 1 34%;min-width:0;border-left:1px solid var(--border);padding-left:16px}
+@media (hover:none) and (pointer:coarse){
+  .cal-day-board{flex-direction:column;gap:20px}
+  .cal-day-agenda-col, .cal-day-notes-col{flex:none;width:100%}
+  .cal-day-notes-col{border-left:none;padding-left:0;border-top:1px solid var(--border);padding-top:14px}
+}
+.cal-agenda-block{margin-bottom:12px}
+.cal-agenda-hour{font-size:12px;font-weight:700;color:var(--text-dim);margin-bottom:4px}
+.cal-agenda-row{display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)}
+.cal-agenda-row:last-child{border-bottom:none}
+.cal-agenda-row .cal-agenda-text{flex:1;min-width:0}
+
 /* print */
 @media print{
   body *{visibility:hidden}
@@ -606,7 +623,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Tucumán';
+const BUILD_VERSION = 'Posadas';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -707,7 +724,7 @@ let _calViewMode = 'day'; // 'day' | 'week' | 'month' — se conserva entre aper
 function openCalendarModal(){
   _calViewDate = new Date();
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  overlay.innerHTML = `<div class="modal" style="width:min(640px,100%)">
+  overlay.innerHTML = `<div class="modal" style="width:min(920px,96vw)">
     <div class="modal-head"><b>📅 Calendario</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="modal-body">
       <div id="calAuthBar"></div>
@@ -895,40 +912,184 @@ function toggleHabitOnCalDay(habitoId){
   const existing = DATA.habito_log.find(l=>l.HabitoID===habitoId && new Date(l.Fecha).toDateString()===dateStr);
   if(existing){ deleteEntity('HABITO_LOG', existing.ID); }
   else{ saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:_calViewDate.toISOString() }); }
-  renderCalHabitosList();
+  renderCalDayDynamic();
 }
 function incrementHabitOnCalDay(habitoId){
   saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:_calViewDate.toISOString() });
-  renderCalHabitosList();
+  renderCalDayDynamic();
 }
 function decrementHabitOnCalDay(habitoId){
   const dateStr = _calViewDate.toDateString();
   const todays = DATA.habito_log.filter(l=>l.HabitoID===habitoId && new Date(l.Fecha).toDateString()===dateStr).sort((a,b)=>+new Date(b.Fecha)-+new Date(a.Fecha));
   if(!todays.length) return;
   deleteEntity('HABITO_LOG', todays[0].ID);
-  renderCalHabitosList();
+  renderCalDayDynamic();
 }
-function renderCalHabitosList(){
-  const el = document.getElementById('calHabitosList'); if(!el) return;
-  const activos = DATA.habitos.filter(h=>h.Activo!=='0');
-  const dateStr = _calViewDate.toDateString();
-  el.innerHTML = activos.length ? activos.map(h=>{
-    const goal = habitGoal(h);
-    const nameSpan = `<span style="flex:1">${h.Emoji||'✅'} ${escHtml(h.Nombre)}</span>`;
-    if(goal>1){
-      const count = habitCountOnDate(h.ID, dateStr);
-      const done = count>=goal;
-      return `<div class="settings-row">${nameSpan}<span style="font-size:12px;font-weight:600;${done?'color:var(--success)':'color:var(--text-dim)'}">${count}/${goal}</span>
-        <button class="icon-btn" onclick="decrementHabitOnCalDay('${h.ID}')" ${count<=0?'disabled':''} title="Quitar uno">−</button>
-        <button class="icon-btn" onclick="incrementHabitOnCalDay('${h.ID}')" title="Sumar uno">+</button>
-      </div>`;
-    }
-    const done = !!DATA.habito_log.find(l=>l.HabitoID===h.ID && new Date(l.Fecha).toDateString()===dateStr);
-    return `<div class="settings-row" style="cursor:pointer" onclick="toggleHabitOnCalDay('${h.ID}')">
-      <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHabitOnCalDay('${h.ID}')">
-      ${nameSpan}
+/* Fila de un hábito dentro de Calendario → Día — reusada tanto por la
+   agenda (hábitos CON hora asignada) como por "✅ Hábitos de hoy"
+   (hábitos SIN hora), mismo look en los dos lugares. */
+function calAgendaHabitRowHTML(h, dateStr){
+  const goal = habitGoal(h);
+  const nameSpan = `<span class="cal-agenda-text">${h.Emoji||'✅'} ${escHtml(h.Nombre)}</span>`;
+  if(goal>1){
+    const count = habitCountOnDate(h.ID, dateStr);
+    const done = count>=goal;
+    return `<div class="cal-agenda-row">${nameSpan}<span style="font-size:12px;font-weight:600;${done?'color:var(--success)':'color:var(--text-dim)'}">${count}/${goal}</span>
+      <button class="icon-btn" onclick="decrementHabitOnCalDay('${h.ID}')" ${count<=0?'disabled':''} title="Quitar uno">−</button>
+      <button class="icon-btn" onclick="incrementHabitOnCalDay('${h.ID}')" title="Sumar uno">+</button>
     </div>`;
-  }).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin hábitos activos.</p>';
+  }
+  const done = !!DATA.habito_log.find(l=>l.HabitoID===h.ID && new Date(l.Fecha).toDateString()===dateStr);
+  return `<div class="cal-agenda-row" style="cursor:pointer" onclick="toggleHabitOnCalDay('${h.ID}')">
+    <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHabitOnCalDay('${h.ID}')">
+    ${nameSpan}
+  </div>`;
+}
+function renderCalHabitosSinHora(){
+  const el = document.getElementById('calHabitosList'); if(!el) return;
+  const dateStr = _calViewDate.toDateString();
+  const activos = DATA.habitos.filter(h=>h.Activo!=='0' && !habitHorasList(h).length);
+  el.innerHTML = activos.length ? activos.map(h=>calAgendaHabitRowHTML(h, dateStr)).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin hábitos sin hora para hoy.</p>';
+}
+/* Tareas (#task, cuaderno Tareas): "tiene hora" se decide por si la
+   parte de hora de su Fecha es EXACTAMENTE medianoche local — ese es el
+   valor que queda cuando el formulario de Tareas solo recibe fecha (sin
+   hora explícita), nunca cuando de verdad se puso una hora. Las tareas
+   viejas (antes de este cambio) casi nunca caían justo en medianoche
+   (quedaban a las 09:00 o a la hora exacta de creación), así que siguen
+   viéndose con SU hora tal cual quedaron guardadas — compatible sin
+   tocar ningún dato existente. */
+function taskHasHour(n){
+  const d = new Date(n.Fecha);
+  return !(d.getHours()===0 && d.getMinutes()===0);
+}
+function tasksForDate(dateObj){
+  const dayStr = dateObj.toDateString();
+  return activeNotes().filter(n=>n.Notebook===TAREAS_NOTEBOOK && n.Fecha && new Date(n.Fecha).toDateString()===dayStr);
+}
+function calAgendaTaskRowHTML(n){
+  const done = isTaskDone(n);
+  return `<div class="cal-agenda-row" style="cursor:pointer" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
+    <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}');renderCalDayDynamic()" title="Marcar como cumplida">
+    <span class="cal-agenda-text"${done?' style="text-decoration:line-through;opacity:.6"':''}>⚑ ${escHtml(n.Titulo||'(sin título)')}</span>
+  </div>`;
+}
+function renderCalNoHoraTasks(){
+  const el = document.getElementById('calTasksNoHora'); if(!el) return;
+  const tasks = tasksForDate(_calViewDate).filter(n=>!taskHasHour(n));
+  el.innerHTML = tasks.length ? tasks.map(n=>{
+    const done = isTaskDone(n);
+    return `<div class="settings-row" style="cursor:pointer" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
+      <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}');renderCalDayDynamic()" title="Marcar como cumplida">
+      <span style="flex:1${done?';text-decoration:line-through;opacity:.6':''}">⚑ ${escHtml(n.Titulo||'(sin título)')}</span>
+    </div>`;
+  }).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin tareas pendientes sin hora.</p>';
+}
+/* Agenda cronológica unificada: eventos de Google, Mi horario, tareas
+   CON hora y hábitos CON hora, agrupados en un solo bloque por hora
+   (sin repetir la hora por cada elemento) — orden dentro de cada bloque
+   siempre eventos→horario→tareas→hábitos, pedido explícito. Que varias
+   cosas coincidan a la misma hora es válido, no un conflicto a
+   resolver. Los eventos de Google se guardan en window._calDayEvents
+   (una sola llamada a la API por apertura del día) para que palomear
+   un hábito/tarea/horario no tenga que volver a pedirlos. */
+function renderCalAgenda(){
+  const el = document.getElementById('calAgenda'); if(!el) return;
+  const dateStr = _calViewDate.toDateString();
+  const events = window._calDayEvents||[];
+  const allDayEvents = events.filter(ev=>!ev.start.dateTime);
+  const timedEvents = events.filter(ev=>ev.start.dateTime);
+  const horario = horarioItemsForDate(_calViewDate);
+  const tasks = tasksForDate(_calViewDate).filter(taskHasHour);
+  const habitsConHora = DATA.habitos.filter(h=>h.Activo!=='0' && habitHorasList(h).length);
+
+  // Clave de agrupación = minutos desde medianoche (número), NUNCA el
+  // texto ya formateado — eventos/tareas usan fmtHM (12h "11:00 a.m."),
+  // horario/hábitos guardan "HH:MM" 24h crudo; agrupar por el string ya
+  // formateado partía el mismo bloque en dos (ej. "11:00" de horario
+  // quedaba separado de "11:00 a.m." del evento) y además no ordenaba
+  // cronológicamente bien (comparación de texto, no de hora real).
+  const buckets = {};
+  const ensure = mins => buckets[mins] || (buckets[mins] = {events:[],horario:[],tasks:[],habits:[]});
+  const minsOf = d => d.getHours()*60+d.getMinutes();
+  const minsOfHHMM = hhmm => { const [h,m] = String(hhmm).split(':').map(Number); return h*60+(m||0); };
+  timedEvents.forEach(ev=>ensure(minsOf(new Date(ev.start.dateTime))).events.push(ev));
+  horario.forEach(h=>ensure(minsOfHHMM(h.Hora)).horario.push(h));
+  tasks.forEach(n=>ensure(minsOf(new Date(n.Fecha))).tasks.push(n));
+  habitsConHora.forEach(h=>habitHorasList(h).forEach(hora=>ensure(minsOfHHMM(hora)).habits.push(h)));
+
+  const allDayHTML = allDayEvents.length ? `<div class="cal-agenda-block">
+    <div class="cal-agenda-hour">Todo el día</div>
+    ${allDayEvents.map(calAgendaEventRowHTML).join('')}
+  </div>` : '';
+  const blocksHTML = Object.keys(buckets).map(Number).sort((a,b)=>a-b).map(mins=>{
+    const b = buckets[mins];
+    const labelD = new Date(); labelD.setHours(Math.floor(mins/60), mins%60, 0, 0);
+    const rows = b.events.map(calAgendaEventRowHTML)
+      .concat(b.horario.map(h=>calAgendaHorarioRowHTML(h, dateStr)))
+      .concat(b.tasks.map(calAgendaTaskRowHTML))
+      .concat(b.habits.map(h=>calAgendaHabitRowHTML(h, dateStr)));
+    return `<div class="cal-agenda-block">
+      <div class="cal-agenda-hour">${escHtml(fmtHM(labelD))}</div>
+      ${rows.join('')}
+    </div>`;
+  }).join('');
+  el.innerHTML = (allDayHTML+blocksHTML) || '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada agendado con hora este día.</p>';
+}
+function calAgendaEventRowHTML(ev){
+  const start = ev.start.dateTime ? new Date(ev.start.dateTime) : null;
+  const end = ev.end.dateTime ? new Date(ev.end.dateTime) : null;
+  const timeLabel = start ? (fmtHM(start)+(end?'–'+fmtHM(end):'')) : 'Todo el día';
+  const linkedNotes = notesForEvent(ev.id);
+  return `<div class="cal-agenda-row">
+    <span class="cal-agenda-text">📅 <b>${escHtml(ev.summary||'(sin título)')}</b> — ${escHtml(timeLabel)}${ev.location?`<br><span style="color:var(--text-dim);font-size:12px">📍 ${escHtml(ev.location)}</span>`:''}</span>
+    <button class="icon-btn" onclick="openEventNotesUI('${escAttr(ev.id)}','${escAttr(ev.summary||'')}','${escAttr(ev.start.dateTime||ev.start.date||'')}')" title="${linkedNotes.length?('Ver/agregar nota ('+linkedNotes.length+')'):'Crear nota para este evento'}">${linkedNotes.length?('📝 '+linkedNotes.length):'📝+'}</button>
+    <button class="icon-btn" onclick='editGoogleEvent(${JSON.stringify(ev.id)})' title="Editar evento">✏️</button>
+  </div>`;
+}
+function calAgendaHorarioRowHTML(h, dateStr){
+  const done = !!DATA.horario_log.find(l=>l.HorarioID===h.ID && new Date(l.Fecha).toDateString()===dateStr);
+  return `<div class="cal-agenda-row" style="cursor:pointer" onclick="toggleHorarioOnCalDay('${h.ID}')">
+    <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHorarioOnCalDay('${h.ID}')">
+    <span class="cal-agenda-text">🔁 ${escHtml(h.Actividad)}</span>
+  </div>`;
+}
+function renderCalDayDynamic(){
+  renderCalAgenda();
+  renderCalNoHoraTasks();
+  renderCalHabitosSinHora();
+}
+/* "Notas de hoy" (columna derecha en escritorio, última sección en
+   celular) — notas normales del día, sin las de #task (esas viven en
+   la agenda/pendientes ahora) ni las de Registro de tiempo (igual que
+   siempre). Fijadas primero, luego por hora de creación. */
+function renderCalNotesToday(){
+  const el = document.getElementById('calNotesList'); if(!el) return;
+  const notes = notesOnDate(_calViewDate).filter(n=>n.Notebook!==TAREAS_NOTEBOOK)
+    .sort((a,b)=>{ const pa=a.Pinned?0:1, pb=b.Pinned?0:1; if(pa!==pb) return pa-pb; return new Date(a.Fecha)-new Date(b.Fecha); });
+  el.innerHTML = notes.length ? notes.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
+      <span style="flex:1">${n.Pinned?'📌 ':''}<b>${escHtml(fmtHM(new Date(n.Fecha)))}</b> ${escHtml(n.Titulo||'(sin título)')}</span>
+    </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin notas este día</p>';
+}
+/* "+ Nota rápida" desde el día del calendario: misma mecánica que
+   openNoteEditor(null) (ID sincrónico antes de cualquier guardado, para
+   no arriesgar la condición de carrera de notas duplicadas), pero con
+   la Fecha anclada al día que se está viendo (no siempre "ahora") — si
+   estás viendo un día futuro/pasado, la nota nueva debe aparecer AHÍ,
+   no en el día de hoy real. Se conserva la hora actual del reloj sobre
+   ESA fecha, para que varias notas rápidas del mismo día se ordenen
+   entre sí por cuándo de verdad se crearon. */
+function quickNoteForCalDay(){
+  document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#calBody')) o.remove(); });
+  if(editingNoteId) abandonEmptyDraftIfAny();
+  const note = newBlankNote();
+  note.ID = uid();
+  const now = new Date(); const d = new Date(_calViewDate);
+  d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+  note.Fecha = d.toISOString();
+  DATA.notas.push(note);
+  editingNoteId = note.ID;
+  renderNoteModal(note);
 }
 function openNoteFromCalendar(id){
   document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#calBody')) o.remove(); });
@@ -951,41 +1112,46 @@ function renderCalDayView(){
   const body = document.getElementById('calBody'); if(!body) return;
   const isToday = _calViewDate.toDateString()===new Date().toDateString();
   const label = isToday ? 'Hoy' : _calViewDate.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
+  window._calDayEvents = [];
   body.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
       <button class="icon-btn" onclick="shiftCalDate(-1)">◀</button>
       <b>${escHtml(label)}</b>
       <button class="icon-btn" onclick="shiftCalDate(1)">▶</button>
     </div>
-    <div style="margin:10px 0"><button class="mini-btn" onclick="openNewEventForm()">+ Nuevo evento</button></div>
-    <div id="calEventsList">${googleAccessToken?'':'<p class="hint" style="color:var(--text-dim);font-size:12px">Conecta tu calendario para ver tus eventos aquí.</p>'}</div>
-    <div style="margin-top:16px">
-      <b style="font-size:12px;color:var(--text-dim)">📝 Notas de este día</b>
-      <div id="calNotesList" style="margin-top:6px"></div>
+    <div style="margin:10px 0;display:flex;gap:6px;flex-wrap:wrap">
+      <button class="mini-btn" style="width:auto" onclick="openNewEventForm()">+ Nuevo evento</button>
+      <button class="mini-btn" style="width:auto" onclick="openQuickTaskModal()">+ Tarea</button>
+      <button class="mini-btn" style="width:auto" onclick="openHorarioSettings()">✏️ Mi horario</button>
     </div>
-    <div style="margin-top:16px">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <b style="font-size:12px;color:var(--text-dim)">🕒 Mi horario</b>
-        <button class="icon-btn" onclick="openHorarioSettings()" title="Editar mi horario">✏️</button>
+    ${googleAccessToken?'':'<p class="hint" style="color:var(--text-dim);font-size:12px">Conecta tu calendario para ver tus eventos aquí.</p>'}
+    <div class="cal-day-board">
+      <div class="cal-day-agenda-col">
+        <div id="calAgenda"></div>
+        <div style="margin-top:16px">
+          <b style="font-size:12px;color:var(--text-dim)">⚑ Pendientes sin hora</b>
+          <div id="calTasksNoHora" style="margin-top:6px"></div>
+        </div>
+        <div style="margin-top:16px">
+          <b style="font-size:12px;color:var(--text-dim)">✅ Hábitos de hoy</b>
+          <div id="calHabitosList" style="margin-top:6px"></div>
+        </div>
       </div>
-      <div id="calHorarioList" style="margin-top:6px"></div>
-    </div>
-    <div style="margin-top:16px">
-      <b style="font-size:12px;color:var(--text-dim)">✅ Hábitos</b>
-      <div id="calHabitosList" style="margin-top:6px"></div>
+      <div class="cal-day-notes-col">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <b style="font-size:12px;color:var(--text-dim)">📝 Notas de hoy</b>
+          <button class="icon-btn" onclick="quickNoteForCalDay()" title="+ Nota rápida">+</button>
+        </div>
+        <div id="calNotesList" style="margin-top:6px"></div>
+      </div>
     </div>`;
+  renderCalDayDynamic();
+  renderCalNotesToday();
   if(googleAccessToken){
-    fetchGoogleEvents(_calViewDate).then(renderCalEventsList).catch(err=>{
-      const el = document.getElementById('calEventsList'); if(el) el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">No se pudieron cargar los eventos'+(err&&err.message?(': '+escHtml(err.message)):'')+'</p>';
+    fetchGoogleEvents(_calViewDate).then(events=>{ window._calDayEvents = events; renderCalAgenda(); }).catch(err=>{
+      const el = document.getElementById('calAgenda'); if(el) el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">No se pudieron cargar los eventos'+(err&&err.message?(': '+escHtml(err.message)):'')+'</p>';
     });
   }
-  const notesEl = document.getElementById('calNotesList');
-  const notes = notesOnDate(_calViewDate);
-  notesEl.innerHTML = notes.length ? notes.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
-      <span style="flex:1"><b>${escHtml(fmtHM(new Date(n.Fecha)))}</b> ${escHtml(n.Titulo||'(sin título)')}</span>
-    </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin notas este día</p>';
-  renderCalHorarioList();
-  renderCalHabitosList();
 }
 /* Pedido explícito: no solo VER la rutina del día en Calendario, poder
    palomear lo que sí se hizo — mismo mecanismo que los hábitos
@@ -1086,24 +1252,6 @@ async function fetchGoogleEvents(dateObj){
   const data = await res.json();
   return data.items||[];
 }
-function renderCalEventsList(events){
-  const el = document.getElementById('calEventsList'); if(!el) return;
-  el.innerHTML = events.map(ev=>{
-    const start = ev.start.dateTime ? new Date(ev.start.dateTime) : null;
-    const end = ev.end.dateTime ? new Date(ev.end.dateTime) : null;
-    const timeLabel = start ? (fmtHM(start)+(end?'–'+fmtHM(end):'')) : 'Todo el día';
-    const linkedNotes = notesForEvent(ev.id);
-    return `<div class="settings-row" style="align-items:flex-start">
-      <span style="flex:1">
-        <b>${escHtml(timeLabel)}</b><br>
-        ${escHtml(ev.summary||'(sin título)')}
-        ${ev.location?`<br><span style="color:var(--text-dim);font-size:12px">📍 ${escHtml(ev.location)}</span>`:''}
-      </span>
-      <button class="icon-btn" onclick="openEventNotesUI('${escAttr(ev.id)}','${escAttr(ev.summary||'')}','${escAttr(ev.start.dateTime||ev.start.date||'')}')" title="${linkedNotes.length?('Ver/agregar nota ('+linkedNotes.length+')'):'Crear nota para este evento'}">${linkedNotes.length?('📝 '+linkedNotes.length):'📝+'}</button>
-      <button class="icon-btn" onclick='editGoogleEvent(${JSON.stringify(ev.id)})' title="Editar evento">✏️</button>
-    </div>`;
-  }).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin eventos este día</p>';
-}
 /* Nota(s) vinculadas a un evento: se guarda el ID del evento de Google en
    la nota (columna GCalEventId) para encontrarla de vuelta con exactitud,
    sin depender de que el título no haya cambiado. Un evento puede tener
@@ -1119,7 +1267,7 @@ function openEventNotesUI(eventId, summary, startIso){
   const notes = notesForEvent(eventId);
   if(!notes.length){ createNoteForEvent(eventId, summary, startIso); return; }
   if(notes.length===1){
-    document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#calEventsList')) o.remove(); });
+    document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#calBody')) o.remove(); });
     openNoteEditor(notes[0].ID);
     return;
   }
@@ -1134,7 +1282,7 @@ function openEventNotesUI(eventId, summary, startIso){
   document.body.appendChild(overlay);
 }
 function createNoteForEvent(eventId, summary, startIso){
-  document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#calEventsList')) o.remove(); });
+  document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#calBody')) o.remove(); });
   if(editingNoteId) abandonEmptyDraftIfAny();
   const note = newBlankNote();
   note.ID = uid();
@@ -4749,10 +4897,18 @@ function openQuickTaskModal(){
   overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
     <div class="modal-head"><b>⚑ Tareas</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">Se guarda en tu listado de Tareas con #task en automático. Ponle fecha límite para que se ordene por eso (y aparezca ese día en 📅 Calendario), o agrégale etiquetas extra como #familia #trabajo para poder filtrarlas después.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">Se guarda en tu listado de Tareas con #task en automático. Ponle fecha límite para que se ordene por eso (y aparezca ese día en 📅 Calendario). Si además le pones hora, aparece junto a tus eventos y hábitos en la agenda del día; sin hora, se ve aparte en "⚑ Pendientes sin hora". Agrégale etiquetas extra como #familia #trabajo para poder filtrarlas después.</p>
       <input type="text" id="quickTaskInput" placeholder="ej. Pagar el internet">
-      <label style="font-size:12px;font-weight:600;display:block;margin-top:10px">Fecha límite (opcional)</label>
-      <input type="date" id="quickTaskDate">
+      <div style="display:flex;gap:6px;margin-top:10px">
+        <div style="flex:1">
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Fecha límite (opcional)</label>
+          <input type="date" id="quickTaskDate" style="width:100%">
+        </div>
+        <div style="flex:1">
+          <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Hora (opcional)</label>
+          <input type="time" id="quickTaskHora" style="width:100%">
+        </div>
+      </div>
       <label style="font-size:12px;font-weight:600;display:block;margin-top:10px">Etiquetas extra (opcional)</label>
       <input type="text" id="quickTaskExtraTags" placeholder="#familia #trabajo" oninput="updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()">
       <div style="margin-top:12px"><button class="btn" id="quickTaskSaveBtn" onclick="saveQuickTask()">Guardar</button></div>
@@ -4772,8 +4928,14 @@ async function saveQuickTask(){
   if(btn && btn.disabled) return;
   await withSavingFeedback(btn, async ()=>{
     const dateInp = document.getElementById('quickTaskDate');
+    const horaInp = document.getElementById('quickTaskHora');
     const extraInp = document.getElementById('quickTaskExtraTags');
-    const dueDate = dateInp.value ? new Date(dateInp.value+'T09:00:00').toISOString() : new Date().toISOString();
+    // Nunca se inventa una hora: si no se puso ninguna, la tarea queda
+    // en medianoche local — el sentinel que taskHasHour() reconoce como
+    // "sin hora" (cae en "⚑ Pendientes sin hora" en vez de la agenda a
+    // las 09:00 como antes). Sin fecha tampoco, se usa hoy.
+    const baseDateStr = dateInp.value || toDatetimeLocal(new Date()).slice(0,10);
+    const dueDate = new Date(baseDateStr+'T'+(horaInp.value||'00:00')+':00').toISOString();
     const extraTags = (extraInp.value||'').split(/\s+/).map(s=>s.replace(/^#/,'').trim()).filter(Boolean);
     const allTags = ['task'].concat(extraTags.filter(t=>t && t!=='task'));
     const nb = await ensureTareasNotebook();
@@ -4792,7 +4954,7 @@ async function saveQuickTask(){
     allTags.forEach(t=>ensureTagsRegistered('#'+t));
     renderAll();
     showToast('⚑ Tarea guardada');
-    inp.value=''; dateInp.value=''; extraInp.value=''; inp.focus();
+    inp.value=''; dateInp.value=''; horaInp.value=''; extraInp.value=''; inp.focus();
     renderQuickTaskList();
   });
 }

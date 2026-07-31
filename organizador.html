@@ -647,7 +647,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Puerto Madryn';
+const BUILD_VERSION = 'El Chaltén';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -6076,7 +6076,14 @@ function tableHeaderCellHTML(label, sortKey, sortCfg){
   const filterBtn = (sortCfg.setFilterCol && sortKey.startsWith('col:')) ? `<button class="icon-btn" style="padding:0 2px" onclick="event.stopPropagation();${sortCfg.setFilterCol}(${arg}'${escAttr(sortKey.slice(4))}')" title="Filtrar por ${escAttr(label)}">🔽</button>` : '';
   return `<th style="cursor:pointer;white-space:nowrap" onclick="${sortCfg.setSort}(${arg}'${escAttr(sortKey)}')" title="Ordenar por ${escAttr(label)}">${escHtml(label)}${active?' ▲':''}${filterBtn}</th>`;
 }
-function itemsTableHTML(rows, h, columns, grouped, sortCfg){
+/* collapseCfg (opcional, 6to parámetro) permite que cada sección se
+   pliegue a solo su título — sin él, el comportamiento es el de
+   siempre (todo expandido), así que Fill/Historial (listas
+   normalmente cortas, siempre quieres verlas completas mientras
+   llenas) no cambian en nada. Solo el editor de plantilla lo usa, y
+   solo importa de verdad con listas largas — ver la nota de
+   rendimiento junto a isTplSectionCollapsed más abajo. */
+function itemsTableHTML(rows, h, columns, grouped, sortCfg, collapseCfg){
   columns = columns||[];
   if(!rows.length) return '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
   // Categoría va AL FINAL, no junto a Elemento — el nombre de la
@@ -6096,9 +6103,12 @@ function itemsTableHTML(rows, h, columns, grouped, sortCfg){
   if(grouped){
     return dl + groupBySection(rows).map(({sec,rows})=>{
       if(!rows.length) return '';
+      const collapsed = collapseCfg && collapseCfg.isCollapsed(sec);
+      const toggleBtn = collapseCfg ? `<button class="icon-btn" style="padding:0 2px" onclick="${collapseCfg.toggleExpr(sec)}">${collapsed?'▸':'▾'}</button>` : '';
+      const titleHTML = (sec || collapseCfg) ? `<div class="fill-section-title" style="display:flex;align-items:center;gap:4px">${toggleBtn}<span>${sec?escHtml(sec):'Sin categoría'}</span><span style="color:var(--text-dim);font-weight:400;font-size:11px">(${rows.length})</span></div>` : '';
       return `<div class="fill-section">
-        ${sec ? `<div class="fill-section-title">${escHtml(sec)}</div>` : ''}
-        <div class="items-table-wrap"><table class="items-table">${headerRow}${rows.map(rowHTML).join('')}</table></div>
+        ${titleHTML}
+        ${collapsed ? '' : `<div class="items-table-wrap"><table class="items-table">${headerRow}${rows.map(rowHTML).join('')}</table></div>`}
       </div>`;
     }).join('');
   }
@@ -6311,6 +6321,7 @@ function openTemplateModal(existingId){
   let items = []; if(existing){ try{ items = JSON.parse(existing.ItemsJSON||'[]'); }catch(e){} }
   window._tplEditItems = items.map(it=>({ text: it.text||'', section: it.section||'', extra: it.extra||{} }));
   window._tplEditColumns = templateColumns(existing);
+  window._tplEditSectionCollapsed = {};
   _tplEditView = 'text';
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(900px,96vw)">
@@ -6325,6 +6336,10 @@ function openTemplateModal(existingId){
           <button id="tplViewBtnList" onclick="setTplEditView('list')">Lista</button>
           <button id="tplViewBtnTable" onclick="setTplEditView('table')">Tabla</button>
         </div>
+      </div>
+      <div id="tplSectionBulkActions" style="display:none;gap:6px;margin-bottom:6px">
+        <button class="mini-btn" style="width:auto" onclick="setAllTplSectionsCollapsed(false)">▾ Expandir todo</button>
+        <button class="mini-btn" style="width:auto" onclick="setAllTplSectionsCollapsed(true)">▸ Plegar todo</button>
       </div>
       <p class="hint" id="tplTextHint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Uno por línea. Una línea que termine en ":" empieza una categoría nueva. "elemento" solo, o "elemento | lo que quieras | lo que quieras" — cada "|" de más se vuelve una columna nueva automáticamente (varios valores separados por coma en una celda = catálogo de opciones para esa columna). Nada viene predefinido — se detectan solas al pasar a Lista/Tabla o al guardar.</p>
       <textarea id="tplItemsInput" rows="10" placeholder="documentos y dinero:
@@ -6421,6 +6436,30 @@ function removeTplColumn(i){
   if(_tplEditView==='table') renderTplEditTable();
 }
 let _tplEditSearch = '', _tplEditSort = 'orig', _tplEditFilterCol = '', _tplEditFilterVal = [];
+/* Rendimiento con listas largas (checklist real de +150 elementos que
+   un usuario pegó de un tirón, la app se sentía "trabada"): reconstruir
+   TODAS las filas (Lista o Tabla) en cada cambio —tipear una categoría,
+   agregar un elemento, etc.— es carísimo con tantos inputs a la vez.
+   Igual que ya se hace con las tarjetas de plantilla (isTplCardCollapsed)
+   y las tablas de campos (isBtCollapsed), cada SECCIÓN del editor ahora
+   se puede plegar a solo su título — con listas chicas (≤30 elementos,
+   el caso normal) arranca todo expandido como siempre; con listas
+   grandes arranca plegado por sección, así el primer render y cada
+   edición solo reconstruyen la sección que de verdad estás mirando. */
+window._tplEditSectionCollapsed = window._tplEditSectionCollapsed || {};
+function isTplSectionCollapsed(sec){
+  if(window._tplEditSectionCollapsed.hasOwnProperty(sec)) return window._tplEditSectionCollapsed[sec];
+  return (window._tplEditItems||[]).length > 30;
+}
+function toggleTplSectionCollapsed(sec){
+  window._tplEditSectionCollapsed[sec] = !isTplSectionCollapsed(sec);
+  if(_tplEditView==='table') renderTplEditTableBody(); else renderTplEditList();
+}
+function setAllTplSectionsCollapsed(collapsed){
+  const secs = Array.from(new Set((window._tplEditItems||[]).map(it=>it.section||'')));
+  secs.forEach(sec=>{ window._tplEditSectionCollapsed[sec] = collapsed; });
+  if(_tplEditView==='table') renderTplEditTableBody(); else renderTplEditList();
+}
 function setTplEditView(view){
   const prevView = _tplEditView;
   _tplEditView = view;
@@ -6454,12 +6493,14 @@ function setTplEditView(view){
     listEditor.style.display = view==='list' ? '' : 'none';
     listActions.style.display = view==='list' ? 'flex' : 'none';
     tableEditor.style.display = view==='table' ? '' : 'none';
+    document.getElementById('tplSectionBulkActions').style.display = 'flex';
     if(view==='list') renderTplEditList(); else renderTplEditTable();
   } else {
     ta.value = templateItemsToText(window._tplEditItems, window._tplEditColumns);
     ta.style.display = ''; hint.style.display = '';
     listEditor.style.display = 'none'; listActions.style.display = 'none';
     tableEditor.style.display = 'none';
+    document.getElementById('tplSectionBulkActions').style.display = 'none';
   }
 }
 function setTplEditSearch(v){ _tplEditSearch=v; renderTplEditTableBody(); }
@@ -6486,16 +6527,21 @@ function renderTplEditTableBody(){
     noteExpr:i=>`window._tplEditItems[${i}].note=this.value`,
     extraExpr:(i,ci)=>`setTplEditItemExtra(${i},${ci},this.value)`,
     delExpr:i=>`removeTplEditRow(${i});renderTplEditTable()`
-  }, columns, true, {sort:_tplEditSort, setSort:'setTplEditSort', setFilterCol:'setTplEditFilterCol'});
+  }, columns, true, {sort:_tplEditSort, setSort:'setTplEditSort', setFilterCol:'setTplEditFilterCol'}, {
+    isCollapsed: sec=>isTplSectionCollapsed(sec),
+    toggleExpr: sec=>`toggleTplSectionCollapsed('${escAttr(sec)}')`
+  });
 }
 function renderTplEditList(){
   const el = document.getElementById('tplItemsListEditor'); if(!el) return;
   const rows = window._tplEditItems.map((it,i)=>({it,i}));
   const groups = groupBySection(rows).map(({sec,rows})=>{
     if(!rows.length) return '';
+    const collapsed = isTplSectionCollapsed(sec);
+    const toggleBtn = `<button class="icon-btn" style="padding:0 2px" onclick="toggleTplSectionCollapsed('${escAttr(sec)}')">${collapsed?'▸':'▾'}</button>`;
     return `<div class="fill-section">
-      ${sec ? `<div class="fill-section-title">${escHtml(sec)}</div>` : ''}
-      ${rows.map(({it,i})=>tplEditRowHTML(it,i)).join('')}
+      <div class="fill-section-title" style="display:flex;align-items:center;gap:4px">${toggleBtn}<span>${sec?escHtml(sec):'Sin categoría'}</span><span style="color:var(--text-dim);font-weight:400;font-size:11px">(${rows.length})</span></div>
+      ${collapsed ? '' : rows.map(({it,i})=>tplEditRowHTML(it,i)).join('')}
     </div>`;
   }).join('');
   el.innerHTML = (groups ? catalogDatalistsHTML(window._tplEditColumns||[]) + groups : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos — agrega uno abajo.</p>');

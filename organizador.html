@@ -72,6 +72,11 @@ header{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1p
 header .brand{font-weight:800;font-size:16px;margin-right:6px;white-space:nowrap}
 header .search-wrap{flex:1;min-width:140px;max-width:360px}
 header .spacer{flex:1}
+/* Respaldo del spacer: si por lo que sea el spacer no empuja (p.ej.
+   quedó en su propia línea al envolver), este margen garantiza que
+   "+ Nota"/"+" igual lleguen al borde derecho en escritorio. Se apaga
+   en celular junto con el spacer, mismo media query de abajo. */
+#headerNewNoteBtn{margin-left:auto}
 /* En celular el encabezado se quedaba en 3 filas en vez de 2 — el
    .spacer (flex:1, pensado para empujar los íconos a la derecha en
    escritorio, donde el encabezado NO se envuelve) partía la fila de
@@ -83,6 +88,7 @@ header .spacer{flex:1}
    y + quepan en la misma fila que el resto de los íconos. */
 @media (hover:none) and (pointer:coarse){
   header .spacer{display:none}
+  #headerNewNoteBtn{margin-left:0}
   header .icon-btn{padding:6px 6px}
   header .btn{padding:6px 8px;font-size:13px}
   header .view-switch button{padding:6px 6px}
@@ -501,7 +507,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" onclick="openAIDrawer()" title="Asistente IA">✨</button>
     <button class="icon-btn no-print desktop-only" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
-    <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel" class="desktop-only">Sync</span></button>
+    <button class="icon-btn no-print" id="syncBtn" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel" class="desktop-only">Sync</span></button>
     <button class="icon-btn no-print hidden" id="pendingInfoBtn" onclick="openPendingSyncModal()" title="Ver qué falta por sincronizar">ℹ️</button>
     <button class="btn no-print" id="headerNewNoteBtn" onclick="openNoteEditor(null)">+ Nota</button>
     <button class="btn no-print" onclick="openCreateMenu()" title="Dato general, plantilla o registro de tiempo">+</button>
@@ -528,7 +534,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
            ahora hay harto espacio debajo; cuando vivía al final del
            panel abría hacia arriba (bottom:100%) por la razón contraria. -->
       <div class="sb-section" data-sb="orden" style="position:relative">
-        <h3 onclick="toggleSortDropdown()">⇅ <span id="sortDropdownLabel">Más recientes</span> <span class="sb-arrow">▾</span></h3>
+        <h3 onclick="toggleSortDropdown()"><span>⇅ <span id="sortDropdownLabel">Más recientes</span></span> <span class="sb-arrow">▾</span></h3>
         <div id="sortDropdownMenu" class="hidden" style="position:absolute;top:100%;left:10px;right:10px;flex-direction:column;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);z-index:30;padding:4px;gap:2px;display:flex"></div>
       </div>
 
@@ -598,7 +604,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Bariloche';
+const BUILD_VERSION = 'Salta';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -683,6 +689,137 @@ function notesOnDate(dateObj){
   return activeNotes().filter(n=>n.Fecha && n.PlantillaPropID!==TIMELOG_MARKER && new Date(n.Fecha).toDateString()===dayStr)
     .sort((a,b)=>new Date(a.Fecha)-new Date(b.Fecha));
 }
+/* ============ Mi horario: rutina semanal recurrente ============
+   Pedido explícito: no vale la pena agendar lo mismo cada semana (ej.
+   levantarse, desayunar) — se define UNA vez por día(s) de la semana
+   que aplique (L,M,X,J,V,S,D) y se calcula al vuelo qué toca mostrar
+   según el día que estés viendo en Calendario → Día, junto a eventos/
+   notas y los hábitos del día (para palomearlos ahí mismo). */
+const DIAS_SEMANA = ['L','M','X','J','V','S','D'];
+function diaCodeForDate(dateObj){
+  return ['D','L','M','X','J','V','S'][dateObj.getDay()]; // getDay(): 0=Dom..6=Sáb
+}
+function horarioItemsForDate(dateObj){
+  const code = diaCodeForDate(dateObj);
+  return (DATA.horario||[]).filter(h=>String(h.Dias||'').split(',').includes(code))
+    .sort((a,b)=>String(a.Hora||'').localeCompare(String(b.Hora||'')));
+}
+window._horarioFormDays = new Set();
+function openHorarioSettings(){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
+    <div class="modal-head"><b>🕒 Mi horario</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">Tu rutina de siempre (a qué hora te levantas, comes, etc.) — se define una vez por día de la semana, no hace falta agendarla cada semana. Se ve junto a tus eventos y notas en 📅 Calendario → Día.</p>
+      <div id="horarioList"></div>
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px">
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Agregar actividad</label>
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <input type="time" id="horarioFormHora" style="flex:none;width:110px">
+          <input type="text" id="horarioFormActividad" style="flex:1" placeholder="ej. Levantarme">
+        </div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px" id="horarioFormDiasChips"></div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+          <button class="mini-btn" style="width:auto" onclick="setHorarioFormDaysPreset('LV')">Lun-Vie</button>
+          <button class="mini-btn" style="width:auto" onclick="setHorarioFormDaysPreset('LJ')">Lun-Jue</button>
+          <button class="mini-btn" style="width:auto" onclick="setHorarioFormDaysPreset('SD')">Sáb-Dom</button>
+          <button class="mini-btn" style="width:auto" onclick="setHorarioFormDaysPreset('todos')">Todos</button>
+        </div>
+        <button class="btn" id="horarioFormSaveBtn" onclick="saveHorarioForm()">+ agregar</button>
+      </div>
+    </div>
+  </div>`;
+  overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  window._horarioFormDays = new Set();
+  renderHorarioFormDiasChips();
+  renderHorarioList();
+}
+function renderHorarioFormDiasChips(){
+  const el = document.getElementById('horarioFormDiasChips'); if(!el) return;
+  el.innerHTML = DIAS_SEMANA.map(c=>`<button class="mini-btn${window._horarioFormDays.has(c)?' active':''}" style="width:auto;padding:4px 10px" onclick="toggleHorarioFormDay('${c}')">${c}</button>`).join('');
+}
+function toggleHorarioFormDay(code){
+  if(window._horarioFormDays.has(code)) window._horarioFormDays.delete(code); else window._horarioFormDays.add(code);
+  renderHorarioFormDiasChips();
+}
+function setHorarioFormDaysPreset(preset){
+  const map = { LV:['L','M','X','J','V'], LJ:['L','M','X','J'], SD:['S','D'], todos:DIAS_SEMANA.slice() };
+  window._horarioFormDays = new Set(map[preset]||[]);
+  renderHorarioFormDiasChips();
+}
+async function saveHorarioForm(){
+  const hora = document.getElementById('horarioFormHora').value;
+  const actividad = document.getElementById('horarioFormActividad').value.trim();
+  if(!hora || !actividad){ showToast('Pon hora y actividad'); return; }
+  if(!window._horarioFormDays.size){ showToast('Elige al menos un día'); return; }
+  const btn = document.getElementById('horarioFormSaveBtn');
+  if(btn && btn.disabled) return;
+  await withSavingFeedback(btn, async ()=>{
+    await saveEntity('HORARIO', { ID:uid(), Hora:hora, Actividad:actividad, Dias:Array.from(window._horarioFormDays).join(',') });
+    document.getElementById('horarioFormActividad').value='';
+    window._horarioFormDays = new Set();
+    renderHorarioFormDiasChips();
+    renderHorarioList();
+    showToast('Agregado a tu horario');
+  });
+}
+function renderHorarioList(){
+  const el = document.getElementById('horarioList'); if(!el) return;
+  const rows = (DATA.horario||[]).slice().sort((a,b)=>String(a.Hora||'').localeCompare(String(b.Hora||'')));
+  el.innerHTML = rows.length ? rows.map(h=>`<div class="settings-row">
+      <span style="flex:1"><b>${escHtml(h.Hora)}</b> ${escHtml(h.Actividad)} <span style="color:var(--text-dim);font-size:11px">${escHtml(String(h.Dias||'').split(',').join(' '))}</span></span>
+      <button class="icon-btn" onclick="deleteHorarioItem('${h.ID}')">🗑️</button>
+    </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada todavía — agrega tu primera actividad abajo.</p>';
+}
+function deleteHorarioItem(id){
+  if(!confirm('¿Quitar esta actividad de tu horario?')) return;
+  deleteEntity('HORARIO', id).then(()=>{ renderHorarioList(); if(document.getElementById('calBody')) renderCalendarView(); });
+}
+/* Hábitos dentro del día de Calendario: mismo mecanismo que ✅ Registrar
+   hábito (HABITO_LOG = una fila por vez que se cumplió), pero contra
+   _calViewDate en vez de "siempre hoy" — así se puede palomear un
+   hábito viendo cualquier día, no solo el de hoy. */
+function toggleHabitOnCalDay(habitoId){
+  const dateStr = _calViewDate.toDateString();
+  const existing = DATA.habito_log.find(l=>l.HabitoID===habitoId && new Date(l.Fecha).toDateString()===dateStr);
+  if(existing){ deleteEntity('HABITO_LOG', existing.ID); }
+  else{ saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:_calViewDate.toISOString() }); }
+  renderCalHabitosList();
+}
+function incrementHabitOnCalDay(habitoId){
+  saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:_calViewDate.toISOString() });
+  renderCalHabitosList();
+}
+function decrementHabitOnCalDay(habitoId){
+  const dateStr = _calViewDate.toDateString();
+  const todays = DATA.habito_log.filter(l=>l.HabitoID===habitoId && new Date(l.Fecha).toDateString()===dateStr).sort((a,b)=>+new Date(b.Fecha)-+new Date(a.Fecha));
+  if(!todays.length) return;
+  deleteEntity('HABITO_LOG', todays[0].ID);
+  renderCalHabitosList();
+}
+function renderCalHabitosList(){
+  const el = document.getElementById('calHabitosList'); if(!el) return;
+  const activos = DATA.habitos.filter(h=>h.Activo!=='0');
+  const dateStr = _calViewDate.toDateString();
+  el.innerHTML = activos.length ? activos.map(h=>{
+    const goal = habitGoal(h);
+    const nameSpan = `<span style="flex:1">${h.Emoji||'✅'} ${escHtml(h.Nombre)}</span>`;
+    if(goal>1){
+      const count = habitCountOnDate(h.ID, dateStr);
+      const done = count>=goal;
+      return `<div class="settings-row">${nameSpan}<span style="font-size:12px;font-weight:600;${done?'color:var(--success)':'color:var(--text-dim)'}">${count}/${goal}</span>
+        <button class="icon-btn" onclick="decrementHabitOnCalDay('${h.ID}')" ${count<=0?'disabled':''} title="Quitar uno">−</button>
+        <button class="icon-btn" onclick="incrementHabitOnCalDay('${h.ID}')" title="Sumar uno">+</button>
+      </div>`;
+    }
+    const done = !!DATA.habito_log.find(l=>l.HabitoID===h.ID && new Date(l.Fecha).toDateString()===dateStr);
+    return `<div class="settings-row" style="cursor:pointer" onclick="toggleHabitOnCalDay('${h.ID}')">
+      <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHabitOnCalDay('${h.ID}')">
+      ${nameSpan}
+    </div>`;
+  }).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin hábitos activos.</p>';
+}
 function openNoteFromCalendar(id){
   document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#calBody')) o.remove(); });
   openNoteEditor(id);
@@ -715,6 +852,17 @@ function renderCalDayView(){
     <div style="margin-top:16px">
       <b style="font-size:12px;color:var(--text-dim)">📝 Notas de este día</b>
       <div id="calNotesList" style="margin-top:6px"></div>
+    </div>
+    <div style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b style="font-size:12px;color:var(--text-dim)">🕒 Mi horario</b>
+        <button class="icon-btn" onclick="openHorarioSettings()" title="Editar mi horario">✏️</button>
+      </div>
+      <div id="calHorarioList" style="margin-top:6px"></div>
+    </div>
+    <div style="margin-top:16px">
+      <b style="font-size:12px;color:var(--text-dim)">✅ Hábitos</b>
+      <div id="calHabitosList" style="margin-top:6px"></div>
     </div>`;
   if(googleAccessToken){
     fetchGoogleEvents(_calViewDate).then(renderCalEventsList).catch(err=>{
@@ -726,6 +874,12 @@ function renderCalDayView(){
   notesEl.innerHTML = notes.length ? notes.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
       <span style="flex:1"><b>${escHtml(fmtHM(new Date(n.Fecha)))}</b> ${escHtml(n.Titulo||'(sin título)')}</span>
     </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin notas este día</p>';
+  const horarioEl = document.getElementById('calHorarioList');
+  const horarioItems = horarioItemsForDate(_calViewDate);
+  horarioEl.innerHTML = horarioItems.length ? horarioItems.map(h=>`<div class="settings-row">
+      <span style="flex:1"><b>${escHtml(h.Hora)}</b> ${escHtml(h.Actividad)}</span>
+    </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada definido para este día — ✏️ arriba para agregarlo.</p>';
+  renderCalHabitosList();
 }
 function renderCalMonthGrid(){
   const body = document.getElementById('calBody'); if(!body) return;
@@ -926,7 +1080,7 @@ function deleteGoogleEventUI(eventId){
 }
 let GAS_URL = localStorage.getItem('org_gas_url') || '';
 let SHEET_ID = localStorage.getItem('org_sheet_id') || '';
-let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[], personas:[], habitos:[], habito_log:[], comandos:[] };
+let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[], personas:[], habitos:[], habito_log:[], comandos:[], horario:[] };
 // Banderas rápidas de fábrica (no se pueden borrar) — las que agrega el
 // usuario desde Configuración se guardan como filas normales en el Sheet
 // (tabla FLAGS), igual que cualquier otra etiqueta o nota, para que
@@ -1110,6 +1264,8 @@ function updateSyncIndicator(){
   const offline = !navigator.onLine;
   dot.className = _syncing ? 'busy' : ((pending||offline) ? 'off' : '');
   lbl.textContent = _syncing ? '…' : (pending ? pending+' pend.' : (offline ? 'Sin conexión' : 'Sync'));
+  const btn = document.getElementById('syncBtn');
+  if(btn) btn.title = _syncing ? 'Sincronizando…' : (pending ? pending+' cambio(s) por sincronizar' : (offline ? 'Sin conexión' : '✓ Sincronizado'));
   const infoBtn = document.getElementById('pendingInfoBtn');
   if(infoBtn) infoBtn.classList.toggle('hidden', !pending);
 }
@@ -1199,12 +1355,12 @@ function normalizeData(d){
     diccionario: d.diccionario||[], feedback: d.feedback||[],
     bloque_tablas: d.bloque_tablas||[], plantillas_prop: d.plantillas_prop||[],
     flags: d.flags||[], busquedas: d.busquedas||[], personas: d.personas||[],
-    habitos: d.habitos||[], habito_log: d.habito_log||[], comandos: d.comandos||[]
+    habitos: d.habitos||[], habito_log: d.habito_log||[], comandos: d.comandos||[], horario: d.horario||[]
   };
 }
 
 /* ============ CRUD genérico local + remoto ============ */
-const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas', HABITOS:'habitos', HABITO_LOG:'habito_log', COMANDOS:'comandos' };
+const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas', HABITOS:'habitos', HABITO_LOG:'habito_log', COMANDOS:'comandos', HORARIO:'horario' };
 function cacheData(){ try{ localStorage.setItem('org_data_cache', JSON.stringify(DATA)); }catch(e){} }
 async function saveEntity(table, obj){
   if(!obj.ID) obj.ID = uid();
@@ -3753,6 +3909,7 @@ function openCreateMenu(){
     <div class="modal-head"><b>+ Nuevo</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body" style="display:flex;flex-direction:column;gap:8px">
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openQuickDatoModal()">⚡ Dato general</button>
+      <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openQuickTaskModal()">⚑ Tareas</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openFieldTemplatePicker()">🏷️ Plantilla</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openChecklists()">☑️ Checklist</button>
       <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();openTimeLogModal()">⏱ Registro de tiempo</button>
@@ -4342,6 +4499,76 @@ function renderQuickDatoList(){
       <span style="flex:1;font-size:13px">${escHtml(n.Titulo)} <span style="color:var(--text-dim)">— ${escHtml(noteSnippetText(n).slice(0,40))}</span></span>
       <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
     </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Aún no hay nada aquí — el primero que guardes aparece arriba.</p>';
+}
+
+/* ============ Tareas: captura rápida con #task automático ============
+   Mismo patrón que +Dato general (modal que se queda abierto para
+   seguir capturando una tras otra), pero con dos campos propios: fecha
+   límite (reutiliza el campo Fecha de la nota, que YA hace que la nota
+   aparezca ese día en Calendario — no hace falta inventar un campo
+   nuevo) y etiquetas extra en texto libre (#familia, #trabajo…) para
+   poder filtrarlas después desde la barra lateral, además de la
+   bandera rápida ⚑ #task que ya existe y las agrupa a todas. */
+const TAREAS_NOTEBOOK = 'Tareas';
+async function ensureTareasNotebook(){
+  let nb = DATA.notebooks.find(n=>n.Nombre===TAREAS_NOTEBOOK);
+  if(!nb) nb = await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:TAREAS_NOTEBOOK, TagsHeredados:'', Color:'#4a6fa5', TagAuto:'' });
+  return nb;
+}
+function openQuickTaskModal(){
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
+    <div class="modal-head"><b>⚑ Tareas</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body">
+      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">Se guarda en tu listado de Tareas con #task en automático. Ponle fecha límite para que se ordene por eso (y aparezca ese día en 📅 Calendario), o agrégale etiquetas extra como #familia #trabajo para poder filtrarlas después.</p>
+      <input type="text" id="quickTaskInput" placeholder="ej. Pagar el internet">
+      <label style="font-size:12px;font-weight:600;display:block;margin-top:10px">Fecha límite (opcional)</label>
+      <input type="date" id="quickTaskDate">
+      <label style="font-size:12px;font-weight:600;display:block;margin-top:10px">Etiquetas extra (opcional)</label>
+      <input type="text" id="quickTaskExtraTags" placeholder="#familia #trabajo" oninput="updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()">
+      <div style="margin-top:12px"><button class="btn" id="quickTaskSaveBtn" onclick="saveQuickTask()">Guardar</button></div>
+      <div id="quickTaskList" style="margin-top:14px"></div>
+    </div>
+  </div>`;
+  overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  document.getElementById('quickTaskInput').focus();
+  document.getElementById('quickTaskInput').onkeydown = e=>{ if(e.key==='Enter') saveQuickTask(); };
+  renderQuickTaskList();
+}
+async function saveQuickTask(){
+  const inp = document.getElementById('quickTaskInput');
+  const titulo = (inp.value||'').trim(); if(!titulo) return;
+  const btn = document.getElementById('quickTaskSaveBtn');
+  if(btn && btn.disabled) return;
+  await withSavingFeedback(btn, async ()=>{
+    const dateInp = document.getElementById('quickTaskDate');
+    const extraInp = document.getElementById('quickTaskExtraTags');
+    const dueDate = dateInp.value ? new Date(dateInp.value+'T09:00:00').toISOString() : new Date().toISOString();
+    const extraTags = (extraInp.value||'').split(/\s+/).map(s=>s.replace(/^#/,'').trim()).filter(Boolean);
+    const allTags = ['task'].concat(extraTags.filter(t=>t && t!=='task'));
+    const nb = await ensureTareasNotebook();
+    const note = {
+      ID:'', Fecha: dueDate, FechaEdicion: new Date().toISOString(),
+      Titulo: titulo,
+      Contenido: '<p>'+escHtml(titulo)+'</p>',
+      Tags: allTags.map(t=>'#'+t).join(' '), Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:''
+    };
+    await saveEntity('NOTAS', note);
+    allTags.forEach(t=>ensureTagsRegistered('#'+t));
+    renderAll();
+    showToast('⚑ Tarea guardada');
+    inp.value=''; dateInp.value=''; extraInp.value=''; inp.focus();
+    renderQuickTaskList();
+  });
+}
+function renderQuickTaskList(){
+  const wrap = document.getElementById('quickTaskList'); if(!wrap) return;
+  const items = activeNotes().filter(n=>n.Notebook===TAREAS_NOTEBOOK).sort((a,b)=>String(a.Fecha).localeCompare(String(b.Fecha))).slice(0,8);
+  wrap.innerHTML = items.length ? items.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteEditor('${n.ID}')">
+      <span style="flex:1;font-size:13px">${escHtml(n.Titulo)}</span>
+      <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
+    </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin tareas todavía — la primera que guardes aparece arriba.</p>';
 }
 
 /* ============ Registro de tiempo: bloques que se cierran solos ==========
@@ -5169,25 +5396,56 @@ protector solar | comprar al llegar | alta"></textarea>
     overlay.remove();
   });
 }
-function parseTemplateText(text){
+/* Detección automática de columnas al pegar/escribir texto con MÁS de
+   los 3 campos fijos (elemento | destino | prioridad): cualquier
+   segmento extra (posición 4, 5...) se vuelve una columna personalizada
+   nueva, nombrada genéricamente "Columna N" (no hay encabezado en el
+   texto plano del que sacar un nombre real — el usuario la renombra
+   después con ✎ si quiere). Si una celda trae comas, cada trozo se
+   suma al catálogo sugerido de esa columna en vez de tratarse como un
+   solo valor — el pedido explícito era "yo pongo mi lista con el
+   formato que quiera y de ahí solo arma la tabla". */
+function autoDetectColumnsFromText(text){
+  const lines = (text||'').split('\n').map(l=>l.trim()).filter(l=>l && !/:$/.test(l));
+  let maxParts = 3;
+  lines.forEach(l=>{ const n = l.split('|').length; if(n>maxParts) maxParts = n; });
+  const cols = [];
+  for(let idx=3; idx<maxParts; idx++){
+    const catalogSet = new Set();
+    lines.forEach(l=>{
+      const parts = l.split('|').map(s=>s.trim());
+      if(parts[idx]) parts[idx].split(',').map(s=>s.trim()).filter(Boolean).forEach(v=>catalogSet.add(v));
+    });
+    cols.push({ name:'Columna '+(idx+1), catalog: Array.from(catalogSet) });
+  }
+  return cols;
+}
+function parseTemplateText(text, columns){
+  columns = columns||[];
   let section = ''; const items = [];
   (text||'').split('\n').forEach(raw=>{
     const line = raw.trim(); if(!line) return;
     if(/:$/.test(line)){ section = line.slice(0,-1).trim(); return; }
     const parts = line.split('|').map(s=>s.trim());
-    if(parts.length>=3) items.push({ text:parts[0], destino:parts[1], priority:normalizePriority(parts[2]), section });
-    else if(parts.length===2) items.push({ text:parts[0], destino:parts[1], priority:'', section });
-    else items.push({ text:parts[0], destino:'', priority:'', section });
+    const extra = {};
+    columns.forEach((c,ci)=>{ const idx=ci+3; if(parts[idx]) extra[c.name] = parts[idx]; });
+    if(parts.length>=3) items.push({ text:parts[0], destino:parts[1], priority:normalizePriority(parts[2]), section, extra });
+    else if(parts.length===2) items.push({ text:parts[0], destino:parts[1], priority:'', section, extra });
+    else items.push({ text:parts[0], destino:'', priority:'', section, extra });
   });
   return items;
 }
-function templateItemsToText(items){
+function templateItemsToText(items, columns){
+  columns = columns||[];
   const out=[]; let last=null;
   items.forEach(it=>{
     const sec = it.section||'';
     if(sec!==last){ if(out.length) out.push(''); if(sec) out.push(sec+':'); last=sec; }
+    const extraVals = columns.map(c=>(it.extra&&it.extra[c.name])||'');
+    while(extraVals.length && !extraVals[extraVals.length-1]) extraVals.pop();
     let line = it.text;
-    if(it.priority) line += ' | '+(it.destino||'')+' | '+it.priority;
+    if(extraVals.length) line += ' | '+(it.destino||'')+' | '+(it.priority||'')+' | '+extraVals.join(' | ');
+    else if(it.priority) line += ' | '+(it.destino||'')+' | '+it.priority;
     else if(it.destino) line += ' | '+it.destino;
     out.push(line);
   });
@@ -5336,13 +5594,13 @@ function openTemplateModal(existingId){
           <button id="tplViewBtnTable" onclick="setTplEditView('table')">Tabla</button>
         </div>
       </div>
-      <p class="hint" id="tplTextHint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Uno por línea. Una línea que termine en ":" empieza una categoría nueva. "elemento | destino" para marcar a dónde va, o "elemento | destino | prioridad" (alta/media/baja) — luego puedes filtrar/ordenar por eso al llenar la lista.</p>
+      <p class="hint" id="tplTextHint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Uno por línea. Una línea que termine en ":" empieza una categoría nueva. "elemento | destino | prioridad" (alta/media/baja). Si agregas más "|" después de eso, cada uno se vuelve una columna nueva automáticamente (varios valores separados por coma en una celda = catálogo de opciones para esa columna) — se detectan solas al pasar a Lista/Tabla o al guardar.</p>
       <textarea id="tplItemsInput" rows="10" placeholder="documentos y dinero:
 pasaporte y visa | equipaje de mano | alta
 cartera | equipaje de mano
 ropa:
 camisetas | maleta documentada
-protector solar | comprar al llegar">${existing?escHtml(templateItemsToText(items)):''}</textarea>
+protector solar | comprar al llegar">${existing?escHtml(templateItemsToText(items, window._tplEditColumns)):''}</textarea>
       <div id="tplItemsListEditor" style="display:none"></div>
       <div id="tplListActions" style="display:none;gap:6px;margin-top:8px;flex-wrap:wrap">
         <button class="mini-btn" onclick="addTplEditRow('')">+ elemento suelto</button>
@@ -5353,7 +5611,7 @@ protector solar | comprar al llegar">${existing?escHtml(templateItemsToText(item
         <div id="tplTableBody"></div>
       </div>
       <label style="font-size:12px;font-weight:600;display:block;margin-top:14px">Columnas personalizadas (ej. caducidad)</label>
-      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:2px 0 6px">Elige tú qué más quieres llevar por elemento en esta lista — aparece como un campo más al llenarla. Puedes agregar opciones sugeridas para elegir de una lista, o escribir algo nuevo cada vez.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:2px 0 6px">Elige tú qué más quieres llevar por elemento en esta lista — aparece como un campo más al llenarla. Puedes agregar opciones sugeridas para elegir de una lista, o escribir algo nuevo cada vez. Si las agregaste solas escribiendo "|" de más en Texto, aquí puedes renombrarlas (clic en el nombre).</p>
       <div id="tplColumnsChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <input type="text" id="tplNewColumnInput" style="flex:1" placeholder="nombre de columna (ej. prioridad de viaje)" onkeydown="if(event.key==='Enter'){event.preventDefault();addTplColumn();}">
@@ -5373,8 +5631,22 @@ function renderTplColumnsChips(){
   const el = document.getElementById('tplColumnsChips'); if(!el) return;
   const columns = window._tplEditColumns||[];
   el.innerHTML = columns.length
-    ? columns.map((c,i)=>`<span class="tag-badge">${escHtml(c.name)}${c.catalog&&c.catalog.length?` (${c.catalog.length})`:''} <button class="icon-btn" style="padding:0 2px" onclick="editTplColumnCatalog(${i})" title="Editar opciones sugeridas">✎</button><button class="icon-btn" style="padding:0 2px" onclick="removeTplColumn(${i})" title="Quitar columna">✕</button></span>`).join('')
+    ? columns.map((c,i)=>`<span class="tag-badge"><span style="cursor:pointer" onclick="renameTplColumn(${i})" title="Renombrar columna">${escHtml(c.name)}</span>${c.catalog&&c.catalog.length?` (${c.catalog.length})`:''} <button class="icon-btn" style="padding:0 2px" onclick="editTplColumnCatalog(${i})" title="Editar opciones sugeridas">✎</button><button class="icon-btn" style="padding:0 2px" onclick="removeTplColumn(${i})" title="Quitar columna">✕</button></span>`).join('')
     : '<span class="hint" style="color:var(--text-dim);font-size:12px">Ninguna todavía.</span>';
+}
+function renameTplColumn(i){
+  const col = window._tplEditColumns[i]; if(!col) return;
+  const val = prompt('Nombre de la columna:', col.name);
+  if(val===null) return;
+  const newName = val.trim(); if(!newName || newName===col.name) return;
+  if(window._tplEditColumns.some((c,ci)=>ci!==i && c.name===newName)){ showToast('Ya existe una columna con ese nombre'); return; }
+  const oldName = col.name; col.name = newName;
+  (window._tplEditItems||[]).forEach(it=>{
+    if(it.extra && Object.prototype.hasOwnProperty.call(it.extra, oldName)){ it.extra[newName] = it.extra[oldName]; delete it.extra[oldName]; }
+  });
+  renderTplColumnsChips();
+  if(_tplEditView==='list') renderTplEditList();
+  if(_tplEditView==='table') renderTplEditTable();
 }
 function addTplColumn(){
   const inp = document.getElementById('tplNewColumnInput');
@@ -5417,19 +5689,22 @@ function setTplEditView(view){
   const tableEditor = document.getElementById('tplItemsTableEditor');
   const hint = document.getElementById('tplTextHint');
   if(view==='list' || view==='table'){
-    // el texto plano no sabe de columnas personalizadas — si la cantidad
-    // de elementos no cambió mientras estuvo en modo Texto, se recupera
-    // el "extra" de cada uno por posición (mismo criterio implícito que
-    // ya se usa para no perder nada al ir y venir entre vistas). Solo se
-    // vuelve a parsear el texto si de verdad se viene de esa vista —
-    // Lista<->Tabla comparten el mismo array en memoria sin pasar por el
-    // textarea, para no pisar ediciones hechas en la otra vista.
+    // el texto plano ahora SÍ sabe de columnas personalizadas: si no hay
+    // ninguna definida todavía, se auto-detectan a partir de los "|" de
+    // más que traiga el texto (ver autoDetectColumnsFromText). Si ya
+    // hay columnas (definidas a mano o de una vuelta anterior), se
+    // respetan tal cual — no se pisan solas. parseTemplateText lee el
+    // "extra" de cada línea usando esas columnas, así que ya no hace
+    // falta recuperarlo por posición como antes. Solo se re-parsea si
+    // de verdad se viene de Texto — Lista<->Tabla comparten el mismo
+    // array en memoria sin pasar por el textarea, para no pisar
+    // ediciones hechas en la otra vista.
     if(prevView==='text'){
-      const prevItems = window._tplEditItems;
-      window._tplEditItems = parseTemplateText(ta.value);
-      window._tplEditItems.forEach((it,i)=>{
-        it.extra = (prevItems && prevItems.length===window._tplEditItems.length && prevItems[i].extra) || {};
-      });
+      if(!(window._tplEditColumns&&window._tplEditColumns.length)){
+        const detected = autoDetectColumnsFromText(ta.value);
+        if(detected.length){ window._tplEditColumns = detected; renderTplColumnsChips(); }
+      }
+      window._tplEditItems = parseTemplateText(ta.value, window._tplEditColumns);
     }
     ta.style.display = 'none'; hint.style.display = 'none';
     listEditor.style.display = view==='list' ? '' : 'none';
@@ -5437,7 +5712,7 @@ function setTplEditView(view){
     tableEditor.style.display = view==='table' ? '' : 'none';
     if(view==='list') renderTplEditList(); else renderTplEditTable();
   } else {
-    ta.value = templateItemsToText(window._tplEditItems);
+    ta.value = templateItemsToText(window._tplEditItems, window._tplEditColumns);
     ta.style.display = ''; hint.style.display = '';
     listEditor.style.display = 'none'; listActions.style.display = 'none';
     tableEditor.style.display = 'none';
@@ -5504,9 +5779,13 @@ function removeTplEditRow(i){ window._tplEditItems.splice(i,1); renderTplEditLis
 function saveTemplateModal(btn, existingId){
   const nombre = document.getElementById('tplNameInput').value.trim();
   if(!nombre){ showToast('Ponle un nombre a la plantilla'); return; }
+  if(_tplEditView==='text' && !(window._tplEditColumns&&window._tplEditColumns.length)){
+    const detected = autoDetectColumnsFromText(document.getElementById('tplItemsInput').value);
+    if(detected.length) window._tplEditColumns = detected;
+  }
   const items = _tplEditView!=='text'
     ? window._tplEditItems.filter(it=>it.text && it.text.trim())
-    : parseTemplateText(document.getElementById('tplItemsInput').value);
+    : parseTemplateText(document.getElementById('tplItemsInput').value, window._tplEditColumns);
   const recordatorio = document.getElementById('tplRecordatorio').value;
   const row = { ID: existingId||uid(), Nombre:nombre, ItemsJSON: JSON.stringify(items), Tags:'', Recordatorio:recordatorio, ColumnasJSON: JSON.stringify(window._tplEditColumns||[]) };
   saveEntity('PLANTILLAS', row).then(()=>{

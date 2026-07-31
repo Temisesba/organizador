@@ -44,7 +44,8 @@ const TABLE_DEFS = {
   PERSONAS:      ['ID', 'Nombre', 'Color', 'FechaNacimiento', 'GCalEventId'],
   HABITOS:       ['ID', 'Nombre', 'Emoji', 'Color', 'Activo', 'Hora', 'Recordatorio', 'Meta', 'HorasJSON', 'Dosis', 'FechaInicio', 'FechaFin', 'Observaciones'],
   HABITO_LOG:    ['ID', 'HabitoID', 'Fecha'],
-  COMANDOS:      ['ID', 'Nombre', 'Tipo', 'Valor']
+  COMANDOS:      ['ID', 'Nombre', 'Tipo', 'Valor'],
+  HORARIO:       ['ID', 'Hora', 'Actividad', 'Dias']
 };
 
 // ── Router GET (solo lectura ligera, ej. ping de conexión) ────
@@ -107,7 +108,7 @@ function getSS(sheetId) {
 // formato de texto ("@") en estas columnas evita que Sheets convierta
 // el valor en primer lugar — nunca se guarda como Hora-de-Sheets, así
 // que nunca hay nada que reconstruir/adivinar en zona horaria alguna.
-const TEXT_FORMAT_COLUMNS = { HABITOS: ['Hora', 'HorasJSON'] };
+const TEXT_FORMAT_COLUMNS = { HABITOS: ['Hora', 'HorasJSON'], HORARIO: ['Hora'] };
 function getTable(ss, tableName) {
   const headers = TABLE_DEFS[tableName];
   if (!headers) throw new Error('Tabla desconocida: ' + tableName);

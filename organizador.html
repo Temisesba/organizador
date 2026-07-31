@@ -158,11 +158,18 @@ main:fullscreen{background:var(--bg);padding:20px}
 .tag-badge.hit{background:var(--accent);border-color:var(--accent);color:var(--accent-text);font-weight:700}
 [data-theme="eink"] .tag-badge{border:1.5px solid #000}
 .nc-foot{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-dim)}
+/* Botón "plegar tarjeta" (▾/▸) — chico, discreto, se pega al borde
+   derecho del título vía margin-left:auto sin importar qué más haya
+   en la misma fila (nc-title es solo texto; chapter-title-right ya
+   agrupa la meta + este botón para no desarmar el layout existente). */
+.card-fold-btn{background:none;border:1px solid var(--border);border-radius:6px;width:20px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:1;color:var(--text-dim);cursor:pointer;margin-left:auto}
+.card-fold-btn:hover{background:var(--bg-soft);color:var(--text)}
 
 /* "capítulo" (nota con campos/Cornell) mostrado como tarjetitas por fila */
 .chapter-group{grid-column:1/-1;background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--radius);padding:12px;box-shadow:var(--shadow);cursor:pointer}
 .chapter-group:hover{border-color:var(--accent)}
 .chapter-title{font-weight:700;font-size:14.5px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.chapter-title-right{display:flex;align-items:center;gap:6px;flex:none}
 .chapter-meta{font-weight:400;font-size:11px;color:var(--text-dim);white-space:nowrap}
 .field-cards-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .field-card{background:var(--bg-soft);border:1px solid var(--border);border-radius:8px;padding:8px 10px;min-width:130px;max-width:220px;flex:1 1 130px}
@@ -631,7 +638,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Córdoba';
+const BUILD_VERSION = 'Mar del Plata';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2513,14 +2520,29 @@ function cardsHTML(notes, query, pane){
   if(!cards.length) return '<p style="color:var(--text-dim)">Nada coincide con tu búsqueda.</p>';
   return '<div class="cards-grid">' + cards.join('') + '</div>';
 }
+/* Plegar una tarjeta (nota simple o capítulo de campos) a solo título +
+   etiquetas — pedido explícito para poder recorrer la vista de tarjetas
+   más rápido sin que cada nota larga (o capítulo con muchos campos)
+   ocupe toda la pantalla. Se acuerda solo por sesión (no en localStorage,
+   mismo criterio ya usado por isTplCardCollapsed/isBtCollapsed) — no
+   tiene sentido que una nota se quede "plegada para siempre" entre
+   recargas si el usuario solo la estaba compactando de paso. */
+window._cardCollapsed = window._cardCollapsed || {};
+function isCardCollapsed(id){ return !!window._cardCollapsed[id]; }
+function toggleCardCollapsed(id){ window._cardCollapsed[id] = !isCardCollapsed(id); renderMain(); }
+function cardFoldBtnHTML(id){
+  const collapsed = isCardCollapsed(id);
+  return `<button class="card-fold-btn" onclick="event.stopPropagation();toggleCardCollapsed('${id}')" title="${collapsed?'Expandir':'Plegar (ver solo título y etiquetas)'}">${collapsed?'▸':'▾'}</button>`;
+}
 function noteCardHTML(n, pane){
   const tags = effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`).join('');
   const snip = noteSnippetText(n).slice(0,140);
+  const collapsed = isCardCollapsed(n.ID);
   return `<div class="note-card" onclick="openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})" style="${n.Color?('border-left:4px solid '+n.Color):''}">
-    <div class="nc-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}</div>
-    <div class="nc-snip">${escHtml(snip)}</div>
+    <div class="nc-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}${cardFoldBtnHTML(n.ID)}</div>
+    ${collapsed?'':`<div class="nc-snip">${escHtml(snip)}</div>`}
     <div class="nc-tags">${tags}</div>
-    <div class="nc-foot"><span>${n.Notebook?escHtml(n.Notebook):''}</span><span>${fmtDate(n.Fecha)}</span></div>
+    ${collapsed?'':`<div class="nc-foot"><span>${n.Notebook?escHtml(n.Notebook):''}</span><span>${fmtDate(n.Fecha)}</span></div>`}
   </div>`;
 }
 /* Etiquetas "#sueltas" encontradas DENTRO del texto de un campo/fila —
@@ -2562,10 +2584,11 @@ function chapterGroupHTML(n, pairs, highlight, pane){
     // tocaba buscar a mano dónde estaba lo que se quería ver.
     return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}','${escAttr(p.cue)}'${pane?`,'${pane}'`:''})"><div class="field-card-tag">${escHtml(label)}${syncBtn}</div><div class="field-card-text">${escHtml(text)}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
   }).join('');
+  const collapsed = isCardCollapsed(n.ID);
   return `<div class="chapter-group" onclick="openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})" style="${n.Color?('border-left:4px solid '+n.Color):''}">
-    <div class="chapter-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}<span class="chapter-meta">${n.Notebook?(escHtml(n.Notebook)+' · '):''}${fmtDate(n.Fecha)}</span></div>
+    <div class="chapter-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}<span class="chapter-title-right"><span class="chapter-meta">${n.Notebook?(escHtml(n.Notebook)+' · '):''}${fmtDate(n.Fecha)}</span>${cardFoldBtnHTML(n.ID)}</span></div>
     ${nbTags?`<div class="nc-tags">${nbTags}</div>`:''}
-    <div class="field-cards-row">${miniCards}</div>
+    ${collapsed?'':`<div class="field-cards-row">${miniCards}</div>`}
   </div>`;
 }
 /* Capítulo del Registro de tiempo: mismo look que chapterGroupHTML,

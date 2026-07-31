@@ -41,7 +41,7 @@ const GOOGLE_CLIENT_SECRET = PropertiesService.getScriptProperties().getProperty
 const TABLE_DEFS = {
   NOTAS:         ['ID', 'Fecha', 'FechaEdicion', 'Titulo', 'Contenido', 'Tags', 'Notebook', 'Cornell', 'CornellCue', 'Color', 'Pinned', 'Orden', 'Archivo', 'Papelera', 'GCalEventId', 'PlantillaPropID', 'CamposGCalJSON'],
   TAGS:          ['ID', 'Etiqueta', 'Color', 'EsComando', 'Descripcion'],
-  NOTEBOOKS:     ['ID', 'Nombre', 'TagsHeredados', 'Color', 'TagAuto'],
+  NOTEBOOKS:     ['ID', 'Nombre', 'TagsHeredados', 'Color', 'TagAuto', 'Password'],
   PLANTILLAS:    ['ID', 'Nombre', 'ItemsJSON', 'Tags', 'Recordatorio', 'ColumnasJSON', 'Papelera'],
   HISTORIAL:     ['ID', 'PlantillaID', 'Fecha', 'ItemsJSON', 'NotaID', 'Nombre'],
   DICCIONARIO:   ['ID', 'Termino', 'Traduccion', 'Notas', 'Fecha', 'Favorito'],

@@ -624,7 +624,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Comodoro';
+const BUILD_VERSION = 'Bahía Blanca';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1748,7 +1748,62 @@ function tagColor(name){
    DATA.notas (y en el Sheet) hasta que se restauren o se borren para
    siempre desde 🗑️ Papelera. getNote(id) sigue viendo TODAS las notas,
    trashed o no, porque la propia Papelera necesita poder encontrarlas. */
-function activeNotes(){ return DATA.notas.filter(n=>!n.Papelera); }
+/* ============ Cuadernos con contraseña ============
+   IMPORTANTE — esto es un CANDADO, no cifrado: esconde las notas de un
+   cuaderno protegido de Inbox/búsqueda/etiquetas/Calendario/etc. hasta
+   que se escriba la contraseña correcta en la sesión actual, pero el
+   contenido sigue viajando y guardándose en texto plano en tu Google
+   Sheet de siempre — cualquiera con acceso directo a esa hoja (o a este
+   código) puede leerlo igual. Sirve para que no se vea "sin querer" al
+   usar la app, NO para proteger algo de alguien con acceso a tu Sheet.
+   Se guarda solo el HASH SHA-256 (no la contraseña en texto) en la
+   columna Password de NOTEBOOKS. El desbloqueo vive SOLO en memoria
+   (window._unlockedNotebooks) — se resetea con cada recarga, que es
+   justo el comportamiento de un candado real (no "recuérdame"). */
+window._unlockedNotebooks = new Set();
+async function hashPassword(pw){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function notebookByName(name){ return DATA.notebooks.find(nb=>nb.Nombre===name); }
+function isNotebookLocked(name){
+  if(!name) return false;
+  const nb = notebookByName(name);
+  return !!(nb && nb.Password && !window._unlockedNotebooks.has(name));
+}
+/* Pide la contraseña (prompt() es lo más simple para algo que solo pasa
+   de vez en cuando, mismo criterio que otros diálogos puntuales de la
+   app) y la compara por hash. Devuelve true/false — quien llama decide
+   qué hacer si no se desbloqueó. */
+async function unlockNotebookPrompt(name){
+  const nb = notebookByName(name); if(!nb || !nb.Password) return true;
+  if(window._unlockedNotebooks.has(name)) return true;
+  const pw = prompt('🔒 "'+name+'" tiene contraseña. Escríbela para verlo:');
+  if(pw===null) return false;
+  const hash = await hashPassword(pw);
+  if(hash!==nb.Password){ showToast('Contraseña incorrecta'); return false; }
+  window._unlockedNotebooks.add(name);
+  return true;
+}
+async function toggleNotebookPasswordUI(id){
+  const nb = DATA.notebooks.find(x=>x.ID===id); if(!nb) return;
+  if(nb.Password){
+    if(!confirm('¿Quitar la contraseña de "'+nb.Nombre+'"? Sus notas volverán a verse en Inbox y demás sin pedir nada.')) return;
+    nb.Password = ''; window._unlockedNotebooks.add(nb.Nombre);
+    await saveEntity('NOTEBOOKS', nb);
+    showToast('🔓 Contraseña quitada'); renderSettingsNotebooks(); renderAll();
+    return;
+  }
+  const pw = prompt('Nueva contraseña para "'+nb.Nombre+'":'); if(!pw) return;
+  const pw2 = prompt('Repítela para confirmar:');
+  if(pw!==pw2){ showToast('No coinciden — inténtalo de nuevo'); return; }
+  nb.Password = await hashPassword(pw);
+  window._unlockedNotebooks.add(nb.Nombre); // recién puesta, ya la escribiste, no hace falta pedirla de vuelta esta sesión
+  await saveEntity('NOTEBOOKS', nb);
+  showToast('🔒 Contraseña puesta — sus notas ya no se ven en Inbox hasta desbloquearlo');
+  renderSettingsNotebooks(); renderAll();
+}
+function activeNotes(){ return DATA.notas.filter(n=>!n.Papelera && !isNotebookLocked(n.Notebook)); }
 /* Mayús/minús no debería importar para una etiqueta ("#Dengue" y
    "#dengue" son la misma cosa) — se agrupa por su forma en minúsculas
    para que el panel lateral/Configuración muestren un solo renglón
@@ -1928,7 +1983,11 @@ document.addEventListener('click', e=>{
   if(sidebar.contains(e.target) || e.target.closest('#btnMenu')) return;
   sidebar.classList.remove('open');
 });
-function setActiveNotebook(name){
+async function setActiveNotebook(name){
+  if(name && name!==NO_NOTEBOOK_SENTINEL && isNotebookLocked(name)){
+    const ok = await unlockNotebookPrompt(name);
+    if(!ok) return; // se quedó donde estaba, no lo cambiamos a medias
+  }
   activeNotebook = name; localStorage.setItem('org_active_notebook', name);
   renderSidebar(); renderMain();
 }
@@ -1943,10 +2002,14 @@ function renderSidebar(){
   renderTagFilterBar();
   const nbList = document.getElementById('notebookList');
   nbList.innerHTML = DATA.notebooks.filter(nb=>nb.Nombre!==MEJORAS_NOTEBOOK).map(nb=>{
-    const cnt = activeNotes().filter(n=>n.Notebook===nb.Nombre).length;
+    const locked = isNotebookLocked(nb.Nombre);
+    // activeNotes() ya excluye las notas de un cuaderno bloqueado — si se
+    // contara con ella el número siempre daría 0 ahí. Se muestra 🔒 en
+    // vez de un número para no filtrar ni siquiera cuántas notas tiene.
+    const cntHTML = locked ? '🔒' : activeNotes().filter(n=>n.Notebook===nb.Nombre).length;
     return `<div class="nb-item tag-chip-row ${activeNotebook===nb.Nombre?'active':''}">
       <span onclick="setActiveNotebook('${escAttr(nb.Nombre)}')" style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;cursor:pointer">
-        <span class="nb-dot" style="background:${nb.Color||'#8a5a3b'}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(nb.Nombre)}</span>${nb.TagAuto?' <small title="se auto-enruta desde el Inbox con #'+escAttr(nb.TagAuto)+'">🔀</small>':''}<span class="cnt">${cnt}</span>
+        <span class="nb-dot" style="background:${nb.Color||'#8a5a3b'}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(nb.Nombre)}</span>${nb.Password?' <small title="Cuaderno con contraseña">'+(locked?'🔒':'🔓')+'</small>':''}${nb.TagAuto?' <small title="se auto-enruta desde el Inbox con #'+escAttr(nb.TagAuto)+'">🔀</small>':''}<span class="cnt">${cntHTML}</span>
       </span>
       <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();openNotebookFolder('${escAttr(nb.ID)}','${escAttr(nb.Nombre)}')" title="Vincular/abrir carpeta de este cuaderno">📁</button>
     </div>`;
@@ -2811,7 +2874,18 @@ function abandonEmptyDraftIfAny(){
    listas se dibujaron) — cualquier otro llamado (Cards/Tabla, Ajustes,
    Calendario, "+ Nota"...) lo deja undefined y sigue abriendo el modal
    de siempre, sin cambios. */
-function openNoteEditor(id, scrollToCue, pane){
+async function openNoteEditor(id, scrollToCue, pane){
+  // Bloquea también el acceso INDIRECTO a una nota de un cuaderno con
+  // contraseña (ej. un clic guardado de antes de ponerle candado) — no
+  // solo esconderla de las listas ya bastaba, había que cortar esto
+  // también para que el candado sea de verdad.
+  if(id){
+    const existing = getNote(id);
+    if(existing && isNotebookLocked(existing.Notebook)){
+      const ok = await unlockNotebookPrompt(existing.Notebook);
+      if(!ok) return;
+    }
+  }
   if(editingNoteId && editingNoteId!==id) abandonEmptyDraftIfAny();
   let note;
   if(id){
@@ -7935,13 +8009,16 @@ async function deleteTagFromSidebar(name){
 }
 function renderSettingsNotebooks(){
   const body = document.getElementById('settingsBody');
-  body.innerHTML = `<button class="btn secondary" onclick="promptNewNotebook()">+ nuevo cuaderno</button><div id="nbRows" style="margin-top:10px"></div>`;
+  body.innerHTML = `<button class="btn secondary" onclick="promptNewNotebook()">+ nuevo cuaderno</button>
+    <p class="hint" style="color:var(--text-dim);font-size:12px;margin-top:8px">🔒 esconde las notas de ese cuaderno de Inbox/búsqueda/etiquetas/Calendario hasta que escribas la contraseña — es un candado de la app, no cifrado: alguien con acceso directo a tu Google Sheet igual podría leerlas.</p>
+    <div id="nbRows" style="margin-top:10px"></div>`;
   document.getElementById('nbRows').innerHTML = DATA.notebooks.filter(nb=>nb.Nombre!==MEJORAS_NOTEBOOK).map(nb=>`
     <div class="settings-row">
       <input type="color" value="${nb.Color||'#8a5a3b'}" onchange="updateNbField('${nb.ID}','Color',this.value)">
       <input type="text" value="${escAttr(nb.Nombre)}" onchange="updateNbField('${nb.ID}','Nombre',this.value)">
       <input type="text" value="${escAttr(nb.TagsHeredados)}" placeholder="etiquetas heredadas" onchange="updateNbField('${nb.ID}','TagsHeredados',this.value)">
       <input type="text" value="${escAttr(nb.TagAuto||'')}" placeholder="auto-ruteo desde Inbox (ej. musica)" title="Si una nota del Inbox lleva esta etiqueta, se mueve sola a este cuaderno" onchange="updateNbField('${nb.ID}','TagAuto',this.value.replace(/^#/,''))">
+      <button class="icon-btn" onclick="toggleNotebookPasswordUI('${nb.ID}')" title="${nb.Password?'Quitar contraseña':'Poner contraseña'}">${nb.Password?'🔒':'🔓'}</button>
       <button class="icon-btn" onclick="deleteNotebookUI('${nb.ID}')">🗑️</button>
     </div>`).join('') || '<p style="color:var(--text-dim)">Sin cuadernos todavía</p>';
 }

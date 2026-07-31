@@ -387,6 +387,13 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .hist-item-text{flex:1.3;min-width:0;border:1px solid transparent;background:transparent;font-size:13.5px;padding:2px 4px}
 .hist-item-text:focus{border-color:var(--border);background:var(--bg-soft);border-radius:4px}
 .hist-item-text.done{text-decoration:line-through;color:var(--text-dim)}
+.hist-item-text.na{font-style:italic;color:var(--text-dim);opacity:.7}
+/* Botón de 3 estados (vacío/✓/⊘) que reemplaza al checkbox de "hecho" —
+   mismo tamaño/posición que un checkbox nativo para no descuadrar las
+   filas donde vivía antes. */
+.check-cycle-btn{width:18px;height:18px;flex:none;border:1px solid var(--border);border-radius:4px;background:var(--bg-elev);display:inline-flex;align-items:center;justify-content:center;font-size:12px;line-height:1;padding:0;cursor:pointer;color:var(--text)}
+.check-cycle-btn.done{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+.check-cycle-btn.na{background:var(--bg-soft);color:var(--text-dim)}
 .hist-note{flex:1;min-width:0;font-size:12px;padding:3px 6px}
 .fill-row{display:flex;gap:6px;align-items:center;margin:6px 0}
 .fill-row input[type=text]{font-size:13px}
@@ -399,6 +406,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .items-table input[type=text]{width:100%;border:1px solid transparent;background:transparent;padding:3px 4px;font-size:12.5px}
 .items-table input[type=text]:focus{border-color:var(--border);background:var(--bg-soft)}
 .items-table tr.done-row{opacity:.55}
+.items-table tr.na-row{opacity:.55;font-style:italic}
 .items-table-wrap{overflow-x:auto}
 .habit-row{margin-bottom:22px;padding-bottom:14px;border-bottom:1px solid var(--border)}
 .habit-row:last-child{border-bottom:none}
@@ -639,7 +647,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Comodoro Rivadavia';
+const BUILD_VERSION = 'Puerto Madryn';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -5908,6 +5916,27 @@ function renderChecklistBody(){
    filtradas+ordenadas (ver filterSortRows) junto con su índice original
    en el arreglo real, para que los onchange de cada fila sigan apuntando
    al elemento correcto. */
+/* Estado de "hecho" de un ítem ahora es de 3 posiciones, no un simple
+   sí/no — pedido explícito: a veces un elemento no falta, sino que
+   directamente NO APLICA para este llenado (ej. "botiquín" en un viaje
+   donde alguien más ya lo lleva) — antes solo existía "pendiente" o
+   "hecho", así que marcarlo como "hecho" para sacarlo del conteo de
+   pendientes era engañoso. `it.na` es un flag NUEVO y separado de
+   `it.checked` (no se reemplaza el booleano existente) para no romper
+   nada de lo que ya lee `it.checked` como sí/no en otros lados
+   (rachas/estadísticas, `pending` sort) — esos siguen viendo "no
+   aplica" como "no marcado", que es la lectura correcta para ellos.
+   Ciclo: vacío -> ✓ hecho -> ⊘ no se requiere -> vacío de nuevo. */
+function cycleItemCheck(it){
+  if(!it.checked && !it.na) it.checked = true;
+  else if(it.checked){ it.checked = false; it.na = true; }
+  else { it.na = false; }
+}
+function checkCycleBtnHTML(it, onclickExpr){
+  const icon = it.na ? '⊘' : (it.checked ? '✓' : '');
+  const title = it.na ? 'No se requiere — clic para dejar vacío' : (it.checked ? 'Hecho — clic para marcar como no requerido' : 'Vacío — clic para marcar hecho');
+  return `<button class="check-cycle-btn${it.checked?' done':''}${it.na?' na':''}" onclick="${onclickExpr}" title="${escAttr(title)}">${icon}</button>`;
+}
 function groupBySection(rows){
   const order = []; const seen = new Set();
   rows.forEach(({it})=>{ const s=it.section||''; if(!seen.has(s)){ seen.add(s); order.push(s); } });
@@ -5925,6 +5954,12 @@ function distinctColumnValues(items, colName){
   });
   return Array.from(vals);
 }
+/* Filtro por columna con selección MÚLTIPLE de valores (pedido
+   explícito — "que pueda poner múltiples filtros por columna"): cada
+   chip de valor se prende/apaga por separado (no reemplaza al
+   anterior), y un ítem pasa el filtro si su celda trae CUALQUIERA de
+   los valores prendidos (OR) — igual criterio que el filtro de
+   etiquetas del panel lateral. "Todos" limpia la selección entera. */
 function columnFilterBarHTML(items, columns, cfg){
   const arg = cfg.ownerArg!==undefined ? `'${escAttr(cfg.ownerArg)}',` : '';
   if(!columns.length) return '';
@@ -5935,15 +5970,21 @@ function columnFilterBarHTML(items, columns, cfg){
   if(!cfg.filterCol) return colSelect;
   const vals = distinctColumnValues(items, cfg.filterCol);
   if(!vals.length) return colSelect;
+  const selected = cfg.filterVal||[];
   return colSelect+`<div class="tag-filter-mode" style="margin:4px 0 8px;flex-wrap:wrap">
-    <button class="${!cfg.filterVal?'active':''}" onclick="${cfg.setFilterVal}(${arg}'')">Todos</button>
-    ${vals.map(v=>`<button class="${cfg.filterVal===v?'active':''}" onclick="${cfg.setFilterVal}(${arg}'${escAttr(v)}')">${escHtml(v)}</button>`).join('')}
+    <button class="${!selected.length?'active':''}" onclick="${cfg.setFilterVal}(${arg}'')">Todos</button>
+    ${vals.map(v=>`<button class="${selected.includes(v)?'active':''}" onclick="${cfg.setFilterVal}(${arg}'${escAttr(v)}')">${escHtml(v)}</button>`).join('')}
   </div>`;
 }
 /* Búsqueda+orden+filtro-por-columna en un solo paso: se aplica ANTES de
-   agrupar por sección, así que cuando el orden es distinto de "orig" (el
-   de la plantilla) ya no tiene sentido seguir agrupando por categoría —
-   el usuario pidió explícitamente reordenar, así que se muestra plano.
+   agrupar por sección. Antes, elegir cualquier orden distinto de "orig"
+   aplanaba la lista entera (se perdían los subtítulos de categoría) —
+   pedido explícito del usuario: las divisiones por categoría NUNCA
+   deben desaparecer, ni al buscar, ni al filtrar por columna, ni al
+   cambiar el orden. groupBySection ya agrupa preservando el orden que
+   traigan las filas, así que agrupar DESPUÉS de ordenar simplemente
+   deja cada categoría ordenada por dentro según ese criterio — el
+   agrupador y el orden ya no se pisan.
    Ordenar por una columna usa el orden de SU catálogo si tiene uno
    definido (ej. alta/media/baja en ese orden, si así se agregó) en vez
    de alfabético — el catálogo YA captura el orden "correcto" que el
@@ -5951,18 +5992,22 @@ function columnFilterBarHTML(items, columns, cfg){
 function filterSortRows(items, opts){
   opts = opts||{};
   const search = String(opts.search||'').toLowerCase().trim();
-  const filterCol = opts.filterCol||''; const filterVal = opts.filterVal||'';
+  // filterVal ahora es un arreglo de valores prendidos a la vez (ver
+  // columnFilterBarHTML) — sigue aceptando un string suelto por si algún
+  // llamador viejo lo manda así, para no romper nada.
+  const filterCol = opts.filterCol||'';
+  const filterVal = Array.isArray(opts.filterVal) ? opts.filterVal : (opts.filterVal ? [opts.filterVal] : []);
   const sort = opts.sort||'orig'; const columns = opts.columns||[];
   let rows = items.map((it,i)=>({it,i})).filter(({it})=>{
-    if(filterCol && filterVal){
+    if(filterCol && filterVal.length){
       const cellVals = String((it.extra&&it.extra[filterCol])||'').split(',').map(s=>s.trim());
-      if(!cellVals.includes(filterVal)) return false;
+      if(!filterVal.some(v=>cellVals.includes(v))) return false;
     }
     if(search && !String(it.text||'').toLowerCase().includes(search)) return false;
     return true;
   });
   if(sort==='az') rows = rows.slice().sort((a,b)=>String(a.it.text||'').localeCompare(String(b.it.text||''),'es'));
-  else if(sort==='pending') rows = rows.slice().sort((a,b)=>(a.it.checked?1:0)-(b.it.checked?1:0));
+  else if(sort==='pending') rows = rows.slice().sort((a,b)=>((a.it.checked||a.it.na)?1:0)-((b.it.checked||b.it.na)?1:0));
   else if(sort.startsWith('col:')){
     const col = sort.slice(4);
     const colDef = columns.find(c=>c.name===col);
@@ -6012,22 +6057,39 @@ function extraFieldInputHTML(value, columns, colIndex, onchangeExpr, extraAttrs)
   const listAttr = (col.catalog&&col.catalog.length) ? ` list="colcat-${colIndex}"` : '';
   return `<input type="text"${extraAttrs?' '+extraAttrs:''} value="${escAttr(value||'')}" placeholder="${escAttr(col.name)}"${listAttr} onchange="${onchangeExpr}">`;
 }
-/* Vista Tabla ahora respeta las categorías (líneas "...:" del texto):
-   con orden==="orig" (el de la plantilla) se arma una mini-tabla por
-   categoría, cada una con su propio título arriba — igual criterio que
-   ya usaba la vista Lista (agrupar deja de tener sentido si el orden es
-   otro, ej. por columna, porque mezclaría categorías a cada rato). El
-   llamador decide `grouped` según su propio estado de orden. */
-function itemsTableHTML(rows, h, columns, grouped){
+/* Vista Tabla respeta las categorías (líneas "...:" del texto): se arma
+   una mini-tabla por categoría, cada una con su propio título arriba —
+   sin importar el orden/búsqueda/filtro activos, esas divisiones nunca
+   deben desaparecer. Todos los llamadores pasan grouped=true; el
+   parámetro se deja por si algún día hiciera falta un caso sin agrupar. */
+/* Encabezados clicables: pedido explícito para no depender solo del
+   select "Ordenar" de la barra de herramientas — cada columna (Elemento
+   y las personalizadas) ordena por sí misma con un clic en su título, y
+   trae además un botoncito 🔽 para activarla como filtro directamente
+   ahí (mismo mecanismo que el select "Filtrar por columna…", solo que
+   sin tener que ir a buscarlo). sortCfg es opcional para no romper
+   ningún llamador viejo que aún no lo pase. */
+function tableHeaderCellHTML(label, sortKey, sortCfg){
+  if(!sortCfg) return `<th>${escHtml(label)}</th>`;
+  const arg = sortCfg.ownerArg!==undefined ? `'${escAttr(sortCfg.ownerArg)}',` : '';
+  const active = sortCfg.sort===sortKey;
+  const filterBtn = (sortCfg.setFilterCol && sortKey.startsWith('col:')) ? `<button class="icon-btn" style="padding:0 2px" onclick="event.stopPropagation();${sortCfg.setFilterCol}(${arg}'${escAttr(sortKey.slice(4))}')" title="Filtrar por ${escAttr(label)}">🔽</button>` : '';
+  return `<th style="cursor:pointer;white-space:nowrap" onclick="${sortCfg.setSort}(${arg}'${escAttr(sortKey)}')" title="Ordenar por ${escAttr(label)}">${escHtml(label)}${active?' ▲':''}${filterBtn}</th>`;
+}
+function itemsTableHTML(rows, h, columns, grouped, sortCfg){
   columns = columns||[];
   if(!rows.length) return '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
-  const headerRow = `<tr><th></th><th>Elemento</th><th>Categoría</th><th>Nota</th>${columns.map(c=>`<th>${escHtml(c.name)}</th>`).join('')}<th></th></tr>`;
-  const rowHTML = ({it,i}) => `<tr class="${it.checked?'done-row':''}">
-      <td><input type="checkbox" ${it.checked?'checked':''} onchange="${h.checkedExpr(i)}"></td>
+  // Categoría va AL FINAL, no junto a Elemento — el nombre de la
+  // categoría ya se ve arriba como subtítulo de cada mini-tabla
+  // agrupada, así que repetirla como 2da columna era redundante y le
+  // quitaba espacio a las columnas que sí importan para filtrar/leer.
+  const headerRow = `<tr><th></th>${tableHeaderCellHTML('Elemento','az',sortCfg)}<th>Nota</th>${columns.map(c=>tableHeaderCellHTML(c.name,'col:'+c.name,sortCfg)).join('')}<th>Categoría</th><th></th></tr>`;
+  const rowHTML = ({it,i}) => `<tr class="${it.checked?'done-row':''}${it.na?' na-row':''}">
+      <td>${checkCycleBtnHTML(it, h.checkedExpr(i))}</td>
       <td><input type="text" value="${escAttr(it.text)}" onchange="${h.textExpr(i)}"></td>
-      <td><input type="text" value="${escAttr(it.section||'')}" onchange="${h.sectionExpr(i)}"></td>
       <td><input type="text" value="${escAttr(it.note||'')}" onchange="${h.noteExpr(i)}"></td>
       ${columns.map((c,ci)=>`<td>${extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,h.extraExpr(i,ci))}</td>`).join('')}
+      <td><input type="text" value="${escAttr(it.section||'')}" onchange="${h.sectionExpr(i)}"></td>
       <td><button class="icon-btn" onclick="${h.delExpr(i)}">🗑️</button></td>
     </tr>`;
   const dl = catalogDatalistsHTML(columns);
@@ -6190,18 +6252,15 @@ function histBodyHTML(h){
   const rows = filterSortRows(items, {search, filterCol, filterVal, sort, columns});
   if(view==='table'){
     return itemsTableHTML(rows, {
-      checkedExpr:i=>`histToggle('${h.ID}',${i},this.checked)`,
+      checkedExpr:i=>`histCycleCheck('${h.ID}',${i})`,
       textExpr:i=>`histTextChange('${h.ID}',${i},this.value)`,
       sectionExpr:i=>`histSectionChange('${h.ID}',${i},this.value)`,
       noteExpr:i=>`histNoteChange('${h.ID}',${i},this.value)`,
       extraExpr:(i,ci)=>`histExtraChange('${h.ID}',${i},${ci},this.value)`,
       delExpr:i=>`histDeleteItem('${h.ID}',${i})`
-    }, columns, sort==='orig');
+    }, columns, true, {sort, setSort:'setHistSort', setFilterCol:'setHistFilterCol', ownerArg:h.ID});
   }
   const dl = catalogDatalistsHTML(columns);
-  if(sort!=='orig'){
-    return rows.length ? dl + `<ul>${rows.map(({it,i})=>histRowHTML(h.ID,it,i,columns)).join('')}</ul>` : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
-  }
   const groups = groupBySection(rows).map(({sec,rows})=>{
     if(!rows.length) return '';
     return `<div class="fill-section">
@@ -6214,8 +6273,8 @@ function histBodyHTML(h){
 function histRowHTML(historyId,it,i,columns){
   columns = columns||[];
   return `<li>
-    <input type="checkbox" ${it.checked?'checked':''} onchange="histToggle('${historyId}',${i},this.checked)">
-    <input type="text" class="hist-item-text ${it.checked?'done':''}" value="${escAttr(it.text)}" onchange="histTextChange('${historyId}',${i},this.value)">
+    ${checkCycleBtnHTML(it, `histCycleCheck('${historyId}',${i})`)}
+    <input type="text" class="hist-item-text ${it.checked?'done':''}${it.na?' na':''}" value="${escAttr(it.text)}" onchange="histTextChange('${historyId}',${i},this.value)">
     <input type="text" class="hist-note" placeholder="nota (cuántos, estado…)" value="${escAttr(it.note||'')}" onchange="histNoteChange('${historyId}',${i},this.value)">
     ${columns.map((c,ci)=>extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,`histExtraChange('${historyId}',${i},${ci},this.value)`,'class="hist-note" style="max-width:110px"')).join('')}
     <button class="icon-btn" onclick="histDeleteItem('${historyId}',${i})">🗑️</button>
@@ -6226,8 +6285,13 @@ function renderHistBody(historyId){
   const h = DATA.historial.find(x=>x.ID===historyId); if(!h) return;
   el.innerHTML = histBodyHTML(h);
 }
-function setHistFilterCol(historyId, c){ window._histFilterCol=window._histFilterCol||{}; window._histFilterCol[historyId]=c; window._histFilterVal=window._histFilterVal||{}; window._histFilterVal[historyId]=''; renderChecklistBody(); }
-function setHistFilterVal(historyId, v){ window._histFilterVal=window._histFilterVal||{}; window._histFilterVal[historyId]=v; renderChecklistBody(); }
+function setHistFilterCol(historyId, c){ window._histFilterCol=window._histFilterCol||{}; window._histFilterCol[historyId]=c; window._histFilterVal=window._histFilterVal||{}; window._histFilterVal[historyId]=[]; renderChecklistBody(); }
+function setHistFilterVal(historyId, v){
+  window._histFilterVal=window._histFilterVal||{};
+  const cur = window._histFilterVal[historyId]||[];
+  window._histFilterVal[historyId] = v==='' ? [] : (cur.includes(v) ? cur.filter(x=>x!==v) : cur.concat([v]));
+  renderChecklistBody();
+}
 function setHistSearch(historyId, v){ window._histSearch=window._histSearch||{}; window._histSearch[historyId]=v; renderHistBody(historyId); }
 function setHistSort(historyId, v){ window._histSort=window._histSort||{}; window._histSort[historyId]=v; renderChecklistBody(); }
 function setHistViewMode(historyId, v){ window._histViewMode=window._histViewMode||{}; window._histViewMode[historyId]=v; renderChecklistBody(); }
@@ -6279,7 +6343,7 @@ protector solar | comprar al llegar">${existing?escHtml(templateItemsToText(item
         <div id="tplTableBody"></div>
       </div>
       <label style="font-size:12px;font-weight:600;display:block;margin-top:14px">Columnas personalizadas (ej. caducidad)</label>
-      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:2px 0 6px">Elige tú qué más quieres llevar por elemento en esta lista — aparece como un campo más al llenarla. Puedes agregar opciones sugeridas para elegir de una lista, o escribir algo nuevo cada vez. Si las agregaste solas escribiendo "|" de más en Texto, aquí puedes renombrarlas (clic en el nombre).</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:2px 0 6px">Elige tú qué más quieres llevar por elemento en esta lista — aparece como un campo más al llenarla. El ✏️ renombra la columna; el 📋 edita sus opciones sugeridas (la lista de la que elegir al llenar).</p>
       <div id="tplColumnsChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         <input type="text" id="tplNewColumnInput" style="flex:1" placeholder="nombre de columna (ej. prioridad de viaje)" onkeydown="if(event.key==='Enter'){event.preventDefault();addTplColumn();}">
@@ -6295,11 +6359,23 @@ protector solar | comprar al llegar">${existing?escHtml(templateItemsToText(item
   document.getElementById('tplNameInput').focus();
   renderTplColumnsChips();
 }
+/* El ✎ (lápiz) originalmente era el único botón junto al nombre de la
+   columna, pero abría el diálogo de OPCIONES sugeridas, no un rename —
+   el usuario esperaba (razonablemente, "lápiz = editar/renombrar") que
+   ahí se cambiara el nombre, escribió el nuevo nombre en el campo de
+   opciones por error, y por eso "no se actualizaba" — no era un bug de
+   propagación (renameTplColumn sí actualiza chips+encabezados de tabla
+   correctamente), era el ícono equivocado prometiendo la acción
+   equivocada. Ahora hay un ✏️ dedicado a renombrar (mismo ícono que ya
+   usa "Renombrar esta lista" en Historial, para ser consistente en toda
+   la app) y el botón de opciones pasa a 📋 para no competir con "lápiz
+   = renombrar". El nombre en sí sigue siendo clicable también, por si
+   alguien ya tenía el hábito. */
 function renderTplColumnsChips(){
   const el = document.getElementById('tplColumnsChips'); if(!el) return;
   const columns = window._tplEditColumns||[];
   el.innerHTML = columns.length
-    ? columns.map((c,i)=>`<span class="tag-badge"><span style="cursor:pointer" onclick="renameTplColumn(${i})" title="Renombrar columna">${escHtml(c.name)}</span>${c.catalog&&c.catalog.length?` (${c.catalog.length})`:''} <button class="icon-btn" style="padding:0 2px" onclick="editTplColumnCatalog(${i})" title="Editar opciones sugeridas">✎</button><button class="icon-btn" style="padding:0 2px" onclick="removeTplColumn(${i})" title="Quitar columna">✕</button></span>`).join('')
+    ? columns.map((c,i)=>`<span class="tag-badge"><span style="cursor:pointer" onclick="renameTplColumn(${i})" title="Renombrar columna">${escHtml(c.name)}</span>${c.catalog&&c.catalog.length?` (${c.catalog.length})`:''} <button class="icon-btn" style="padding:0 2px" onclick="renameTplColumn(${i})" title="Renombrar columna">✏️</button><button class="icon-btn" style="padding:0 2px" onclick="editTplColumnCatalog(${i})" title="Editar opciones sugeridas (la lista para elegir al llenar)">📋</button><button class="icon-btn" style="padding:0 2px" onclick="removeTplColumn(${i})" title="Quitar columna">✕</button></span>`).join('')
     : '<span class="hint" style="color:var(--text-dim);font-size:12px">Ninguna todavía.</span>';
 }
 function renameTplColumn(i){
@@ -6344,7 +6420,7 @@ function removeTplColumn(i){
   if(_tplEditView==='list') renderTplEditList();
   if(_tplEditView==='table') renderTplEditTable();
 }
-let _tplEditSearch = '', _tplEditSort = 'orig', _tplEditFilterCol = '', _tplEditFilterVal = '';
+let _tplEditSearch = '', _tplEditSort = 'orig', _tplEditFilterCol = '', _tplEditFilterVal = [];
 function setTplEditView(view){
   const prevView = _tplEditView;
   _tplEditView = view;
@@ -6388,8 +6464,8 @@ function setTplEditView(view){
 }
 function setTplEditSearch(v){ _tplEditSearch=v; renderTplEditTableBody(); }
 function setTplEditSort(v){ _tplEditSort=v; renderTplEditTable(); }
-function setTplEditFilterCol(c){ _tplEditFilterCol=c; _tplEditFilterVal=''; renderTplEditTable(); }
-function setTplEditFilterVal(v){ _tplEditFilterVal=v; renderTplEditTable(); }
+function setTplEditFilterCol(c){ _tplEditFilterCol=c; _tplEditFilterVal=[]; renderTplEditTable(); }
+function setTplEditFilterVal(v){ _tplEditFilterVal = v==='' ? [] : (_tplEditFilterVal.includes(v) ? _tplEditFilterVal.filter(x=>x!==v) : _tplEditFilterVal.concat([v])); renderTplEditTable(); }
 function renderTplEditTable(){
   const tb = document.getElementById('tplTableToolbar'); if(!tb) return;
   const columns = window._tplEditColumns||[];
@@ -6404,13 +6480,13 @@ function renderTplEditTableBody(){
   const columns = window._tplEditColumns||[];
   const rows = filterSortRows(window._tplEditItems, {search:_tplEditSearch, filterCol:_tplEditFilterCol, filterVal:_tplEditFilterVal, sort:_tplEditSort, columns});
   body.innerHTML = itemsTableHTML(rows, {
-    checkedExpr:i=>`window._tplEditItems[${i}].checked=this.checked`,
+    checkedExpr:i=>`cycleItemCheck(window._tplEditItems[${i}]);renderTplEditTable()`,
     textExpr:i=>`window._tplEditItems[${i}].text=this.value`,
     sectionExpr:i=>`window._tplEditItems[${i}].section=this.value`,
     noteExpr:i=>`window._tplEditItems[${i}].note=this.value`,
     extraExpr:(i,ci)=>`setTplEditItemExtra(${i},${ci},this.value)`,
     delExpr:i=>`removeTplEditRow(${i});renderTplEditTable()`
-  }, columns, _tplEditSort==='orig');
+  }, columns, true, {sort:_tplEditSort, setSort:'setTplEditSort', setFilterCol:'setTplEditFilterCol'});
 }
 function renderTplEditList(){
   const el = document.getElementById('tplItemsListEditor'); if(!el) return;
@@ -6491,7 +6567,7 @@ function permanentlyDeleteTemplateUI(id){
 /* Llenar: formulario real agrupado por categoría (no un prompt) — casillas
    y nota libre por elemento, más elementos/categorías extra solo para esta
    vez, con nombre propio para esta lista llenada. */
-let _fillFilterCol = '', _fillFilterVal = '', _fillSearch = '', _fillSort = 'orig', _fillViewMode = 'list';
+let _fillFilterCol = '', _fillFilterVal = [], _fillSearch = '', _fillSort = 'orig', _fillViewMode = 'list';
 function openFillModal(templateId){
   const p = DATA.plantillas.find(x=>x.ID===templateId); if(!p) return;
   let baseItems; try{ baseItems = JSON.parse(p.ItemsJSON||'[]').map(it=>({ text: it.text!==undefined?it.text:it, checked:false, note:'', section: it.section||'', extra: it.extra||{} })); }catch(e){ baseItems=[]; }
@@ -6502,7 +6578,7 @@ function openFillModal(templateId){
   // (con scroll horizontal propio) es la que de verdad se puede usar
   // cuando hay varias columnas. Sin columnas, Lista sigue siendo la más
   // cómoda para un checklist simple.
-  _fillFilterCol=''; _fillFilterVal=''; _fillSearch=''; _fillSort='orig'; _fillViewMode = window._fillColumns.length ? 'table' : 'list';
+  _fillFilterCol=''; _fillFilterVal=[]; _fillSearch=''; _fillSort='orig'; _fillViewMode = window._fillColumns.length ? 'table' : 'list';
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(900px,96vw)">
     <div class="modal-head"><b>▶ Llenar: ${escHtml(p.Nombre)}</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
@@ -6522,8 +6598,8 @@ function openFillModal(templateId){
   document.body.appendChild(overlay);
   renderFillItemsList();
 }
-function setFillFilterCol(c){ _fillFilterCol = c; _fillFilterVal=''; renderFillItemsList(); }
-function setFillFilterVal(v){ _fillFilterVal = v; renderFillItemsList(); }
+function setFillFilterCol(c){ _fillFilterCol = c; _fillFilterVal=[]; renderFillItemsList(); }
+function setFillFilterVal(v){ _fillFilterVal = v==='' ? [] : (_fillFilterVal.includes(v) ? _fillFilterVal.filter(x=>x!==v) : _fillFilterVal.concat([v])); renderFillItemsList(); }
 function setFillSearch(v){ _fillSearch = v; renderFillItemsBody(); }
 function setFillSort(v){ _fillSort = v; renderFillItemsList(); }
 function setFillViewMode(v){ _fillViewMode = v; renderFillItemsList(); }
@@ -6547,18 +6623,15 @@ function fillBodyHTML(){
   const rows = filterSortRows(window._fillItems, {search:_fillSearch, filterCol:_fillFilterCol, filterVal:_fillFilterVal, sort:_fillSort, columns});
   if(_fillViewMode==='table'){
     return itemsTableHTML(rows, {
-      checkedExpr:i=>`window._fillItems[${i}].checked=this.checked;renderFillItemsBody()`,
+      checkedExpr:i=>`cycleItemCheck(window._fillItems[${i}]);renderFillItemsBody()`,
       textExpr:i=>`window._fillItems[${i}].text=this.value`,
       sectionExpr:i=>`window._fillItems[${i}].section=this.value;renderFillItemsList()`,
       noteExpr:i=>`window._fillItems[${i}].note=this.value`,
       extraExpr:(i,ci)=>`setFillItemExtra(${i},${ci},this.value)`,
       delExpr:i=>`removeFillRow(${i})`
-    }, columns, _fillSort==='orig');
+    }, columns, true, {sort:_fillSort, setSort:'setFillSort', setFilterCol:'setFillFilterCol'});
   }
   const dl = catalogDatalistsHTML(columns);
-  if(_fillSort!=='orig'){
-    return rows.length ? dl + rows.map(({it,i})=>fillRowHTML(it,i)).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
-  }
   const groups = groupBySection(rows).map(({sec,rows})=>{
     if(!rows.length) return '';
     return `<div class="fill-section">
@@ -6572,7 +6645,7 @@ function fillBodyHTML(){
 function fillRowHTML(it,i){
   const columns = window._fillColumns||[];
   return `<div class="fill-row">
-    <input type="checkbox" ${it.checked?'checked':''} onchange="window._fillItems[${i}].checked=this.checked;renderFillItemsBody()">
+    ${checkCycleBtnHTML(it, `cycleItemCheck(window._fillItems[${i}]);renderFillItemsBody()`)}
     <input type="text" style="flex:1.3" value="${escAttr(it.text)}" placeholder="elemento" onchange="window._fillItems[${i}].text=this.value">
     <input type="text" style="flex:1" value="${escAttr(it.note||'')}" placeholder="nota (cuántos, si hace calor…)" onchange="window._fillItems[${i}].note=this.value">
     ${columns.map((c,ci)=>extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,`setFillItemExtra(${i},${ci},this.value)`,'style="flex:.6"')).join('')}
@@ -6609,6 +6682,7 @@ async function histMutate(historyId, mutator){
   renderChecklistBody();
 }
 function histToggle(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].checked = val; }); }
+function histCycleCheck(id, i){ histMutate(id, items=>{ if(items[i]) cycleItemCheck(items[i]); }); }
 function histTextChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].text = val; }); }
 function histSectionChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].section = val; }); }
 function histNoteChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].note = val; }); }

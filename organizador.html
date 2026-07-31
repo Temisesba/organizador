@@ -72,6 +72,13 @@ header{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1p
 header .brand{font-weight:800;font-size:16px;margin-right:6px;white-space:nowrap}
 header .search-wrap{flex:1;min-width:140px;max-width:360px}
 header .spacer{flex:1}
+/* Íconos del header un poquito más grandes que el tamaño base de
+   .icon-btn — pedido explícito del usuario para verlos más cómodos.
+   Va ANTES del media query de celular de abajo a propósito: misma
+   especificidad, así que el orden en la hoja decide, y el achique de
+   celular (que viene después) sigue ganando ahí cuando corresponde. */
+header .icon-btn{padding:9px 11px}
+header .btn{padding:9px 15px}
 /* Respaldo del spacer: si por lo que sea el spacer no empuja (p.ej.
    quedó en su propia línea al envolver), este margen garantiza que
    "+ Nota"/"+" igual lleguen al borde derecho en escritorio. Se apaga
@@ -85,20 +92,14 @@ header .spacer{flex:1}
    ahí todo se envuelve solo — así que se apaga, y el hueco entre
    íconos/gap normal del header ya alcanza para verse bien. También un
    poco menos de relleno en los íconos del encabezado, para que + Nota
-   y + quepan en la misma fila que el resto de los íconos.
-   Este bloque usa ancho de pantalla (max-width:400px), NO el detector
-   táctil (hover:none/pointer:coarse) que usa el resto de la app — así
-   la laptop táctil del usuario (ventana ancha, mouse+teclado) nunca
-   entra acá y mantiene los íconos a tamaño normal sin importar si
-   pointer:coarse se evalúa como touch en su hardware; sólo pantallas
-   angostas de verdad (celulares) reciben el achique. */
-@media (max-width:400px){
+   y + quepan en la misma fila que el resto de los íconos. */
+@media (hover:none) and (pointer:coarse){
   header .spacer{display:none}
   #headerNewNoteBtn{margin-left:0}
-  header .icon-btn{padding:5px 4px}
-  header .btn{padding:5px 6px;font-size:12.5px}
-  header .view-switch button{padding:5px 5px}
-  header{gap:2px;padding:8px 5px}
+  header .icon-btn{padding:6px 6px}
+  header .btn{padding:6px 8px;font-size:13px}
+  header .view-switch button{padding:6px 6px}
+  header{gap:4px;padding:8px 8px}
 }
 #syncDot{width:9px;height:9px;border-radius:50%;background:var(--success);display:inline-block}
 #syncDot.off{background:var(--danger)}
@@ -630,7 +631,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Iguazú';
+const BUILD_VERSION = 'Posadas';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.

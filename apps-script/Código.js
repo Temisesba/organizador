@@ -28,6 +28,15 @@ const GEMINI_API = 'https://generativelanguage.googleapis.com/v1/models/gemini-2
 const CLAUDE_KEY = PropertiesService.getScriptProperties().getProperty('CLAUDE_KEY');
 const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
+// El Client ID de Google NO es secreto (ver comentario igual en el
+// frontend) — el Client Secret sí, por eso vive en Script Properties
+// como las demás llaves. Necesario para intercambiar/refrescar tokens
+// de Google Calendar sin que el usuario tenga que reconectar cada ~1h:
+// el navegador nunca ve el secret, solo manda el "code" o el
+// "refresh_token" aquí y este backend hace el intercambio real con
+// Google por él.
+const GOOGLE_CLIENT_ID = '596591883908-8qo7c1i44e5lv5p9o4nan1fkn20qflq6.apps.googleusercontent.com';
+const GOOGLE_CLIENT_SECRET = PropertiesService.getScriptProperties().getProperty('GOOGLE_CLIENT_SECRET');
 
 const TABLE_DEFS = {
   NOTAS:         ['ID', 'Fecha', 'FechaEdicion', 'Titulo', 'Contenido', 'Tags', 'Notebook', 'Cornell', 'CornellCue', 'Color', 'Pinned', 'Orden', 'Archivo', 'Papelera', 'GCalEventId', 'PlantillaPropID', 'CamposGCalJSON'],
@@ -86,6 +95,8 @@ function doPost(e) {
     else if (action === 'aiEnglishLesson')      result = aiEnglishLesson(body.text);
     else if (action === 'ocrImage')             result = ocrImage(body.imageBase64, body.mimeType);
     else if (action === 'uploadImage')          result = uploadImage(body.sheetId, body.imageBase64, body.mimeType, body.fileName);
+    else if (action === 'exchangeGoogleCode')   result = exchangeGoogleCode(body.code);
+    else if (action === 'refreshGoogleToken')   result = refreshGoogleToken(body.refresh_token);
     else                                        result = { error: 'Acción no reconocida' };
   } catch (err) { result = { error: err.message }; }
   return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
@@ -389,6 +400,53 @@ function uploadImage(sheetId, imageBase64, mimeType, fileName) {
     const url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1200';
     return { ok: true, url: url, fileId: file.getId() };
   } catch (e) { return { ok: false, error: 'Drive: ' + e.message }; }
+}
+
+// ── Google Calendar: intercambio/refresco de tokens ──────────────
+// El frontend obtiene un "code" de un solo uso vía Google Identity
+// Services (popup, sin salir de la app — ux_mode:'popup' usa
+// internamente redirect_uri:"postmessage", que NO necesita registrarse
+// como URI de redirección en la consola de Google, ya que no es una URL
+// real). Este intercambio SÍ necesita el client secret, por eso pasa
+// por aquí y no por el navegador directamente.
+function exchangeGoogleCode(code) {
+  if (!code) return { ok: false, error: 'Falta el código de autorización' };
+  if (!GOOGLE_CLIENT_SECRET) return { ok: false, error: 'Falta GOOGLE_CLIENT_SECRET en Propiedades del script' };
+  const resp = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+    method: 'post',
+    payload: {
+      code: code,
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      redirect_uri: 'postmessage',
+      grant_type: 'authorization_code'
+    },
+    muteHttpExceptions: true
+  });
+  const data = JSON.parse(resp.getContentText());
+  if (data.error) return { ok: false, error: data.error_description || data.error };
+  return { ok: true, access_token: data.access_token, refresh_token: data.refresh_token || '', expires_in: data.expires_in };
+}
+// El refresh_token no expira solo (dura hasta que el usuario revoque el
+// acceso desde su cuenta de Google, o Google lo invalide por
+// inactividad prolongada) — mientras siga siendo válido, esto renueva
+// el access_token (~1h) sin volver a pedirle nada a la persona.
+function refreshGoogleToken(refreshToken) {
+  if (!refreshToken) return { ok: false, error: 'Falta el refresh token' };
+  if (!GOOGLE_CLIENT_SECRET) return { ok: false, error: 'Falta GOOGLE_CLIENT_SECRET en Propiedades del script' };
+  const resp = UrlFetchApp.fetch('https://oauth2.googleapis.com/token', {
+    method: 'post',
+    payload: {
+      refresh_token: refreshToken,
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      grant_type: 'refresh_token'
+    },
+    muteHttpExceptions: true
+  });
+  const data = JSON.parse(resp.getContentText());
+  if (data.error) return { ok: false, error: data.error_description || data.error };
+  return { ok: true, access_token: data.access_token, expires_in: data.expires_in };
 }
 
 // ── OCR con Claude Visión ───────────────────────────────────────

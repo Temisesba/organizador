@@ -606,40 +606,34 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Rosario';
+const BUILD_VERSION = 'Tucumán';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
 const MEJORAS_NOTEBOOK = 'Mejoras Organizador';
 
-/* ============ Google Calendar — conexión 100% del navegador, sin
-   backend propio, vía Google Identity Services (GIS). El Client ID NO es
-   secreto — las apps de navegador no usan client secret en OAuth; la
-   seguridad la da la lista de "orígenes autorizados" configurada en la
-   consola de Google, no que este valor esté oculto en el código. El
-   token de acceso dura ~1h — este flujo (implícito, sin backend propio)
-   nunca entrega un refresh token, así que ese límite real no se puede
-   evitar del todo. Lo que sí se evita: se guarda en localStorage junto
-   con su expiración (`saveGoogleTokenToStorage`/`loadGoogleTokenFromStorage`)
-   para no tener que reconectar en cada RECARGA de página si el token de
-   la vez anterior sigue vigente — antes vivía solo en memoria y se
-   perdía con cada F5, que era el reconectar-de-más que el usuario
-   reportó ("¿por qué me tengo que conectar cada vez?"). Una conexión
-   que nunca pida nada (refresh token real) necesitaría un backend que
-   guarde el client secret — Apps Script podría servir para eso si hace
-   falta más adelante, pero es un cambio de arquitectura aparte. */
+/* ============ Google Calendar — conexión con refresh token real
+   (2026-08-01, reemplaza el flujo implícito de antes) ============
+   El Client ID NO es secreto — las apps de navegador no usan client
+   secret en OAuth del lado del navegador; la seguridad la da la lista
+   de "orígenes autorizados" en la consola de Google. El flujo anterior
+   (`initTokenClient`) solo entregaba access_token de ~1h, sin forma de
+   renovarlo sin volver a pedirle algo a la persona — pedido explícito:
+   "quedar conectada para siempre, al menos en este equipo". Eso SÍ
+   necesita un refresh_token, y obtenerlo/usarlo requiere el client
+   secret — que nunca debe tocar el navegador. Por eso ahora se usa
+   `initCodeClient` (entrega un "code" de un solo uso, no un token) y el
+   intercambio real (code→tokens, y luego refresh_token→access_token
+   cada vez que hace falta) pasa por `exchangeGoogleCode`/
+   `refreshGoogleToken` en el backend de Apps Script, que sí puede
+   guardar el secret en Propiedades del script — mismo patrón que
+   GEMINI_KEY/CLAUDE_KEY. El refresh_token se guarda en localStorage
+   (por eso "en este equipo", no en la nube) y no expira solo — solo se
+   invalida si la persona revoca el acceso desde su cuenta de Google. */
 const GOOGLE_CLIENT_ID = '596591883908-8qo7c1i44e5lv5p9o4nan1fkn20qflq6.apps.googleusercontent.com';
 const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar';
 let googleAccessToken = null;
-let googleTokenClient = null;
-/* El token en sí sigue durando ~1h nomás (límite real de Google para
-   este tipo de flujo sin backend propio que maneje un refresh token) —
-   pero antes había que reconectar en cada RECARGA de la página, aunque
-   el token de la vez anterior todavía fuera válido, porque solo vivía
-   en memoria. Guardarlo en localStorage junto con su expiración evita
-   ESE reconectar de más; solo pide reconectar cuando de verdad ya
-   expiró. Pedido explícito: "quedar conectada al menos en este
-   equipo". */
+let googleCodeClient = null;
 function saveGoogleTokenToStorage(token, expiresInSec){
   const expiresAt = Date.now() + (Number(expiresInSec)||3600)*1000 - 60000;
   try{ localStorage.setItem('org_gcal_token', JSON.stringify({ token, expiresAt })); }catch(e){}
@@ -653,29 +647,60 @@ function loadGoogleTokenFromStorage(){
   }catch(e){ return null; }
 }
 function clearGoogleTokenStorage(){ try{ localStorage.removeItem('org_gcal_token'); }catch(e){} }
+function saveGoogleRefreshToken(token){ try{ localStorage.setItem('org_gcal_refresh', token); }catch(e){} }
+function loadGoogleRefreshToken(){ try{ return localStorage.getItem('org_gcal_refresh')||''; }catch(e){ return ''; } }
+function clearGoogleRefreshToken(){ try{ localStorage.removeItem('org_gcal_refresh'); }catch(e){} }
+let _refreshingGoogleToken = false;
+async function maybeRefreshGoogleToken(){
+  const refreshToken = loadGoogleRefreshToken(); if(!refreshToken || _refreshingGoogleToken) return false;
+  _refreshingGoogleToken = true;
+  try{
+    const data = await apiPost('refreshGoogleToken', { refresh_token: refreshToken });
+    if(data && data.ok){
+      googleAccessToken = data.access_token;
+      saveGoogleTokenToStorage(data.access_token, data.expires_in);
+      renderGCalConnectionStatus();
+      return true;
+    }
+    // Un refresh_token inválido (revocado desde la cuenta de Google) ya
+    // no sirve de nada guardado — se limpia para no seguir intentando.
+    if(data && /invalid_grant/i.test(data.error||'')) clearGoogleRefreshToken();
+    return false;
+  }catch(e){ return false; }
+  finally{ _refreshingGoogleToken = false; }
+}
 function initGoogleAuth(){
   const stored = loadGoogleTokenFromStorage();
   if(stored && !googleAccessToken){ googleAccessToken = stored; renderGCalConnectionStatus(); }
-  if(googleTokenClient || !window.google || !google.accounts || !google.accounts.oauth2) return;
-  googleTokenClient = google.accounts.oauth2.initTokenClient({
+  else if(!googleAccessToken && loadGoogleRefreshToken()){ maybeRefreshGoogleToken(); }
+  if(googleCodeClient || !window.google || !google.accounts || !google.accounts.oauth2) return;
+  googleCodeClient = google.accounts.oauth2.initCodeClient({
     client_id: GOOGLE_CLIENT_ID,
     scope: GOOGLE_CALENDAR_SCOPE,
-    callback: (resp)=>{
-      if(resp.error){ showToast('No se pudo conectar Google Calendar'); return; }
-      googleAccessToken = resp.access_token;
-      saveGoogleTokenToStorage(resp.access_token, resp.expires_in);
-      showToast('✅ Google Calendar conectado');
+    ux_mode: 'popup',
+    callback: async (resp)=>{
+      if(resp.error || !resp.code){ showToast('No se pudo conectar Google Calendar'); return; }
+      const data = await apiPost('exchangeGoogleCode', { code: resp.code });
+      if(!data || !data.ok){ showToast('No se pudo conectar: '+((data&&data.error)||'error desconocido')); return; }
+      googleAccessToken = data.access_token;
+      saveGoogleTokenToStorage(data.access_token, data.expires_in);
+      if(data.refresh_token) saveGoogleRefreshToken(data.refresh_token);
+      showToast(data.refresh_token ? '✅ Google Calendar conectado — se queda conectado en este equipo' : '✅ Google Calendar conectado');
       renderCalendarView();
       renderGCalConnectionStatus();
     }
   });
 }
 function connectGoogleCalendar(){
-  if(!googleTokenClient) initGoogleAuth();
-  if(!googleTokenClient){ showToast('Google todavía está cargando, intenta de nuevo en un segundo'); return; }
-  googleTokenClient.requestAccessToken({ prompt: googleAccessToken ? '' : 'consent' });
+  if(!googleCodeClient) initGoogleAuth();
+  if(!googleCodeClient){ showToast('Google todavía está cargando, intenta de nuevo en un segundo'); return; }
+  googleCodeClient.requestCode();
 }
 window.addEventListener('load', initGoogleAuth);
+// Refresca por adelantado durante una sesión larga (antes de que el
+// access_token realmente expire), para que ni siquiera una app dejada
+// abierta muchas horas llegue a pedir reconectar.
+setInterval(()=>{ if(!loadGoogleTokenFromStorage() && loadGoogleRefreshToken()) maybeRefreshGoogleToken(); }, 50*60*1000);
 
 let _calViewDate = new Date();
 let _calViewMode = 'day'; // 'day' | 'week' | 'month' — se conserva entre aperturas del modal a propósito
@@ -1045,8 +1070,18 @@ async function fetchGoogleEvents(dateObj){
   const dayStart = new Date(dateObj); dayStart.setHours(0,0,0,0);
   const dayEnd = new Date(dateObj); dayEnd.setHours(23,59,59,999);
   const params = new URLSearchParams({ timeMin: dayStart.toISOString(), timeMax: dayEnd.toISOString(), singleEvents:'true', orderBy:'startTime' });
-  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?'+params.toString(), { headers:{ Authorization:'Bearer '+googleAccessToken } });
-  if(res.status===401){ googleAccessToken=null; clearGoogleTokenStorage(); throw new Error('Sesión expirada, vuelve a conectar'); }
+  let res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?'+params.toString(), { headers:{ Authorization:'Bearer '+googleAccessToken } });
+  if(res.status===401){
+    // El access_token local pudo haber quedado desfasado (reloj del
+    // navegador, o Google lo invalidó un poco antes del margen que se
+    // calculó al guardarlo) — con refresh_token guardado, un intento de
+    // renovar en silencio es gratis y evita pedir reconectar por algo
+    // que se resuelve solo.
+    if(await maybeRefreshGoogleToken()){
+      res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?'+params.toString(), { headers:{ Authorization:'Bearer '+googleAccessToken } });
+    }
+    if(res.status===401){ googleAccessToken=null; clearGoogleTokenStorage(); throw new Error('Sesión expirada, vuelve a conectar'); }
+  }
   if(!res.ok) throw new Error('Error '+res.status);
   const data = await res.json();
   return data.items||[];

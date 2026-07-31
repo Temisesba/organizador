@@ -553,11 +553,13 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
         </div>
       </div>
 
-      <!-- Pedido explícito: SOLO el interruptor Y/O (no los chips de
-           etiquetas activas, que se quedan junto al buscador de abajo)
-           sube arriba de Cuadernos — visible nada más cuando hay 2+
-           etiquetas activas, mismo criterio de siempre. -->
+      <!-- Pedido explícito: el filtro de etiquetas activo (interruptor
+           Y/O + chips + "aplicar a" + "quitar todo") entero sube arriba
+           de Cuadernos. Fuera de cualquier plegable a propósito: si
+           tienes un filtro de etiquetas activo, necesitas verlo aunque
+           tengas "Etiquetas" colapsado más abajo. -->
       <div id="tagFilterModeBar"></div>
+      <div id="tagFilterBar"></div>
 
       <div class="sb-section" data-sb="cuaderno">
         <h3 onclick="toggleSbSection('cuaderno')">Cuadernos <span class="sb-arrow">▾</span></h3>
@@ -567,12 +569,6 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
           <button class="mini-btn" onclick="promptNewNotebook()">+ nuevo cuaderno</button>
         </div>
       </div>
-
-      <!-- Fuera de cualquier plegable a propósito: si tienes una búsqueda o
-           filtro de etiquetas activo, necesitas verlo aunque tengas
-           "Etiquetas" colapsado — colapsar esa sección no debe esconder qué
-           estás buscando ahora mismo. -->
-      <div id="tagFilterBar"></div>
 
       <div class="sb-section" data-sb="busquedas">
         <h3 onclick="toggleSbSection('busquedas')">Búsquedas guardadas <span class="sb-arrow">▾</span></h3>
@@ -610,7 +606,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Corrientes';
+const BUILD_VERSION = 'Formosa';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -621,15 +617,45 @@ const MEJORAS_NOTEBOOK = 'Mejoras Organizador';
    secreto — las apps de navegador no usan client secret en OAuth; la
    seguridad la da la lista de "orígenes autorizados" configurada en la
    consola de Google, no que este valor esté oculto en el código. El
-   token de acceso vive SOLO en memoria (nunca en localStorage): dura
-   ~1h y no hay forma de refrescarlo en silencio sin un backend propio,
-   así que toca reconectar de vez en cuando — normal en integraciones
-   enteramente del lado del cliente como esta. */
+   token de acceso dura ~1h — este flujo (implícito, sin backend propio)
+   nunca entrega un refresh token, así que ese límite real no se puede
+   evitar del todo. Lo que sí se evita: se guarda en localStorage junto
+   con su expiración (`saveGoogleTokenToStorage`/`loadGoogleTokenFromStorage`)
+   para no tener que reconectar en cada RECARGA de página si el token de
+   la vez anterior sigue vigente — antes vivía solo en memoria y se
+   perdía con cada F5, que era el reconectar-de-más que el usuario
+   reportó ("¿por qué me tengo que conectar cada vez?"). Una conexión
+   que nunca pida nada (refresh token real) necesitaría un backend que
+   guarde el client secret — Apps Script podría servir para eso si hace
+   falta más adelante, pero es un cambio de arquitectura aparte. */
 const GOOGLE_CLIENT_ID = '596591883908-8qo7c1i44e5lv5p9o4nan1fkn20qflq6.apps.googleusercontent.com';
 const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar';
 let googleAccessToken = null;
 let googleTokenClient = null;
+/* El token en sí sigue durando ~1h nomás (límite real de Google para
+   este tipo de flujo sin backend propio que maneje un refresh token) —
+   pero antes había que reconectar en cada RECARGA de la página, aunque
+   el token de la vez anterior todavía fuera válido, porque solo vivía
+   en memoria. Guardarlo en localStorage junto con su expiración evita
+   ESE reconectar de más; solo pide reconectar cuando de verdad ya
+   expiró. Pedido explícito: "quedar conectada al menos en este
+   equipo". */
+function saveGoogleTokenToStorage(token, expiresInSec){
+  const expiresAt = Date.now() + (Number(expiresInSec)||3600)*1000 - 60000;
+  try{ localStorage.setItem('org_gcal_token', JSON.stringify({ token, expiresAt })); }catch(e){}
+}
+function loadGoogleTokenFromStorage(){
+  try{
+    const raw = localStorage.getItem('org_gcal_token'); if(!raw) return null;
+    const { token, expiresAt } = JSON.parse(raw);
+    if(!token || !expiresAt || Date.now()>=expiresAt){ localStorage.removeItem('org_gcal_token'); return null; }
+    return token;
+  }catch(e){ return null; }
+}
+function clearGoogleTokenStorage(){ try{ localStorage.removeItem('org_gcal_token'); }catch(e){} }
 function initGoogleAuth(){
+  const stored = loadGoogleTokenFromStorage();
+  if(stored && !googleAccessToken){ googleAccessToken = stored; renderGCalConnectionStatus(); }
   if(googleTokenClient || !window.google || !google.accounts || !google.accounts.oauth2) return;
   googleTokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GOOGLE_CLIENT_ID,
@@ -637,6 +663,7 @@ function initGoogleAuth(){
     callback: (resp)=>{
       if(resp.error){ showToast('No se pudo conectar Google Calendar'); return; }
       googleAccessToken = resp.access_token;
+      saveGoogleTokenToStorage(resp.access_token, resp.expires_in);
       showToast('✅ Google Calendar conectado');
       renderCalendarView();
       renderGCalConnectionStatus();
@@ -775,7 +802,11 @@ async function saveHorarioForm(){
   // se estaba editando, así que llamarlo adentro dejaba el botón mal
   // etiquetado después de guardar).
   await withSavingFeedback(btn, async ()=>{
-    await saveEntity('HORARIO', { ID:id, Hora:hora, Actividad:actividad, Dias:Array.from(window._horarioFormDays).join(',') });
+    // saveEntity ya deja DATA al día de inmediato (síncrono) antes de su
+    // propio await interno al backend — esperar ESE viaje de ida y
+    // vuelta antes de refrescar la pantalla es lo que hacía sentir el
+    // guardado lento (mismo reporte que con Tareas, misma causa).
+    saveEntity('HORARIO', { ID:id, Hora:hora, Actividad:actividad, Dias:Array.from(window._horarioFormDays).join(',') });
   });
   cancelHorarioEdit();
   renderHorarioList();
@@ -785,10 +816,21 @@ async function saveHorarioForm(){
    una línea entera y volver a escribirla. ✎ precarga el formulario de
    agregar con los valores de esa línea; guardar reutiliza el mismo ID
    en vez de crear una fila nueva (así no se duplica). */
+/* <input type="time"> es estricto: si el valor no viene EXACTO en
+   formato "HH:MM" (o "HH:MM:SS"), el navegador lo rechaza en silencio y
+   deja el campo vacío — se veía como "la hora no se guardó" al editar,
+   cuando en realidad sí estaba guardada, solo que en un formato que el
+   input no aceptaba (ej. si Sheets la devolvió con segundos o como
+   fecha completa antes de que TEXT_FORMAT_COLUMNS la protegiera). */
+function normalizeTimeValue(v){
+  const m = String(v||'').match(/(\d{1,2}):(\d{2})/);
+  if(!m) return '';
+  return String(Math.min(23,parseInt(m[1],10))).padStart(2,'0')+':'+m[2];
+}
 function editHorarioItem(id){
   const h = DATA.horario.find(x=>x.ID===id); if(!h) return;
   window._horarioEditingId = id;
-  document.getElementById('horarioFormHora').value = h.Hora||'';
+  document.getElementById('horarioFormHora').value = normalizeTimeValue(h.Hora);
   document.getElementById('horarioFormActividad').value = h.Actividad||'';
   window._horarioFormDays = new Set(String(h.Dias||'').split(',').filter(Boolean));
   renderHorarioFormDiasChips();
@@ -917,12 +959,32 @@ function renderCalDayView(){
   notesEl.innerHTML = notes.length ? notes.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
       <span style="flex:1"><b>${escHtml(fmtHM(new Date(n.Fecha)))}</b> ${escHtml(n.Titulo||'(sin título)')}</span>
     </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin notas este día</p>';
-  const horarioEl = document.getElementById('calHorarioList');
-  const horarioItems = horarioItemsForDate(_calViewDate);
-  horarioEl.innerHTML = horarioItems.length ? horarioItems.map(h=>`<div class="settings-row">
-      <span style="flex:1"><b>${escHtml(h.Hora)}</b> ${escHtml(h.Actividad)}</span>
-    </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada definido para este día — ✏️ arriba para agregarlo.</p>';
+  renderCalHorarioList();
   renderCalHabitosList();
+}
+/* Pedido explícito: no solo VER la rutina del día en Calendario, poder
+   palomear lo que sí se hizo — mismo mecanismo que los hábitos
+   (HORARIO_LOG = una fila por vez que se cumplió ese renglón del
+   horario ese día), separado de HABITO_LOG porque son conceptos
+   distintos (rutina fija vs. hábito con racha). */
+function renderCalHorarioList(){
+  const horarioEl = document.getElementById('calHorarioList'); if(!horarioEl) return;
+  const horarioItems = horarioItemsForDate(_calViewDate);
+  const dateStr = _calViewDate.toDateString();
+  horarioEl.innerHTML = horarioItems.length ? horarioItems.map(h=>{
+    const done = !!DATA.horario_log.find(l=>l.HorarioID===h.ID && new Date(l.Fecha).toDateString()===dateStr);
+    return `<div class="settings-row" style="cursor:pointer" onclick="toggleHorarioOnCalDay('${h.ID}')">
+      <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHorarioOnCalDay('${h.ID}')">
+      <span style="flex:1"><b>${escHtml(h.Hora)}</b> ${escHtml(h.Actividad)}</span>
+    </div>`;
+  }).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada definido para este día — ✏️ arriba para agregarlo.</p>';
+}
+function toggleHorarioOnCalDay(horarioId){
+  const dateStr = _calViewDate.toDateString();
+  const existing = DATA.horario_log.find(l=>l.HorarioID===horarioId && new Date(l.Fecha).toDateString()===dateStr);
+  if(existing){ deleteEntity('HORARIO_LOG', existing.ID); }
+  else{ saveEntity('HORARIO_LOG', { ID:uid(), HorarioID:horarioId, Fecha:_calViewDate.toISOString() }); }
+  renderCalHorarioList();
 }
 function renderCalMonthGrid(){
   const body = document.getElementById('calBody'); if(!body) return;
@@ -984,7 +1046,7 @@ async function fetchGoogleEvents(dateObj){
   const dayEnd = new Date(dateObj); dayEnd.setHours(23,59,59,999);
   const params = new URLSearchParams({ timeMin: dayStart.toISOString(), timeMax: dayEnd.toISOString(), singleEvents:'true', orderBy:'startTime' });
   const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?'+params.toString(), { headers:{ Authorization:'Bearer '+googleAccessToken } });
-  if(res.status===401){ googleAccessToken=null; throw new Error('Sesión expirada, vuelve a conectar'); }
+  if(res.status===401){ googleAccessToken=null; clearGoogleTokenStorage(); throw new Error('Sesión expirada, vuelve a conectar'); }
   if(!res.ok) throw new Error('Error '+res.status);
   const data = await res.json();
   return data.items||[];
@@ -1063,20 +1125,34 @@ async function fetchGoogleEvent(eventId){
   if(!res.ok) throw new Error('Error '+res.status);
   return res.json();
 }
+/* Predeterminados pensados para no tener que escribir todo a mano
+   ("ya yo actualizo" — solo hace falta un punto de partida razonable):
+   inicio = próxima hora en punto (no el minuto exacto en que se abrió
+   el formulario), fin = inicio + 1h. Cambiar la fecha/hora de inicio
+   recalcula el fin manteniendo esa misma duración de 1h — antes el fin
+   quedaba fijo en "hoy" aunque movieras el inicio a otro día. */
+function roundToNextHour(d){ const r = new Date(d); r.setMinutes(0,0,0); r.setHours(r.getHours()+1); return r; }
+function syncEventEndOnStartChange(){
+  const startEl = document.getElementById('evStart'); const endEl = document.getElementById('evEnd');
+  if(!startEl.value) return;
+  endEl.value = toDatetimeLocal(new Date(new Date(startEl.value).getTime()+60*60*1000));
+}
 function openEventForm(existingEvent){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   const isEdit = !!existingEvent;
-  const startVal = isEdit && existingEvent.start.dateTime ? toDatetimeLocal(new Date(existingEvent.start.dateTime)) : toDatetimeLocal(new Date());
-  const endVal = isEdit && existingEvent.end.dateTime ? toDatetimeLocal(new Date(existingEvent.end.dateTime)) : toDatetimeLocal(new Date(Date.now()+60*60*1000));
+  const startVal = isEdit && existingEvent.start.dateTime ? toDatetimeLocal(new Date(existingEvent.start.dateTime)) : toDatetimeLocal(roundToNextHour(new Date()));
+  const endVal = isEdit && existingEvent.end.dateTime ? toDatetimeLocal(new Date(existingEvent.end.dateTime)) : toDatetimeLocal(new Date(roundToNextHour(new Date()).getTime()+60*60*1000));
   overlay.innerHTML = `<div class="modal" style="width:min(420px,100%)">
     <div class="modal-head"><b>${isEdit?'✏️ Editar':'+ Nuevo'} evento</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
       <input type="text" id="evTitle" value="${isEdit?escAttr(existingEvent.summary||''):''}" placeholder="Título del evento">
       <label style="font-size:12px;display:block;margin:10px 0 4px">Inicio</label>
-      <input type="datetime-local" id="evStart" value="${startVal}">
+      <input type="datetime-local" id="evStart" value="${startVal}" onchange="syncEventEndOnStartChange()">
       <label style="font-size:12px;display:block;margin:10px 0 4px">Fin</label>
       <input type="datetime-local" id="evEnd" value="${endVal}">
       <input type="text" id="evLocation" value="${isEdit?escAttr(existingEvent.location||''):''}" placeholder="Ubicación (opcional)" style="margin-top:10px">
+      <label style="font-size:12px;display:block;margin:10px 0 4px">Notas</label>
+      <textarea id="evNotes" rows="3" placeholder="Notas para este evento (opcional)">${isEdit?escHtml(existingEvent.description||''):''}</textarea>
       <div style="margin-top:14px;display:flex;justify-content:space-between">
         ${isEdit?`<button class="icon-btn" onclick='deleteGoogleEventUI(${JSON.stringify(existingEvent.id)})' title="Eliminar evento">🗑️</button>`:'<span></span>'}
         <button class="btn" id="evSaveBtn" onclick='saveEventForm(${JSON.stringify(isEdit?existingEvent.id:"")}, this)'>Guardar</button>
@@ -1091,10 +1167,11 @@ async function saveEventForm(eventId, btn){
   const startVal = document.getElementById('evStart').value;
   const endVal = document.getElementById('evEnd').value;
   const location = document.getElementById('evLocation').value.trim();
+  const notes = document.getElementById('evNotes').value.trim();
   if(!title || !startVal || !endVal){ showToast('Falta título u horario'); return; }
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const body = {
-    summary: title, location: location||undefined,
+    summary: title, location: location||undefined, description: notes||undefined,
     start: { dateTime: new Date(startVal).toISOString(), timeZone: tz },
     end: { dateTime: new Date(endVal).toISOString(), timeZone: tz }
   };
@@ -1123,7 +1200,7 @@ function deleteGoogleEventUI(eventId){
 }
 let GAS_URL = localStorage.getItem('org_gas_url') || '';
 let SHEET_ID = localStorage.getItem('org_sheet_id') || '';
-let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[], personas:[], habitos:[], habito_log:[], comandos:[], horario:[] };
+let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[], personas:[], habitos:[], habito_log:[], comandos:[], horario:[], horario_log:[] };
 // Banderas rápidas de fábrica (no se pueden borrar) — las que agrega el
 // usuario desde Configuración se guardan como filas normales en el Sheet
 // (tabla FLAGS), igual que cualquier otra etiqueta o nota, para que
@@ -1398,12 +1475,12 @@ function normalizeData(d){
     diccionario: d.diccionario||[], feedback: d.feedback||[],
     bloque_tablas: d.bloque_tablas||[], plantillas_prop: d.plantillas_prop||[],
     flags: d.flags||[], busquedas: d.busquedas||[], personas: d.personas||[],
-    habitos: d.habitos||[], habito_log: d.habito_log||[], comandos: d.comandos||[], horario: d.horario||[]
+    habitos: d.habitos||[], habito_log: d.habito_log||[], comandos: d.comandos||[], horario: d.horario||[], horario_log: d.horario_log||[]
   };
 }
 
 /* ============ CRUD genérico local + remoto ============ */
-const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas', HABITOS:'habitos', HABITO_LOG:'habito_log', COMANDOS:'comandos', HORARIO:'horario' };
+const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas', HABITOS:'habitos', HABITO_LOG:'habito_log', COMANDOS:'comandos', HORARIO:'horario', HORARIO_LOG:'horario_log' };
 function cacheData(){ try{ localStorage.setItem('org_data_cache', JSON.stringify(DATA)); }catch(e){} }
 async function saveEntity(table, obj){
   if(!obj.ID) obj.ID = uid();
@@ -4615,13 +4692,34 @@ async function saveQuickTask(){
     renderQuickTaskList();
   });
 }
+/* Pedido explícito: agrupar las tareas al agregarlas desde "+", mismo
+   espíritu que ⏱ Registro de tiempo (una pantalla propia, no una nota
+   más perdida en un cuaderno). Acá el agrupador es la etiqueta EXTRA
+   que le pongas (#familia, #trabajo…) — la primera que no sea #task se
+   vuelve el "capítulo"; sin ninguna, cae en "Sin categoría". Dentro de
+   cada capítulo, ordenadas por fecha límite (la más próxima primero). */
 function renderQuickTaskList(){
   const wrap = document.getElementById('quickTaskList'); if(!wrap) return;
-  const items = activeNotes().filter(n=>n.Notebook===TAREAS_NOTEBOOK).sort((a,b)=>String(a.Fecha).localeCompare(String(b.Fecha))).slice(0,8);
-  wrap.innerHTML = items.length ? items.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteEditor('${n.ID}')">
-      <span style="flex:1;font-size:13px">${escHtml(n.Titulo)}</span>
-      <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
-    </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin tareas todavía — la primera que guardes aparece arriba.</p>';
+  const items = activeNotes().filter(n=>n.Notebook===TAREAS_NOTEBOOK);
+  if(!items.length){ wrap.innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin tareas todavía — la primera que guardes aparece arriba.</p>'; return; }
+  const groups = {}; const order = [];
+  items.forEach(n=>{
+    const tags = String(n.Tags||'').split(/\s+/).map(t=>t.replace(/^#/,'').trim()).filter(Boolean);
+    const chapter = tags.find(t=>t!=='task') || 'Sin categoría';
+    if(!groups[chapter]){ groups[chapter]=[]; order.push(chapter); }
+    groups[chapter].push(n);
+  });
+  order.sort((a,b)=> a==='Sin categoría' ? 1 : b==='Sin categoría' ? -1 : a.localeCompare(b,'es'));
+  wrap.innerHTML = order.map(chapter=>{
+    const rows = groups[chapter].slice().sort((a,b)=>String(a.Fecha).localeCompare(String(b.Fecha)));
+    return `<div class="fill-section">
+      <div class="fill-section-title">${chapter==='Sin categoría'?chapter:'#'+escHtml(chapter)}</div>
+      ${rows.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteEditor('${n.ID}')">
+        <span style="flex:1;font-size:13px">${escHtml(n.Titulo)}</span>
+        <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
+      </div>`).join('')}
+    </div>`;
+  }).join('');
 }
 
 /* ============ Registro de tiempo: bloques que se cierran solos ==========

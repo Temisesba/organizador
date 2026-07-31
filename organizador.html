@@ -110,6 +110,7 @@ aside h3{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(
 main{flex:1;overflow-y:auto;padding:14px;min-width:0}
 main:fullscreen{background:var(--bg);padding:20px}
 .mini-btn{font-size:12px;background:none;border:1px dashed var(--border);border-radius:6px;padding:4px 8px;color:var(--text-dim);width:100%;text-align:left}
+.mini-btn.active{background:var(--accent);color:var(--accent-text);border-color:var(--accent);border-style:solid}
 .mini-btn:hover{color:var(--text);border-color:var(--text-dim)}
 
 /* cards */
@@ -472,12 +473,6 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" id="btnMenu" onclick="toggleSidebar()" title="Cuadernos y etiquetas">☰</button>
     <span class="brand">🗂️ Organizador</span>
     <div class="search-wrap"><input type="search" id="searchInput" placeholder="Buscar notas, #etiquetas…" oninput="renderMain();updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()"></div>
-    <select id="sortSelect" class="no-print" style="width:auto" onchange="sortBy(this.value)" title="Ordenar">
-      <option value="Fecha">Fecha</option>
-      <option value="Titulo">Título</option>
-      <option value="Notebook">Cuaderno</option>
-    </select>
-    <button class="icon-btn no-print" id="sortDirBtn" onclick="toggleSortDir()" title="Cambiar dirección del orden">▼</button>
     <div class="view-switch no-print">
       <button id="vwCards" onclick="setView('cards')" title="Tarjetas">🗃️</button>
       <button id="vwTable" onclick="setView('table')" title="Tabla">📊</button>
@@ -524,6 +519,21 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
            estás buscando ahora mismo. -->
       <div id="tagFilterBar"></div>
 
+      <div class="sb-section" data-sb="fecha">
+        <h3 onclick="toggleSbSection('fecha')">📅 Filtrar por fecha <span class="sb-arrow">▾</span></h3>
+        <div class="sb-content">
+          <div id="dateFilterPresets" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('hoy')">Hoy</button>
+            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('semana')">Esta semana</button>
+            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('mes')">Este mes</button>
+            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('anio')">Este año</button>
+          </div>
+          <input type="date" id="dateFilterFrom" onchange="applyCustomDateFilter()" style="width:100%">
+          <input type="date" id="dateFilterTo" onchange="applyCustomDateFilter()" style="width:100%;margin-top:6px">
+          <button class="mini-btn hidden" id="dateFilterClearBtn" style="margin-top:6px" onclick="clearDateFilter()">✕ Quitar filtro de fecha</button>
+        </div>
+      </div>
+
       <div class="sb-section" data-sb="busquedas">
         <h3 onclick="toggleSbSection('busquedas')">Búsquedas guardadas <span class="sb-arrow">▾</span></h3>
         <div class="sb-content">
@@ -544,6 +554,11 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
         </div>
       </div>
 
+      <div class="sb-section" data-sb="orden" style="position:relative">
+        <h3 onclick="toggleSortDropdown()">⇅ <span id="sortDropdownLabel">Más recientes</span> <span class="sb-arrow">▾</span></h3>
+        <div id="sortDropdownMenu" class="hidden" style="position:absolute;bottom:100%;left:10px;right:10px;flex-direction:column;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);z-index:30;padding:4px;gap:2px;display:flex"></div>
+      </div>
+
     </aside>
 
     <main id="viewArea"></main>
@@ -560,7 +575,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Resistencia';
+const BUILD_VERSION = 'Santa Rosa';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1621,6 +1636,11 @@ function getFilteredSortedNotes(query, applyTagFilters){
       const hay = (n.Titulo+' '+noteSnippetText(n)+' '+n.Tags).toLowerCase();
       if(!hay.includes(q)) return false;
     }
+    if(activeDateFilter){
+      const iso = n.Fecha ? toISODate(new Date(n.Fecha)) : '';
+      if(activeDateFilter.from && iso < activeDateFilter.from) return false;
+      if(activeDateFilter.to && iso > activeDateFilter.to) return false;
+    }
     return true;
   });
   notes.sort((a,b)=>{
@@ -2000,11 +2020,109 @@ function sortBy(col){
   else { sortState.col=col; sortState.dir='asc'; }
   syncSortUI(); renderMain();
 }
-function toggleSortDir(){ sortState.dir = sortState.dir==='asc'?'desc':'asc'; syncSortUI(); renderMain(); }
+/* El "Fecha ▾" + botón de dirección sueltos del encabezado se
+   mudaron al panel lateral (pedido explícito), como un solo
+   desplegable con las combinaciones ya armadas (campo+dirección en
+   una sola opción, ej. "Más recientes" = Fecha desc) — más parecido a
+   cómo lo mostró el usuario en su imagen de referencia (otra app) que
+   a un <select> + botón de flecha separados. sortBy(col) (usado por
+   los encabezados de columna clickeables de la vista Tabla) se deja
+   intacto — este menú es solo OTRA forma de llegar al mismo sortState. */
+const SORT_OPTIONS = [
+  { key:'fecha_desc', label:'Más recientes', col:'Fecha', dir:'desc' },
+  { key:'fecha_asc', label:'Más antiguas', col:'Fecha', dir:'asc' },
+  { key:'titulo_asc', label:'Título A-Z', col:'Titulo', dir:'asc' },
+  { key:'titulo_desc', label:'Título Z-A', col:'Titulo', dir:'desc' },
+  { key:'cuaderno_asc', label:'Cuaderno A-Z', col:'Notebook', dir:'asc' },
+  { key:'cuaderno_desc', label:'Cuaderno Z-A', col:'Notebook', dir:'desc' }
+];
+function toggleSortDropdown(){
+  const menu = document.getElementById('sortDropdownMenu'); if(!menu) return;
+  if(menu.classList.contains('hidden')) renderSortDropdownMenu();
+  menu.classList.toggle('hidden');
+}
+function chooseSortOption(key){
+  const opt = SORT_OPTIONS.find(o=>o.key===key); if(!opt) return;
+  sortState.col = opt.col; sortState.dir = opt.dir;
+  document.getElementById('sortDropdownMenu').classList.add('hidden');
+  syncSortUI(); renderMain();
+}
+function renderSortDropdownMenu(){
+  const menu = document.getElementById('sortDropdownMenu'); if(!menu) return;
+  const current = currentSortKey();
+  menu.innerHTML = SORT_OPTIONS.map(o=>`<button class="icon-btn ${o.key===current?'active':''}" style="justify-content:flex-start" onclick="chooseSortOption('${o.key}')">${o.key===current?'✓ ':''}${o.label}</button>`).join('');
+}
+function currentSortKey(){
+  const found = SORT_OPTIONS.find(o=>o.col===sortState.col && o.dir===sortState.dir);
+  return found ? found.key : 'fecha_desc';
+}
+document.addEventListener('click', e=>{
+  const menu = document.getElementById('sortDropdownMenu');
+  if(!menu || menu.classList.contains('hidden')) return;
+  if(menu.contains(e.target) || e.target.closest('[onclick^="toggleSortDropdown"]')) return;
+  menu.classList.add('hidden');
+});
 function syncSortUI(){
-  const sel = document.getElementById('sortSelect');
-  if(sel && !sortState.col.startsWith('kv:')) sel.value = sortState.col;
-  const btn = document.getElementById('sortDirBtn'); if(btn) btn.textContent = sortState.dir==='asc' ? '▲' : '▼';
+  const lbl = document.getElementById('sortDropdownLabel');
+  const opt = SORT_OPTIONS.find(o=>o.key===currentSortKey());
+  if(lbl) lbl.textContent = opt ? opt.label : 'Ordenar';
+}
+/* ============ Filtro de fecha (panel lateral) ============ */
+/* Igual espíritu que la imagen de referencia que mandó el usuario
+   (otra app: Hoy/Esta semana/Este mes/Este año + rango) — los presets
+   son periodos de CALENDARIO (ej. "esta semana" = lunes a domingo de
+   la semana actual), no una ventana móvil de N días, que es lo que
+   casi siempre se espera de un botón con ese nombre. activeDateFilter
+   es null (sin filtro) o {from,to} en formato yyyy-mm-dd; se aplica en
+   getFilteredSortedNotes junto a los demás filtros (cuaderno/etiquetas/
+   búsqueda de texto). */
+let activeDateFilter = null;
+function pad2(n){ return String(n).padStart(2,'0'); }
+function toISODate(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function dateRangeForPreset(preset){
+  const now = new Date();
+  if(preset==='hoy') return { from: toISODate(now), to: toISODate(now) };
+  if(preset==='semana'){
+    const day = now.getDay(); // 0=domingo
+    const diffToMonday = (day===0 ? -6 : 1-day);
+    const monday = new Date(now); monday.setDate(now.getDate()+diffToMonday);
+    const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
+    return { from: toISODate(monday), to: toISODate(sunday) };
+  }
+  if(preset==='mes'){
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    const to = new Date(now.getFullYear(), now.getMonth()+1, 0);
+    return { from: toISODate(from), to: toISODate(to) };
+  }
+  if(preset==='anio'){
+    return { from: now.getFullYear()+'-01-01', to: now.getFullYear()+'-12-31' };
+  }
+  return null;
+}
+function setDateFilterPreset(preset){
+  const range = dateRangeForPreset(preset); if(!range) return;
+  activeDateFilter = range;
+  const fromEl = document.getElementById('dateFilterFrom'); if(fromEl) fromEl.value = range.from;
+  const toEl = document.getElementById('dateFilterTo'); if(toEl) toEl.value = range.to;
+  renderDateFilterUI(preset); renderMain();
+}
+function applyCustomDateFilter(){
+  const from = document.getElementById('dateFilterFrom').value;
+  const to = document.getElementById('dateFilterTo').value;
+  activeDateFilter = (from||to) ? { from: from||null, to: to||null } : null;
+  renderDateFilterUI(null); renderMain();
+}
+function clearDateFilter(){
+  activeDateFilter = null;
+  const fromEl = document.getElementById('dateFilterFrom'); if(fromEl) fromEl.value = '';
+  const toEl = document.getElementById('dateFilterTo'); if(toEl) toEl.value = '';
+  renderDateFilterUI(null); renderMain();
+}
+function renderDateFilterUI(activePreset){
+  const wrap = document.getElementById('dateFilterPresets');
+  if(wrap) Array.from(wrap.children).forEach((btn,i)=>btn.classList.toggle('active', activePreset && ['hoy','semana','mes','anio'][i]===activePreset));
+  const clearBtn = document.getElementById('dateFilterClearBtn');
+  if(clearBtn) clearBtn.classList.toggle('hidden', !activeDateFilter);
 }
 
 /* La vista dividida son DOS listas independientes (izquierda/derecha),

@@ -647,7 +647,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'El Chaltén';
+const BUILD_VERSION = 'Mérida';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -6268,17 +6268,39 @@ function histBodyHTML(h){
       noteExpr:i=>`histNoteChange('${h.ID}',${i},this.value)`,
       extraExpr:(i,ci)=>`histExtraChange('${h.ID}',${i},${ci},this.value)`,
       delExpr:i=>`histDeleteItem('${h.ID}',${i})`
-    }, columns, true, {sort, setSort:'setHistSort', setFilterCol:'setHistFilterCol', ownerArg:h.ID});
+    }, columns, true, {sort, setSort:'setHistSort', setFilterCol:'setHistFilterCol', ownerArg:h.ID}, {
+      isCollapsed: sec=>isHistSectionCollapsed(h.ID, sec),
+      toggleExpr: sec=>`toggleHistSectionCollapsed('${escAttr(h.ID)}','${escAttr(sec)}')`
+    });
   }
   const dl = catalogDatalistsHTML(columns);
   const groups = groupBySection(rows).map(({sec,rows})=>{
     if(!rows.length) return '';
+    const collapsed = isHistSectionCollapsed(h.ID, sec);
+    const toggleBtn = `<button class="icon-btn" style="padding:0 2px" onclick="toggleHistSectionCollapsed('${escAttr(h.ID)}','${escAttr(sec)}')">${collapsed?'▸':'▾'}</button>`;
     return `<div class="fill-section">
-      ${sec ? `<div class="fill-section-title">${escHtml(sec)}</div>` : ''}
-      <ul>${rows.map(({it,i})=>histRowHTML(h.ID,it,i,columns)).join('')}</ul>
+      <div class="fill-section-title" style="display:flex;align-items:center;gap:4px">${toggleBtn}<span>${sec?escHtml(sec):'Sin categoría'}</span><span style="color:var(--text-dim);font-weight:400;font-size:11px">(${rows.length})</span></div>
+      ${collapsed ? '' : `<ul>${rows.map(({it,i})=>histRowHTML(h.ID,it,i,columns)).join('')}</ul>`}
     </div>`;
   }).join('');
   return groups ? dl + groups : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
+}
+/* Mismo criterio de rendimiento que el editor y Fill — un llenado ya
+   guardado con muchos elementos (>30) arranca con sus secciones
+   plegadas al expandir la entrada del historial. Clave por historyId
+   Y sección, porque cada llenado tiene su propio estado. */
+window._histSectionCollapsed = window._histSectionCollapsed || {};
+function isHistSectionCollapsed(historyId, sec){
+  window._histSectionCollapsed[historyId] = window._histSectionCollapsed[historyId] || {};
+  const map = window._histSectionCollapsed[historyId];
+  if(map.hasOwnProperty(sec)) return map[sec];
+  let items=[]; const h = DATA.historial.find(x=>x.ID===historyId); if(h){ try{ items = JSON.parse(h.ItemsJSON||'[]'); }catch(e){} }
+  return items.length > 30;
+}
+function toggleHistSectionCollapsed(historyId, sec){
+  window._histSectionCollapsed[historyId] = window._histSectionCollapsed[historyId] || {};
+  window._histSectionCollapsed[historyId][sec] = !isHistSectionCollapsed(historyId, sec);
+  const el = document.getElementById('histBody-'+historyId); if(el){ const h = DATA.historial.find(x=>x.ID===historyId); if(h) el.innerHTML = histBodyHTML(h); }
 }
 function histRowHTML(historyId,it,i,columns){
   columns = columns||[];
@@ -6625,6 +6647,7 @@ function openFillModal(templateId){
   // cuando hay varias columnas. Sin columnas, Lista sigue siendo la más
   // cómoda para un checklist simple.
   _fillFilterCol=''; _fillFilterVal=[]; _fillSearch=''; _fillSort='orig'; _fillViewMode = window._fillColumns.length ? 'table' : 'list';
+  window._fillSectionCollapsed = {};
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(900px,96vw)">
     <div class="modal-head"><b>▶ Llenar: ${escHtml(p.Nombre)}</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
@@ -6632,6 +6655,10 @@ function openFillModal(templateId){
       <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Nombre para esta lista</label>
       <input type="text" id="fillNombreInput" value="${escAttr(p.Nombre)}" placeholder="ej. Viaje a Cancún — marzo">
       <div id="fillToolbar" style="margin-top:12px"></div>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <button class="mini-btn" style="width:auto" onclick="setAllFillSectionsCollapsed(false)">▾ Expandir todo</button>
+        <button class="mini-btn" style="width:auto" onclick="setAllFillSectionsCollapsed(true)">▸ Plegar todo</button>
+      </div>
       <div id="fillItemsBody"></div>
       <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
         <button class="mini-btn" onclick="addFillRow('')">+ elemento suelto</button>
@@ -6651,6 +6678,23 @@ function setFillSort(v){ _fillSort = v; renderFillItemsList(); }
 function setFillViewMode(v){ _fillViewMode = v; renderFillItemsList(); }
 function openBulkAddForFill(){
   openBulkAddModal(items=>{ window._fillItems.push(...items); renderFillItemsList(); }, window._fillColumns||[]);
+}
+/* Mismo problema de rendimiento que el editor de plantilla, pero aquí
+   pega más fuerte todavía: palomear un elemento (cycleItemCheck) llama
+   renderFillItemsBody() en CADA clic — con una lista larga expandida,
+   cada palomeada reconstruía las ~150 filas de nuevo. Con las secciones
+   plegadas por defecto (igual criterio: >30 elementos en total), solo
+   la sección que tienes abierta se reconstruye en cada clic. */
+window._fillSectionCollapsed = window._fillSectionCollapsed || {};
+function isFillSectionCollapsed(sec){
+  if(window._fillSectionCollapsed.hasOwnProperty(sec)) return window._fillSectionCollapsed[sec];
+  return (window._fillItems||[]).length > 30;
+}
+function toggleFillSectionCollapsed(sec){ window._fillSectionCollapsed[sec] = !isFillSectionCollapsed(sec); renderFillItemsBody(); }
+function setAllFillSectionsCollapsed(collapsed){
+  const secs = Array.from(new Set((window._fillItems||[]).map(it=>it.section||'')));
+  secs.forEach(sec=>{ window._fillSectionCollapsed[sec] = collapsed; });
+  renderFillItemsBody();
 }
 function renderFillItemsList(){
   const tb = document.getElementById('fillToolbar');
@@ -6675,15 +6719,20 @@ function fillBodyHTML(){
       noteExpr:i=>`window._fillItems[${i}].note=this.value`,
       extraExpr:(i,ci)=>`setFillItemExtra(${i},${ci},this.value)`,
       delExpr:i=>`removeFillRow(${i})`
-    }, columns, true, {sort:_fillSort, setSort:'setFillSort', setFilterCol:'setFillFilterCol'});
+    }, columns, true, {sort:_fillSort, setSort:'setFillSort', setFilterCol:'setFillFilterCol'}, {
+      isCollapsed: sec=>isFillSectionCollapsed(sec),
+      toggleExpr: sec=>`toggleFillSectionCollapsed('${escAttr(sec)}')`
+    });
   }
   const dl = catalogDatalistsHTML(columns);
   const groups = groupBySection(rows).map(({sec,rows})=>{
     if(!rows.length) return '';
+    const collapsed = isFillSectionCollapsed(sec);
+    const toggleBtn = `<button class="icon-btn" style="padding:0 2px" onclick="toggleFillSectionCollapsed('${escAttr(sec)}')">${collapsed?'▸':'▾'}</button>`;
     return `<div class="fill-section">
-      ${sec ? `<div class="fill-section-title">${escHtml(sec)}</div>` : ''}
-      ${rows.map(({it,i})=>fillRowHTML(it,i)).join('')}
-      <button class="mini-btn" onclick="addFillRow('${escAttr(sec)}')">+ elemento en ${sec?escHtml(sec):'esta lista'}</button>
+      <div class="fill-section-title" style="display:flex;align-items:center;gap:4px">${toggleBtn}<span>${sec?escHtml(sec):'Sin categoría'}</span><span style="color:var(--text-dim);font-weight:400;font-size:11px">(${rows.length})</span></div>
+      ${collapsed ? '' : rows.map(({it,i})=>fillRowHTML(it,i)).join('')}
+      ${collapsed ? '' : `<button class="mini-btn" onclick="addFillRow('${escAttr(sec)}')">+ elemento en ${sec?escHtml(sec):'esta lista'}</button>`}
     </div>`;
   }).join('');
   return groups ? dl + groups : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';

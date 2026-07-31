@@ -624,7 +624,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Bahía Blanca';
+const BUILD_VERSION = 'La Plata';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1994,7 +1994,18 @@ async function setActiveNotebook(name){
 function promptNewNotebook(){
   const nombre = prompt('Nombre del cuaderno (ej. "clase nagasaki"):'); if(!nombre) return;
   const heredados = prompt('Etiquetas que hereda automáticamente cada nota (separadas por espacio, ej. "#dengue #salud"):','') || '';
-  saveEntity('NOTEBOOKS', { ID:uid(), Nombre:nombre.trim(), TagsHeredados:heredados, Color: randomColor() }).then(()=>{ renderSidebar(); });
+  // Dos bugs reales reportados juntos, misma causa: (1) saveEntity ya deja
+  // DATA al día de inmediato (síncrono) antes de su propio await interno
+  // a la red — esperar ESE viaje de ida y vuelta antes de refrescar
+  // CUALQUIER pantalla es lo que hacía sentir lento crear un cuaderno.
+  // (2) solo se refrescaba el panel lateral, nunca la lista de
+  // Configuración → Cuadernos — así que crear uno DESDE Configuración no
+  // mostraba nada nuevo ahí, parecía que no había pasado nada, y el
+  // usuario le daba clic otra vez → dos cuadernos duplicados.
+  saveEntity('NOTEBOOKS', { ID:uid(), Nombre:nombre.trim(), TagsHeredados:heredados, Color: randomColor() });
+  renderSidebar();
+  if(document.getElementById('nbRows')) renderSettingsNotebooks();
+  showToast('✅ Cuaderno creado');
 }
 function randomColor(){ const c=['#8a5a3b','#3d7a4f','#4a6fa5','#b3432b','#7d5ba6','#c9a227']; return c[Math.floor(Math.random()*c.length)]; }
 

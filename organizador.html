@@ -72,6 +72,22 @@ header{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1p
 header .brand{font-weight:800;font-size:16px;margin-right:6px;white-space:nowrap}
 header .search-wrap{flex:1;min-width:140px;max-width:360px}
 header .spacer{flex:1}
+/* En celular el encabezado se quedaba en 3 filas en vez de 2 — el
+   .spacer (flex:1, pensado para empujar los íconos a la derecha en
+   escritorio, donde el encabezado NO se envuelve) partía la fila de
+   íconos en dos pedazos raros al envolverse en celular (tomaba su
+   propio renglón angosto de la nada). En celular no hace falta —
+   ahí todo se envuelve solo — así que se apaga, y el hueco entre
+   íconos/gap normal del header ya alcanza para verse bien. También un
+   poco menos de relleno en los íconos del encabezado, para que + Nota
+   y + quepan en la misma fila que el resto de los íconos. */
+@media (hover:none) and (pointer:coarse){
+  header .spacer{display:none}
+  header .icon-btn{padding:6px 6px}
+  header .btn{padding:6px 8px;font-size:13px}
+  header .view-switch button{padding:6px 6px}
+  header{gap:4px;padding:8px 8px}
+}
 #syncDot{width:9px;height:9px;border-radius:50%;background:var(--success);display:inline-block}
 #syncDot.off{background:var(--danger)}
 #syncDot.busy{background:#c9a227}
@@ -485,9 +501,9 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" onclick="openAIDrawer()" title="Asistente IA">✨</button>
     <button class="icon-btn no-print desktop-only" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
-    <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel">Sync</span></button>
+    <button class="icon-btn no-print" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel" class="desktop-only">Sync</span></button>
     <button class="icon-btn no-print hidden" id="pendingInfoBtn" onclick="openPendingSyncModal()" title="Ver qué falta por sincronizar">ℹ️</button>
-    <button class="btn no-print" onclick="openNoteEditor(null)">+ Nota</button>
+    <button class="btn no-print" id="headerNewNoteBtn" onclick="openNoteEditor(null)">+ Nota</button>
     <button class="btn no-print" onclick="openCreateMenu()" title="Dato general, plantilla o registro de tiempo">+</button>
   </header>
 
@@ -504,6 +520,33 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
         <div class="nb-item" onclick="openCalendarModal()">📅 Calendario</div>
         <div class="nb-item" onclick="openBlockTables()">🧩 Tablas</div>
       </div>
+
+      <!-- Pedido explícito: orden y filtro de fecha van pegados arriba,
+           entre los accesos rápidos de celular y Cuadernos — no al
+           final del panel (donde vivían antes de este reacomodo). El
+           desplegable de orden abre hacia ABAJO acá (top:100%) porque
+           ahora hay harto espacio debajo; cuando vivía al final del
+           panel abría hacia arriba (bottom:100%) por la razón contraria. -->
+      <div class="sb-section" data-sb="orden" style="position:relative">
+        <h3 onclick="toggleSortDropdown()">⇅ <span id="sortDropdownLabel">Más recientes</span> <span class="sb-arrow">▾</span></h3>
+        <div id="sortDropdownMenu" class="hidden" style="position:absolute;top:100%;left:10px;right:10px;flex-direction:column;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);z-index:30;padding:4px;gap:2px;display:flex"></div>
+      </div>
+
+      <div class="sb-section" data-sb="fecha">
+        <h3 onclick="toggleSbSection('fecha')">Filtrar por fecha <span class="sb-arrow">▾</span></h3>
+        <div class="sb-content">
+          <div id="dateFilterPresets" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('hoy')">Hoy</button>
+            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('semana')">Esta semana</button>
+            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('mes')">Este mes</button>
+            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('anio')">Este año</button>
+          </div>
+          <input type="date" id="dateFilterFrom" onchange="applyCustomDateFilter()" style="width:100%">
+          <input type="date" id="dateFilterTo" onchange="applyCustomDateFilter()" style="width:100%;margin-top:6px">
+          <button class="mini-btn hidden" id="dateFilterClearBtn" style="margin-top:6px" onclick="clearDateFilter()">✕ Quitar filtro de fecha</button>
+        </div>
+      </div>
+
       <div class="sb-section" data-sb="cuaderno">
         <h3 onclick="toggleSbSection('cuaderno')">Cuadernos <span class="sb-arrow">▾</span></h3>
         <div class="sb-content">
@@ -518,21 +561,6 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
            "Etiquetas" colapsado — colapsar esa sección no debe esconder qué
            estás buscando ahora mismo. -->
       <div id="tagFilterBar"></div>
-
-      <div class="sb-section" data-sb="fecha">
-        <h3 onclick="toggleSbSection('fecha')">📅 Filtrar por fecha <span class="sb-arrow">▾</span></h3>
-        <div class="sb-content">
-          <div id="dateFilterPresets" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
-            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('hoy')">Hoy</button>
-            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('semana')">Esta semana</button>
-            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('mes')">Este mes</button>
-            <button class="mini-btn" style="width:auto" onclick="setDateFilterPreset('anio')">Este año</button>
-          </div>
-          <input type="date" id="dateFilterFrom" onchange="applyCustomDateFilter()" style="width:100%">
-          <input type="date" id="dateFilterTo" onchange="applyCustomDateFilter()" style="width:100%;margin-top:6px">
-          <button class="mini-btn hidden" id="dateFilterClearBtn" style="margin-top:6px" onclick="clearDateFilter()">✕ Quitar filtro de fecha</button>
-        </div>
-      </div>
 
       <div class="sb-section" data-sb="busquedas">
         <h3 onclick="toggleSbSection('busquedas')">Búsquedas guardadas <span class="sb-arrow">▾</span></h3>
@@ -554,11 +582,6 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
         </div>
       </div>
 
-      <div class="sb-section" data-sb="orden" style="position:relative">
-        <h3 onclick="toggleSortDropdown()">⇅ <span id="sortDropdownLabel">Más recientes</span> <span class="sb-arrow">▾</span></h3>
-        <div id="sortDropdownMenu" class="hidden" style="position:absolute;bottom:100%;left:10px;right:10px;flex-direction:column;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);z-index:30;padding:4px;gap:2px;display:flex"></div>
-      </div>
-
     </aside>
 
     <main id="viewArea"></main>
@@ -575,7 +598,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Santa Rosa';
+const BUILD_VERSION = 'Río Gallegos';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1428,6 +1451,19 @@ function toggleSidebar(){
   el.classList.toggle('open'); // comportamiento en celular (desliza)
   el.classList.toggle('desktop-hidden'); // en escritorio: lo oculta del todo, para recuperar espacio
 }
+/* Pedido explícito: en celular (NO en computadora — por eso el chequeo
+   de tipo de puntero, no de ancho de ventana, mismo criterio que ya
+   usa el resto de la app) tocar AFUERA del panel deslizado lo cierra
+   solo, sin tener que volver a tocar ☰. En escritorio ☰ solo
+   muestra/oculta el panel dentro del layout normal — ahí SÍ tiene
+   sentido que se quede abierto hasta que lo cierres a propósito. */
+document.addEventListener('click', e=>{
+  if(!window.matchMedia('(hover:none) and (pointer:coarse)').matches) return;
+  const sidebar = document.getElementById('sidebar');
+  if(!sidebar || !sidebar.classList.contains('open')) return;
+  if(sidebar.contains(e.target) || e.target.closest('#btnMenu')) return;
+  sidebar.classList.remove('open');
+});
 function setActiveNotebook(name){
   activeNotebook = name; localStorage.setItem('org_active_notebook', name);
   renderSidebar(); renderMain();
@@ -2643,7 +2679,7 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn desktop-only" onclick="duplicateNoteUI()" title="Duplicar">📄</button>
     <button class="icon-btn desktop-only" onclick="copyNoteUI()" title="Copiar texto">📋</button>
     <button class="icon-btn desktop-only" onclick="exportNotePDF(editingNoteId)" title="Exportar PDF">🖨️</button>
-    <button class="icon-btn desktop-only" onclick="togglePin()" title="Fijar">📌</button>
+    <button class="icon-btn desktop-only" id="pinBtnDesktop" onclick="togglePin()" title="${note.Pinned?'Quitar fijado':'Fijar'}">${note.Pinned?'📍':'📌'}</button>
     <button class="icon-btn desktop-only" onclick="deleteNoteUI(editingNoteId)" title="Eliminar">🗑️</button>
     <!-- Celular: se juntan en "⋮ más acciones" para no apretar el título,
          más un botón de pantalla completa (oculta la barra del navegador). -->
@@ -2654,7 +2690,7 @@ function editorInnerHTML(note, isModal){
         <button class="icon-btn" onclick="duplicateNoteUI()" style="justify-content:flex-start">📄 Duplicar</button>
         <button class="icon-btn" onclick="copyNoteUI()" style="justify-content:flex-start">📋 Copiar texto</button>
         <button class="icon-btn" onclick="exportNotePDF(editingNoteId)" style="justify-content:flex-start">🖨️ Exportar PDF</button>
-        <button class="icon-btn" onclick="togglePin()" style="justify-content:flex-start">📌 Fijar</button>
+        <button class="icon-btn" id="pinBtnMobile" onclick="togglePin()" style="justify-content:flex-start">${note.Pinned?'📍 Fijado':'📌 Fijar'}</button>
         <button class="icon-btn" onclick="deleteNoteUI(editingNoteId)" style="justify-content:flex-start">🗑️ Eliminar</button>
       </div>
     </span>
@@ -2739,6 +2775,12 @@ function togglePin(){
   if(!note){ showToast('Guarda la nota primero'); return; }
   note.Pinned = note.Pinned?'':'1';
   persistCurrentNote(note); showToast(note.Pinned?'📌 Fijada':'Ya no está fijada');
+  // Pedido explícito: que 📌 Fijar/📍 Fijado cambien al instante, sin
+  // tener que cerrar y volver a abrir la nota para ver el nuevo estado.
+  const dBtn = document.getElementById('pinBtnDesktop');
+  if(dBtn){ dBtn.textContent = note.Pinned?'📍':'📌'; dBtn.title = note.Pinned?'Quitar fijado':'Fijar'; }
+  const mBtn = document.getElementById('pinBtnMobile');
+  if(mBtn) mBtn.textContent = note.Pinned?'📍 Fijado':'📌 Fijar';
 }
 function toggleCornell(){
   const note = collectNoteFromForm();

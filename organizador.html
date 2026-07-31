@@ -96,10 +96,10 @@ header .btn{padding:11px 18px;font-size:15px}
 @media (hover:none) and (pointer:coarse){
   header .spacer{display:none}
   #headerNewNoteBtn{margin-left:0}
-  header .icon-btn{padding:6px 6px}
-  header .btn{padding:6px 8px;font-size:13px}
-  header .view-switch button{padding:6px 6px}
-  header{gap:4px;padding:8px 8px}
+  header .icon-btn{padding:8px 7px}
+  header .btn{padding:7px 10px;font-size:14px}
+  header .view-switch button{padding:7px 7px}
+  header{gap:5px;padding:8px 9px}
 }
 #syncDot{width:9px;height:9px;border-radius:50%;background:var(--success);display:inline-block}
 #syncDot.off{background:var(--danger)}
@@ -631,7 +631,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Resistencia';
+const BUILD_VERSION = 'Corrientes';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1982,14 +1982,25 @@ function toggleSidebar(){
    usa el resto de la app) tocar AFUERA del panel deslizado lo cierra
    solo, sin tener que volver a tocar ☰. En escritorio ☰ solo
    muestra/oculta el panel dentro del layout normal — ahí SÍ tiene
-   sentido que se quede abierto hasta que lo cierres a propósito. */
+   sentido que se quede abierto hasta que lo cierres a propósito.
+   Va en fase de CAPTURA (3er argumento true) y corta el evento con
+   stopPropagation/preventDefault cuando decide cerrar: si no, el
+   mismo toque que cierra el panel también le llegaba al elemento de
+   abajo (p.ej. una tarjeta de nota) y disparaba SU onclick, abriendo
+   una nota que el usuario no quería tocar — el reporte real fue
+   justo ese ("por cerrar doy clic afuera... termino abriendo una
+   nota q no quería"). Con la captura, este listener corre ANTES de
+   que el clic le llegue al objetivo, así que puede frenarlo del
+   todo en vez de solo enterarse después de que ya disparó. */
 document.addEventListener('click', e=>{
   if(!window.matchMedia('(hover:none) and (pointer:coarse)').matches) return;
   const sidebar = document.getElementById('sidebar');
   if(!sidebar || !sidebar.classList.contains('open')) return;
   if(sidebar.contains(e.target) || e.target.closest('#btnMenu')) return;
   sidebar.classList.remove('open');
-});
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
 async function setActiveNotebook(name){
   if(name && name!==NO_NOTEBOOK_SENTINEL && isNotebookLocked(name)){
     const ok = await unlockNotebookPrompt(name);

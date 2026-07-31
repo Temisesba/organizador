@@ -606,7 +606,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Jujuy';
+const BUILD_VERSION = 'Rosario';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2203,14 +2203,12 @@ function cardsHTML(notes, query, pane){
     // una — pedido explícito tras ver la vista principal llena de
     // tarjetitas de #task sueltas.
     if(n.Notebook===TAREAS_NOTEBOOK){
-      const tags = String(n.Tags||'').split(/\s+/).map(t=>t.replace(/^#/,'').trim()).filter(Boolean);
-      const chapterTag = tags.find(t=>t!=='task') || '';
+      const chapterTag = taskTagList(n).find(t=>t!=='task' && t!=='hecho') || '';
       if(seenTaskChapters.has(chapterTag)) return '';
       seenTaskChapters.add(chapterTag);
       const chapterNotes = notes.filter(x=>{
         if(x.Notebook!==TAREAS_NOTEBOOK) return false;
-        const xtags = String(x.Tags||'').split(/\s+/).map(t=>t.replace(/^#/,'').trim()).filter(Boolean);
-        return (xtags.find(t=>t!=='task')||'')===chapterTag;
+        return (taskTagList(x).find(t=>t!=='task' && t!=='hecho')||'')===chapterTag;
       });
       return taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane);
     }
@@ -2348,7 +2346,15 @@ function taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pan
     const tagName = chapterTag;
     const hit = tagName && highlight.includes(tagName.toLowerCase());
     const innerTags = tagName ? `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(tagName)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(tagName)}')" title="Filtrar por #${escAttr(tagName)}">#${escHtml(tagName)}</span>` : '';
-    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})"><div class="field-card-tag">${escHtml(fmtDate(n.Fecha))}</div><div class="field-card-text">${escHtml(n.Titulo||'(sin título)')}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
+    const done = isTaskDone(n);
+    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})">
+      <div class="field-card-tag" style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}')" title="Marcar como cumplida">
+        <span>${escHtml(fmtDate(n.Fecha))}</span>
+      </div>
+      <div class="field-card-text"${done?' style="text-decoration:line-through;opacity:.6"':''}>${escHtml(n.Titulo||'(sin título)')}</div>
+      ${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}
+    </div>`;
   }).join('');
   const label = chapterTag ? '#'+chapterTag : 'Sin categoría';
   return `<div class="chapter-group" onclick="openQuickTaskModal()">
@@ -4687,6 +4693,22 @@ async function ensureTareasNotebook(){
   if(!nb) nb = await saveEntity('NOTEBOOKS', { ID:uid(), Nombre:TAREAS_NOTEBOOK, TagsHeredados:'', Color:'#4a6fa5', TagAuto:'' });
   return nb;
 }
+/* Completar una tarea reutiliza el mismo mecanismo de #etiquetas que ya
+   organiza todo lo demás en Tareas (#task, #familia…) en vez de agregar
+   una columna nueva en NOTAS — un checkbox en la tarjetita agrega/quita
+   #hecho. "hecho" nunca cuenta como el "capítulo" (#familia/#trabajo) de
+   la tarea aunque sea la única etiqueta extra que tenga. */
+function taskTagList(n){ return String(n.Tags||'').split(/\s+/).map(t=>t.replace(/^#/,'').trim()).filter(Boolean); }
+function isTaskDone(n){ return taskTagList(n).includes('hecho'); }
+function toggleTaskDone(id){
+  const n = DATA.notas.find(x=>x.ID===id); if(!n) return;
+  const tags = taskTagList(n);
+  const idx = tags.indexOf('hecho');
+  if(idx>=0) tags.splice(idx,1); else { tags.push('hecho'); ensureTagsRegistered('#hecho'); }
+  n.Tags = tags.map(t=>'#'+t).join(' ');
+  saveEntity('NOTAS', n);
+  renderAll();
+}
 function openQuickTaskModal(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
@@ -4751,8 +4773,7 @@ function renderQuickTaskList(){
   if(!items.length){ wrap.innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin tareas todavía — la primera que guardes aparece arriba.</p>'; return; }
   const groups = {}; const order = [];
   items.forEach(n=>{
-    const tags = String(n.Tags||'').split(/\s+/).map(t=>t.replace(/^#/,'').trim()).filter(Boolean);
-    const chapter = tags.find(t=>t!=='task') || 'Sin categoría';
+    const chapter = taskTagList(n).find(t=>t!=='task' && t!=='hecho') || 'Sin categoría';
     if(!groups[chapter]){ groups[chapter]=[]; order.push(chapter); }
     groups[chapter].push(n);
   });
@@ -4761,10 +4782,14 @@ function renderQuickTaskList(){
     const rows = groups[chapter].slice().sort((a,b)=>String(a.Fecha).localeCompare(String(b.Fecha)));
     return `<div class="fill-section">
       <div class="fill-section-title">${chapter==='Sin categoría'?chapter:'#'+escHtml(chapter)}</div>
-      ${rows.map(n=>`<div class="settings-row" style="cursor:pointer" onclick="openNoteEditor('${n.ID}')">
-        <span style="flex:1;font-size:13px">${escHtml(n.Titulo)}</span>
+      ${rows.map(n=>{
+        const done = isTaskDone(n);
+        return `<div class="settings-row" style="cursor:pointer" onclick="openNoteEditor('${n.ID}')">
+        <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}');renderQuickTaskList()" title="Marcar como cumplida">
+        <span style="flex:1;font-size:13px${done?';text-decoration:line-through;opacity:.6':''}">${escHtml(n.Titulo)}</span>
         <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
-      </div>`).join('')}
+      </div>`;
+      }).join('')}
     </div>`;
   }).join('');
 }
@@ -5578,20 +5603,35 @@ function extraFieldInputHTML(value, columns, colIndex, onchangeExpr, extraAttrs)
   const listAttr = (col.catalog&&col.catalog.length) ? ` list="colcat-${colIndex}"` : '';
   return `<input type="text"${extraAttrs?' '+extraAttrs:''} value="${escAttr(value||'')}" placeholder="${escAttr(col.name)}"${listAttr} onchange="${onchangeExpr}">`;
 }
-function itemsTableHTML(rows, h, columns){
+/* Vista Tabla ahora respeta las categorías (líneas "...:" del texto):
+   con orden==="orig" (el de la plantilla) se arma una mini-tabla por
+   categoría, cada una con su propio título arriba — igual criterio que
+   ya usaba la vista Lista (agrupar deja de tener sentido si el orden es
+   otro, ej. por columna, porque mezclaría categorías a cada rato). El
+   llamador decide `grouped` según su propio estado de orden. */
+function itemsTableHTML(rows, h, columns, grouped){
   columns = columns||[];
   if(!rows.length) return '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
-  return `${catalogDatalistsHTML(columns)}<div class="items-table-wrap"><table class="items-table">
-    <tr><th></th><th>Elemento</th><th>Categoría</th><th>Nota</th>${columns.map(c=>`<th>${escHtml(c.name)}</th>`).join('')}<th></th></tr>
-    ${rows.map(({it,i})=>`<tr class="${it.checked?'done-row':''}">
+  const headerRow = `<tr><th></th><th>Elemento</th><th>Categoría</th><th>Nota</th>${columns.map(c=>`<th>${escHtml(c.name)}</th>`).join('')}<th></th></tr>`;
+  const rowHTML = ({it,i}) => `<tr class="${it.checked?'done-row':''}">
       <td><input type="checkbox" ${it.checked?'checked':''} onchange="${h.checkedExpr(i)}"></td>
       <td><input type="text" value="${escAttr(it.text)}" onchange="${h.textExpr(i)}"></td>
       <td><input type="text" value="${escAttr(it.section||'')}" onchange="${h.sectionExpr(i)}"></td>
       <td><input type="text" value="${escAttr(it.note||'')}" onchange="${h.noteExpr(i)}"></td>
       ${columns.map((c,ci)=>`<td>${extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,h.extraExpr(i,ci))}</td>`).join('')}
       <td><button class="icon-btn" onclick="${h.delExpr(i)}">🗑️</button></td>
-    </tr>`).join('')}
-  </table></div>`;
+    </tr>`;
+  const dl = catalogDatalistsHTML(columns);
+  if(grouped){
+    return dl + groupBySection(rows).map(({sec,rows})=>{
+      if(!rows.length) return '';
+      return `<div class="fill-section">
+        ${sec ? `<div class="fill-section-title">${escHtml(sec)}</div>` : ''}
+        <div class="items-table-wrap"><table class="items-table">${headerRow}${rows.map(rowHTML).join('')}</table></div>
+      </div>`;
+    }).join('');
+  }
+  return `${dl}<div class="items-table-wrap"><table class="items-table">${headerRow}${rows.map(rowHTML).join('')}</table></div>`;
 }
 /* "Pegar varios": mismo formato de línea que al crear una plantilla
    (categoría:, "elemento | columna 1 | columna 2 | ..."), para copiar/
@@ -5747,7 +5787,7 @@ function histBodyHTML(h){
       noteExpr:i=>`histNoteChange('${h.ID}',${i},this.value)`,
       extraExpr:(i,ci)=>`histExtraChange('${h.ID}',${i},${ci},this.value)`,
       delExpr:i=>`histDeleteItem('${h.ID}',${i})`
-    }, columns);
+    }, columns, sort==='orig');
   }
   const dl = catalogDatalistsHTML(columns);
   if(sort!=='orig'){
@@ -5961,7 +6001,7 @@ function renderTplEditTableBody(){
     noteExpr:i=>`window._tplEditItems[${i}].note=this.value`,
     extraExpr:(i,ci)=>`setTplEditItemExtra(${i},${ci},this.value)`,
     delExpr:i=>`removeTplEditRow(${i});renderTplEditTable()`
-  }, columns);
+  }, columns, _tplEditSort==='orig');
 }
 function renderTplEditList(){
   const el = document.getElementById('tplItemsListEditor'); if(!el) return;
@@ -6104,7 +6144,7 @@ function fillBodyHTML(){
       noteExpr:i=>`window._fillItems[${i}].note=this.value`,
       extraExpr:(i,ci)=>`setFillItemExtra(${i},${ci},this.value)`,
       delExpr:i=>`removeFillRow(${i})`
-    }, columns);
+    }, columns, _fillSort==='orig');
   }
   const dl = catalogDatalistsHTML(columns);
   if(_fillSort!=='orig'){

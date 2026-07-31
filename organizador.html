@@ -97,7 +97,7 @@ header .btn{padding:11px 18px;font-size:15px}
   header .spacer{display:none}
   #headerNewNoteBtn{margin-left:0}
   header .icon-btn{padding:6.5px 6px}
-  header .btn{padding:6.5px 8.5px;font-size:13.25px}
+  header .btn{padding:7px 9.5px;font-size:13.5px}
   header .view-switch button{padding:6px 6px}
   header{gap:4px;padding:8px 8px}
 }
@@ -144,7 +144,8 @@ main:fullscreen{background:var(--bg);padding:20px}
 
 /* cards */
 .cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
-.note-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--radius);padding:12px;box-shadow:var(--shadow);cursor:pointer;display:flex;flex-direction:column;gap:6px;min-height:110px}
+.note-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--radius);padding:12px;box-shadow:var(--shadow);cursor:pointer;display:flex;flex-direction:column;gap:6px;min-height:110px;align-self:start}
+.note-card.collapsed{min-height:0}
 .note-card:hover{border-color:var(--accent)}
 .note-card .nc-title{font-weight:700;font-size:14.5px;display:flex;gap:6px;align-items:flex-start}
 .note-card .nc-snip{font-size:12.5px;color:var(--text-dim);flex:1;white-space:pre-wrap;overflow:hidden;max-height:60px}
@@ -638,7 +639,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Mar del Plata';
+const BUILD_VERSION = 'San Rafael';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2538,7 +2539,7 @@ function noteCardHTML(n, pane){
   const tags = effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`).join('');
   const snip = noteSnippetText(n).slice(0,140);
   const collapsed = isCardCollapsed(n.ID);
-  return `<div class="note-card" onclick="openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})" style="${n.Color?('border-left:4px solid '+n.Color):''}">
+  return `<div class="note-card${collapsed?' collapsed':''}" onclick="openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})" style="${n.Color?('border-left:4px solid '+n.Color):''}">
     <div class="nc-title">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}${cardFoldBtnHTML(n.ID)}</div>
     ${collapsed?'':`<div class="nc-snip">${escHtml(snip)}</div>`}
     <div class="nc-tags">${tags}</div>
@@ -2626,9 +2627,14 @@ function timeLogChapterHTML(dateObj, dayNotes, highlight, q, activeTags, pane){
   }).reverse().join(''); // más reciente primero, igual que el modal de Registro de tiempo
   const isToday = dateObj.toDateString()===new Date().toDateString();
   const label = isToday ? 'Hoy' : dateObj.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
+  // No hay una nota-ID única para "todo el día" (son varios bloques) —
+  // se usa una llave propia por fecha para el estado de plegado, sin
+  // chocar con IDs reales de notas.
+  const foldKey = 'timelog:'+dateObj.toDateString();
+  const collapsed = isCardCollapsed(foldKey);
   return `<div class="chapter-group" onclick="openTimeLogModal(new Date('${dateObj.toISOString()}'))">
-    <div class="chapter-title">⏱ Registro de tiempo — ${escHtml(label)}<span class="chapter-meta">Registro Personal · ${fmtDate(dateObj.toISOString())}</span></div>
-    <div class="field-cards-row">${miniCards}</div>
+    <div class="chapter-title">⏱ Registro de tiempo — ${escHtml(label)}<span class="chapter-title-right"><span class="chapter-meta">Registro Personal · ${fmtDate(dateObj.toISOString())}</span>${cardFoldBtnHTML(foldKey)}</span></div>
+    ${collapsed?'':`<div class="field-cards-row">${miniCards}</div>`}
   </div>`;
 }
 /* Mismo patrón que timeLogChapterHTML — un capítulo por "etiqueta

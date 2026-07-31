@@ -606,7 +606,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Formosa';
+const BUILD_VERSION = 'Jujuy';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2188,6 +2188,7 @@ function cardsHTML(notes, query, pane){
   // un bloque de ese día en la lista ya ordenada; los demás bloques del
   // mismo día se saltan porque ya quedaron incluidos ahí.
   const seenTimeLogDays = new Set();
+  const seenTaskChapters = new Set();
   const cards = notes.map(n=>{
     if(n.PlantillaPropID===TIMELOG_MARKER){
       const dayKey = new Date(n.Fecha).toDateString();
@@ -2195,6 +2196,23 @@ function cardsHTML(notes, query, pane){
       seenTimeLogDays.add(dayKey);
       const dayNotes = notes.filter(x=>x.PlantillaPropID===TIMELOG_MARKER && new Date(x.Fecha).toDateString()===dayKey);
       return timeLogChapterHTML(new Date(n.Fecha), dayNotes, highlight, q, activeTags, pane);
+    }
+    // Mismo criterio que Registro de tiempo: las tareas creadas desde
+    // ⚑ Tareas se agrupan en UN capítulo por "etiqueta extra" (#familia,
+    // #trabajo…) en vez de aparecer como una tarjeta suelta por cada
+    // una — pedido explícito tras ver la vista principal llena de
+    // tarjetitas de #task sueltas.
+    if(n.Notebook===TAREAS_NOTEBOOK){
+      const tags = String(n.Tags||'').split(/\s+/).map(t=>t.replace(/^#/,'').trim()).filter(Boolean);
+      const chapterTag = tags.find(t=>t!=='task') || '';
+      if(seenTaskChapters.has(chapterTag)) return '';
+      seenTaskChapters.add(chapterTag);
+      const chapterNotes = notes.filter(x=>{
+        if(x.Notebook!==TAREAS_NOTEBOOK) return false;
+        const xtags = String(x.Tags||'').split(/\s+/).map(t=>t.replace(/^#/,'').trim()).filter(Boolean);
+        return (xtags.find(t=>t!=='task')||'')===chapterTag;
+      });
+      return taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane);
     }
     const pairs = extractFieldPairs(n);
     if(!pairs.length) return noteCardHTML(n, pane);
@@ -2306,6 +2324,35 @@ function timeLogChapterHTML(dateObj, dayNotes, highlight, q, activeTags, pane){
   const label = isToday ? 'Hoy' : dateObj.toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
   return `<div class="chapter-group" onclick="openTimeLogModal(new Date('${dateObj.toISOString()}'))">
     <div class="chapter-title">⏱ Registro de tiempo — ${escHtml(label)}<span class="chapter-meta">Registro Personal · ${fmtDate(dateObj.toISOString())}</span></div>
+    <div class="field-cards-row">${miniCards}</div>
+  </div>`;
+}
+/* Mismo patrón que timeLogChapterHTML — un capítulo por "etiqueta
+   extra" (#familia, #trabajo…) en vez de una tarjeta suelta por
+   tarea. Clic en el capítulo abre la vista agrupada completa
+   (openQuickTaskModal, la misma que ya lista por capítulo+fecha). */
+function taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane){
+  let rows = chapterNotes;
+  if(q || (activeTags && activeTags.length)){
+    rows = rows.filter(n=>{
+      const textoL = stripHtmlToText(n.Contenido||'').toLowerCase();
+      const tituloL = (n.Titulo||'').toLowerCase();
+      const tagL = (n.Tags||'').toLowerCase();
+      if(q && (textoL.includes(q) || tituloL.includes(q) || tagL.includes(q))) return true;
+      return activeTags.some(t => tagL.includes(t));
+    });
+    if(!rows.length) return '';
+  }
+  rows = rows.slice().sort((a,b)=>String(a.Fecha).localeCompare(String(b.Fecha)));
+  const miniCards = rows.map(n=>{
+    const tagName = chapterTag;
+    const hit = tagName && highlight.includes(tagName.toLowerCase());
+    const innerTags = tagName ? `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(tagName)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(tagName)}')" title="Filtrar por #${escAttr(tagName)}">#${escHtml(tagName)}</span>` : '';
+    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})"><div class="field-card-tag">${escHtml(fmtDate(n.Fecha))}</div><div class="field-card-text">${escHtml(n.Titulo||'(sin título)')}</div>${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}</div>`;
+  }).join('');
+  const label = chapterTag ? '#'+chapterTag : 'Sin categoría';
+  return `<div class="chapter-group" onclick="openQuickTaskModal()">
+    <div class="chapter-title">⚑ Tareas — ${escHtml(label)}<span class="chapter-meta">${rows.length} tarea${rows.length===1?'':'s'}</span></div>
     <div class="field-cards-row">${miniCards}</div>
   </div>`;
 }
@@ -5382,7 +5429,7 @@ async function insertImage(file){
 /* ============ Checklists: plantillas + historial ============ */
 function openChecklists(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  overlay.innerHTML = `<div class="modal">
+  overlay.innerHTML = `<div class="modal" style="width:min(900px,96vw)">
     <div class="modal-head"><b>☑️ Checklists</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="modal-body" id="checklistBody"></div>
   </div>`;
@@ -5677,7 +5724,7 @@ function histEntryHTML(h, isNewest){
     </div>
     ${collapsed ? '' : `
       <div id="histToolbar-${h.ID}" style="margin-top:8px">${itemsToolbarHTML(rawItems, columns, {
-        search: window._histSearch[h.ID]||'', filterCol: window._histFilterCol[h.ID]||'', filterVal: window._histFilterVal[h.ID]||'', sort: window._histSort[h.ID]||'orig', view: window._histViewMode[h.ID]||'list',
+        search: window._histSearch[h.ID]||'', filterCol: window._histFilterCol[h.ID]||'', filterVal: window._histFilterVal[h.ID]||'', sort: window._histSort[h.ID]||'orig', view: window._histViewMode[h.ID]||(columns.length?'table':'list'),
         setSearch:'setHistSearch', setFilterCol:'setHistFilterCol', setFilterVal:'setHistFilterVal', setSort:'setHistSort', setView:'setHistViewMode', ownerArg:h.ID
       })}</div>
       <div id="histBody-${h.ID}">${histBodyHTML(h)}</div>`}
@@ -5689,8 +5736,8 @@ function histBodyHTML(h){
   const filterCol = (window._histFilterCol&&window._histFilterCol[h.ID])||'';
   const filterVal = (window._histFilterVal&&window._histFilterVal[h.ID])||'';
   const sort = (window._histSort&&window._histSort[h.ID])||'orig';
-  const view = (window._histViewMode&&window._histViewMode[h.ID])||'list';
   const columns = templateColumns(DATA.plantillas.find(p=>p.ID===h.PlantillaID));
+  const view = (window._histViewMode&&window._histViewMode[h.ID])||(columns.length?'table':'list');
   const rows = filterSortRows(items, {search, filterCol, filterVal, sort, columns});
   if(view==='table'){
     return itemsTableHTML(rows, {
@@ -5753,7 +5800,7 @@ function openTemplateModal(existingId){
   window._tplEditColumns = templateColumns(existing);
   _tplEditView = 'text';
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  overlay.innerHTML = `<div class="modal">
+  overlay.innerHTML = `<div class="modal" style="width:min(900px,96vw)">
     <div class="modal-head"><b>${existing?'✏️ Editar':'+ Nueva'} plantilla</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
       <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Nombre</label>
@@ -6001,10 +6048,15 @@ function openFillModal(templateId){
   let baseItems; try{ baseItems = JSON.parse(p.ItemsJSON||'[]').map(it=>({ text: it.text!==undefined?it.text:it, checked:false, note:'', section: it.section||'', extra: it.extra||{} })); }catch(e){ baseItems=[]; }
   window._fillItems = baseItems;
   window._fillColumns = templateColumns(p);
-  _fillFilterCol=''; _fillFilterVal=''; _fillSearch=''; _fillSort='orig'; _fillViewMode='list';
+  // Con columnas personalizadas, la vista Lista (cada campo en un input
+  // angosto de ancho fijo) se aprieta demasiado para leer algo — Tabla
+  // (con scroll horizontal propio) es la que de verdad se puede usar
+  // cuando hay varias columnas. Sin columnas, Lista sigue siendo la más
+  // cómoda para un checklist simple.
+  _fillFilterCol=''; _fillFilterVal=''; _fillSearch=''; _fillSort='orig'; _fillViewMode = window._fillColumns.length ? 'table' : 'list';
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
-  overlay.innerHTML = `<div class="modal">
-    <div class="modal-head"><b>▶ Llenar: ${escHtml(p.Nombre)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+  overlay.innerHTML = `<div class="modal" style="width:min(900px,96vw)">
+    <div class="modal-head"><b>▶ Llenar: ${escHtml(p.Nombre)}</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
     <div class="modal-body">
       <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Nombre para esta lista</label>
       <input type="text" id="fillNombreInput" value="${escAttr(p.Nombre)}" placeholder="ej. Viaje a Cancún — marzo">

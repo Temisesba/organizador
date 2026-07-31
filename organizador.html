@@ -598,7 +598,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Río Gallegos';
+const BUILD_VERSION = 'Bariloche';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -5108,16 +5108,32 @@ function itemsToolbarHTML(items, cfg){
       <option value="az" ${cfg.sort==='az'?'selected':''}>A-Z</option>
       <option value="pending" ${cfg.sort==='pending'?'selected':''}>Pendientes primero</option>
     </select>
-    <button class="icon-btn" title="${cfg.view==='table'?'Ver como lista':'Ver como tabla'}" onclick="${cfg.setView}(${arg}'${cfg.view==='table'?'list':'table'}')">${cfg.view==='table'?'📋':'🔲'}</button>
+    ${cfg.hideViewToggle?'':`<button class="icon-btn" title="${cfg.view==='table'?'Ver como lista':'Ver como tabla'}" onclick="${cfg.setView}(${arg}'${cfg.view==='table'?'list':'table'}')">${cfg.view==='table'?'📋':'🔲'}</button>`}
   </div>
   ${destinoBar}`;
 }
-function templateColumns(p){ if(!p) return []; try{ return JSON.parse(p.ColumnasJSON||'[]'); }catch(e){ return []; } }
+function templateColumns(p){
+  if(!p) return [];
+  let raw; try{ raw = JSON.parse(p.ColumnasJSON||'[]'); }catch(e){ raw = []; }
+  if(!Array.isArray(raw)) return [];
+  return raw.map(c => typeof c==='string' ? {name:c, catalog:[]} : {name:c.name||'', catalog:Array.isArray(c.catalog)?c.catalog:[]});
+}
+function catalogDatalistsHTML(columns){
+  return (columns||[]).filter(c=>c.catalog&&c.catalog.length).map((c,ci)=>{
+    const realIdx = columns.indexOf(c);
+    return `<datalist id="colcat-${realIdx}">${c.catalog.map(v=>`<option value="${escAttr(v)}">`).join('')}</datalist>`;
+  }).join('');
+}
+function extraFieldInputHTML(value, columns, colIndex, onchangeExpr, extraAttrs){
+  const col = columns[colIndex]||{name:'',catalog:[]};
+  const listAttr = (col.catalog&&col.catalog.length) ? ` list="colcat-${colIndex}"` : '';
+  return `<input type="text"${extraAttrs?' '+extraAttrs:''} value="${escAttr(value||'')}" placeholder="${escAttr(col.name)}"${listAttr} onchange="${onchangeExpr}">`;
+}
 function itemsTableHTML(rows, h, columns){
   columns = columns||[];
   if(!rows.length) return '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
-  return `<div class="items-table-wrap"><table class="items-table">
-    <tr><th></th><th>Elemento</th><th>Categoría</th><th>Destino</th><th>Prioridad</th><th>Nota</th>${columns.map(c=>`<th>${escHtml(c)}</th>`).join('')}<th></th></tr>
+  return `${catalogDatalistsHTML(columns)}<div class="items-table-wrap"><table class="items-table">
+    <tr><th></th><th>Elemento</th><th>Categoría</th><th>Destino</th><th>Prioridad</th><th>Nota</th>${columns.map(c=>`<th>${escHtml(c.name)}</th>`).join('')}<th></th></tr>
     ${rows.map(({it,i})=>`<tr class="${it.checked?'done-row':''}">
       <td><input type="checkbox" ${it.checked?'checked':''} onchange="${h.checkedExpr(i)}"></td>
       <td><input type="text" value="${escAttr(it.text)}" onchange="${h.textExpr(i)}"></td>
@@ -5125,7 +5141,7 @@ function itemsTableHTML(rows, h, columns){
       <td><input type="text" value="${escAttr(it.destino||'')}" onchange="${h.destinoExpr(i)}"></td>
       <td>${prioritySelectHTML(it.priority, h.priorityExpr(i))}</td>
       <td><input type="text" value="${escAttr(it.note||'')}" onchange="${h.noteExpr(i)}"></td>
-      ${columns.map((c,ci)=>`<td><input type="text" value="${escAttr((it.extra&&it.extra[c])||'')}" onchange="${h.extraExpr(i,ci)}"></td>`).join('')}
+      ${columns.map((c,ci)=>`<td>${extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,h.extraExpr(i,ci))}</td>`).join('')}
       <td><button class="icon-btn" onclick="${h.delExpr(i)}">🗑️</button></td>
     </tr>`).join('')}
   </table></div>`;
@@ -5257,8 +5273,9 @@ function histBodyHTML(h){
       delExpr:i=>`histDeleteItem('${h.ID}',${i})`
     }, columns);
   }
+  const dl = catalogDatalistsHTML(columns);
   if(sort!=='orig'){
-    return rows.length ? `<ul>${rows.map(({it,i})=>histRowHTML(h.ID,it,i,columns)).join('')}</ul>` : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
+    return rows.length ? dl + `<ul>${rows.map(({it,i})=>histRowHTML(h.ID,it,i,columns)).join('')}</ul>` : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
   }
   const groups = groupBySection(rows).map(({sec,rows})=>{
     if(!rows.length) return '';
@@ -5267,7 +5284,7 @@ function histBodyHTML(h){
       <ul>${rows.map(({it,i})=>histRowHTML(h.ID,it,i,columns)).join('')}</ul>
     </div>`;
   }).join('');
-  return groups || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
+  return groups ? dl + groups : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
 }
 function histRowHTML(historyId,it,i,columns){
   columns = columns||[];
@@ -5277,7 +5294,7 @@ function histRowHTML(historyId,it,i,columns){
     <input type="text" class="hist-note" style="max-width:90px" placeholder="destino" value="${escAttr(it.destino||'')}" onchange="histDestinoChange('${historyId}',${i},this.value)">
     ${prioritySelectHTML(it.priority, `histPriorityChange('${historyId}',${i},this.value)`)}
     <input type="text" class="hist-note" placeholder="nota (cuántos, estado…)" value="${escAttr(it.note||'')}" onchange="histNoteChange('${historyId}',${i},this.value)">
-    ${columns.map((c,ci)=>`<input type="text" class="hist-note" style="max-width:110px" placeholder="${escAttr(c)}" value="${escAttr((it.extra&&it.extra[c])||'')}" onchange="histExtraChange('${historyId}',${i},${ci},this.value)">`).join('')}
+    ${columns.map((c,ci)=>extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,`histExtraChange('${historyId}',${i},${ci},this.value)`,'class="hist-note" style="max-width:110px"')).join('')}
     <button class="icon-btn" onclick="histDeleteItem('${historyId}',${i})">🗑️</button>
   </li>`;
 }
@@ -5316,6 +5333,7 @@ function openTemplateModal(existingId){
         <div class="tag-filter-mode">
           <button id="tplViewBtnText" class="active" onclick="setTplEditView('text')">Texto</button>
           <button id="tplViewBtnList" onclick="setTplEditView('list')">Lista</button>
+          <button id="tplViewBtnTable" onclick="setTplEditView('table')">Tabla</button>
         </div>
       </div>
       <p class="hint" id="tplTextHint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Uno por línea. Una línea que termine en ":" empieza una categoría nueva. "elemento | destino" para marcar a dónde va, o "elemento | destino | prioridad" (alta/media/baja) — luego puedes filtrar/ordenar por eso al llenar la lista.</p>
@@ -5330,11 +5348,16 @@ protector solar | comprar al llegar">${existing?escHtml(templateItemsToText(item
         <button class="mini-btn" onclick="addTplEditRow('')">+ elemento suelto</button>
         <button class="mini-btn" onclick="addTplEditSection()">+ nueva categoría</button>
       </div>
+      <div id="tplItemsTableEditor" style="display:none">
+        <div id="tplTableToolbar"></div>
+        <div id="tplTableBody"></div>
+      </div>
       <label style="font-size:12px;font-weight:600;display:block;margin-top:14px">Columnas personalizadas (ej. caducidad)</label>
-      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:2px 0 6px">Elige tú qué más quieres llevar por elemento en esta lista — aparece como un campo más al llenarla.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:2px 0 6px">Elige tú qué más quieres llevar por elemento en esta lista — aparece como un campo más al llenarla. Puedes agregar opciones sugeridas para elegir de una lista, o escribir algo nuevo cada vez.</p>
       <div id="tplColumnsChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
-      <div style="display:flex;gap:6px">
-        <input type="text" id="tplNewColumnInput" placeholder="nombre de columna (ej. caducidad)" onkeydown="if(event.key==='Enter'){event.preventDefault();addTplColumn();}">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <input type="text" id="tplNewColumnInput" style="flex:1" placeholder="nombre de columna (ej. prioridad de viaje)" onkeydown="if(event.key==='Enter'){event.preventDefault();addTplColumn();}">
+        <input type="text" id="tplNewColumnCatalogInput" style="flex:1" placeholder="opciones sugeridas, separadas por coma (opcional)" onkeydown="if(event.key==='Enter'){event.preventDefault();addTplColumn();}">
         <button class="mini-btn" style="width:auto" onclick="addTplColumn()">+ agregar</button>
       </div>
       <label style="font-size:12px;font-weight:600;display:block;margin-top:12px">Avísame si no la he llenado</label>
@@ -5350,50 +5373,101 @@ function renderTplColumnsChips(){
   const el = document.getElementById('tplColumnsChips'); if(!el) return;
   const columns = window._tplEditColumns||[];
   el.innerHTML = columns.length
-    ? columns.map((c,i)=>`<span class="tag-badge">${escHtml(c)} <button class="icon-btn" style="padding:0 2px" onclick="removeTplColumn(${i})" title="Quitar columna">✕</button></span>`).join('')
+    ? columns.map((c,i)=>`<span class="tag-badge">${escHtml(c.name)}${c.catalog&&c.catalog.length?` (${c.catalog.length})`:''} <button class="icon-btn" style="padding:0 2px" onclick="editTplColumnCatalog(${i})" title="Editar opciones sugeridas">✎</button><button class="icon-btn" style="padding:0 2px" onclick="removeTplColumn(${i})" title="Quitar columna">✕</button></span>`).join('')
     : '<span class="hint" style="color:var(--text-dim);font-size:12px">Ninguna todavía.</span>';
 }
 function addTplColumn(){
   const inp = document.getElementById('tplNewColumnInput');
+  const catInp = document.getElementById('tplNewColumnCatalogInput');
   const name = (inp.value||'').trim(); if(!name) return;
   window._tplEditColumns = window._tplEditColumns||[];
-  if(window._tplEditColumns.includes(name)){ showToast('Ya existe esa columna'); return; }
-  window._tplEditColumns.push(name);
-  inp.value=''; inp.focus();
+  if(window._tplEditColumns.some(c=>c.name===name)){ showToast('Ya existe esa columna'); return; }
+  const catalog = (catInp.value||'').split(',').map(s=>s.trim()).filter(Boolean);
+  window._tplEditColumns.push({name, catalog});
+  inp.value=''; catInp.value=''; inp.focus();
   renderTplColumnsChips();
   if(_tplEditView==='list') renderTplEditList();
+  if(_tplEditView==='table') renderTplEditTable();
+}
+function editTplColumnCatalog(i){
+  const col = window._tplEditColumns[i]; if(!col) return;
+  const val = prompt('Opciones sugeridas para "'+col.name+'", separadas por coma (vacío = ninguna):', (col.catalog||[]).join(', '));
+  if(val===null) return;
+  col.catalog = val.split(',').map(s=>s.trim()).filter(Boolean);
+  renderTplColumnsChips();
+  if(_tplEditView==='list') renderTplEditList();
+  if(_tplEditView==='table') renderTplEditTable();
 }
 function removeTplColumn(i){
   window._tplEditColumns.splice(i,1);
   renderTplColumnsChips();
   if(_tplEditView==='list') renderTplEditList();
+  if(_tplEditView==='table') renderTplEditTable();
 }
+let _tplEditSearch = '', _tplEditSort = 'orig', _tplEditDestino = '';
 function setTplEditView(view){
+  const prevView = _tplEditView;
   _tplEditView = view;
   document.getElementById('tplViewBtnText').classList.toggle('active', view==='text');
   document.getElementById('tplViewBtnList').classList.toggle('active', view==='list');
+  document.getElementById('tplViewBtnTable').classList.toggle('active', view==='table');
   const ta = document.getElementById('tplItemsInput');
   const listEditor = document.getElementById('tplItemsListEditor');
   const listActions = document.getElementById('tplListActions');
+  const tableEditor = document.getElementById('tplItemsTableEditor');
   const hint = document.getElementById('tplTextHint');
-  if(view==='list'){
+  if(view==='list' || view==='table'){
     // el texto plano no sabe de columnas personalizadas — si la cantidad
     // de elementos no cambió mientras estuvo en modo Texto, se recupera
     // el "extra" de cada uno por posición (mismo criterio implícito que
-    // ya se usa para no perder nada al ir y venir entre las dos vistas)
-    const prevItems = window._tplEditItems;
-    window._tplEditItems = parseTemplateText(ta.value);
-    window._tplEditItems.forEach((it,i)=>{
-      it.extra = (prevItems && prevItems.length===window._tplEditItems.length && prevItems[i].extra) || {};
-    });
+    // ya se usa para no perder nada al ir y venir entre vistas). Solo se
+    // vuelve a parsear el texto si de verdad se viene de esa vista —
+    // Lista<->Tabla comparten el mismo array en memoria sin pasar por el
+    // textarea, para no pisar ediciones hechas en la otra vista.
+    if(prevView==='text'){
+      const prevItems = window._tplEditItems;
+      window._tplEditItems = parseTemplateText(ta.value);
+      window._tplEditItems.forEach((it,i)=>{
+        it.extra = (prevItems && prevItems.length===window._tplEditItems.length && prevItems[i].extra) || {};
+      });
+    }
     ta.style.display = 'none'; hint.style.display = 'none';
-    listEditor.style.display = ''; listActions.style.display = 'flex';
-    renderTplEditList();
+    listEditor.style.display = view==='list' ? '' : 'none';
+    listActions.style.display = view==='list' ? 'flex' : 'none';
+    tableEditor.style.display = view==='table' ? '' : 'none';
+    if(view==='list') renderTplEditList(); else renderTplEditTable();
   } else {
     ta.value = templateItemsToText(window._tplEditItems);
     ta.style.display = ''; hint.style.display = '';
     listEditor.style.display = 'none'; listActions.style.display = 'none';
+    tableEditor.style.display = 'none';
   }
+}
+function setTplEditSearch(v){ _tplEditSearch=v; renderTplEditTableBody(); }
+function setTplEditSort(v){ _tplEditSort=v; renderTplEditTable(); }
+function setTplEditDestino(v){ _tplEditDestino=v; renderTplEditTable(); }
+function renderTplEditTable(){
+  const tb = document.getElementById('tplTableToolbar'); if(!tb) return;
+  tb.innerHTML = itemsToolbarHTML(window._tplEditItems, {
+    search:_tplEditSearch, destino:_tplEditDestino, sort:_tplEditSort, view:'table', hideViewToggle:true,
+    setSearch:'setTplEditSearch', setDestino:'setTplEditDestino', setSort:'setTplEditSort'
+  });
+  renderTplEditTableBody();
+}
+function renderTplEditTableBody(){
+  const body = document.getElementById('tplTableBody'); if(!body) return;
+  const rows = filterSortRows(window._tplEditItems, {search:_tplEditSearch, destino:_tplEditDestino, sort:_tplEditSort});
+  const columns = window._tplEditColumns||[];
+  body.innerHTML = itemsTableHTML(rows, {
+    checkedExpr:i=>`window._tplEditItems[${i}].checked=this.checked`,
+    textExpr:i=>`window._tplEditItems[${i}].text=this.value`,
+    sectionExpr:i=>`window._tplEditItems[${i}].section=this.value`,
+    destinoExpr:i=>`window._tplEditItems[${i}].destino=this.value;renderTplEditTable()`,
+    priorityExpr:i=>`window._tplEditItems[${i}].priority=this.value`,
+    noteExpr:i=>`window._tplEditItems[${i}].note=this.value`,
+    extraExpr:(i,ci)=>`setTplEditItemExtra(${i},${ci},this.value)`,
+    delExpr:i=>`removeTplEditRow(${i});renderTplEditTable()`
+  }, columns);
 }
 function renderTplEditList(){
   const el = document.getElementById('tplItemsListEditor'); if(!el) return;
@@ -5405,7 +5479,7 @@ function renderTplEditList(){
       ${rows.map(({it,i})=>tplEditRowHTML(it,i)).join('')}
     </div>`;
   }).join('');
-  el.innerHTML = groups || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos — agrega uno abajo.</p>';
+  el.innerHTML = (groups ? catalogDatalistsHTML(window._tplEditColumns||[]) + groups : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos — agrega uno abajo.</p>');
 }
 function tplEditRowHTML(it,i){
   const columns = window._tplEditColumns||[];
@@ -5414,7 +5488,7 @@ function tplEditRowHTML(it,i){
     <input type="text" style="flex:.6" value="${escAttr(it.destino||'')}" placeholder="destino" onchange="window._tplEditItems[${i}].destino=this.value">
     ${prioritySelectHTML(it.priority, `window._tplEditItems[${i}].priority=this.value`)}
     <input type="text" style="flex:.7" value="${escAttr(it.section||'')}" placeholder="categoría" onchange="window._tplEditItems[${i}].section=this.value;renderTplEditList()">
-    ${columns.map((c,ci)=>`<input type="text" style="flex:.6" placeholder="${escAttr(c)}" value="${escAttr((it.extra&&it.extra[c])||'')}" onchange="setTplEditItemExtra(${i},${ci},this.value)">`).join('')}
+    ${columns.map((c,ci)=>extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,`setTplEditItemExtra(${i},${ci},this.value)`,'style="flex:.6"')).join('')}
     <button class="icon-btn" onclick="removeTplEditRow(${i})">🗑️</button>
   </div>`;
 }
@@ -5422,7 +5496,7 @@ function setTplEditItemExtra(i, colIndex, val){
   const columns = window._tplEditColumns||[];
   const col = columns[colIndex]; if(col===undefined) return;
   const it = window._tplEditItems[i]; if(!it) return;
-  it.extra = it.extra||{}; it.extra[col] = val;
+  it.extra = it.extra||{}; it.extra[col.name] = val;
 }
 function addTplEditRow(section){ window._tplEditItems.push({text:'',destino:'',priority:'',section:section||'',extra:{}}); renderTplEditList(); }
 function addTplEditSection(){ const name = prompt('Nombre de la categoría (ej. Ropa):'); if(!name || !name.trim()) return; window._tplEditItems.push({text:'',destino:'',priority:'',section:name.trim(),extra:{}}); renderTplEditList(); }
@@ -5430,7 +5504,7 @@ function removeTplEditRow(i){ window._tplEditItems.splice(i,1); renderTplEditLis
 function saveTemplateModal(btn, existingId){
   const nombre = document.getElementById('tplNameInput').value.trim();
   if(!nombre){ showToast('Ponle un nombre a la plantilla'); return; }
-  const items = _tplEditView==='list'
+  const items = _tplEditView!=='text'
     ? window._tplEditItems.filter(it=>it.text && it.text.trim())
     : parseTemplateText(document.getElementById('tplItemsInput').value);
   const recordatorio = document.getElementById('tplRecordatorio').value;
@@ -5531,8 +5605,9 @@ function fillBodyHTML(){
       delExpr:i=>`removeFillRow(${i})`
     }, window._fillColumns||[]);
   }
+  const dl = catalogDatalistsHTML(window._fillColumns||[]);
   if(_fillSort!=='orig'){
-    return rows.length ? rows.map(({it,i})=>fillRowHTML(it,i)).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
+    return rows.length ? dl + rows.map(({it,i})=>fillRowHTML(it,i)).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
   }
   const groups = groupBySection(rows).map(({sec,rows})=>{
     if(!rows.length) return '';
@@ -5542,7 +5617,7 @@ function fillBodyHTML(){
       <button class="mini-btn" onclick="addFillRow('${escAttr(sec)}')">+ elemento en ${sec?escHtml(sec):'esta lista'}</button>
     </div>`;
   }).join('');
-  return groups || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
+  return groups ? dl + groups : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
 }
 function fillRowHTML(it,i){
   const columns = window._fillColumns||[];
@@ -5552,7 +5627,7 @@ function fillRowHTML(it,i){
     <input type="text" style="flex:.6" value="${escAttr(it.destino||'')}" placeholder="destino" onchange="window._fillItems[${i}].destino=this.value;renderFillItemsList()">
     ${prioritySelectHTML(it.priority, `window._fillItems[${i}].priority=this.value;renderFillItemsBody()`)}
     <input type="text" style="flex:1" value="${escAttr(it.note||'')}" placeholder="nota (cuántos, si hace calor…)" onchange="window._fillItems[${i}].note=this.value">
-    ${columns.map((c,ci)=>`<input type="text" style="flex:.6" placeholder="${escAttr(c)}" value="${escAttr((it.extra&&it.extra[c])||'')}" onchange="setFillItemExtra(${i},${ci},this.value)">`).join('')}
+    ${columns.map((c,ci)=>extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,`setFillItemExtra(${i},${ci},this.value)`,'style="flex:.6"')).join('')}
     <button class="icon-btn" onclick="removeFillRow(${i})">🗑️</button>
   </div>`;
 }
@@ -5560,7 +5635,7 @@ function setFillItemExtra(i, colIndex, val){
   const columns = window._fillColumns||[];
   const col = columns[colIndex]; if(col===undefined) return;
   const it = window._fillItems[i]; if(!it) return;
-  it.extra = it.extra||{}; it.extra[col] = val;
+  it.extra = it.extra||{}; it.extra[col.name] = val;
 }
 function addFillRow(section){ window._fillItems.push({text:'',checked:false,note:'',destino:'',priority:'',section:section||'',extra:{}}); renderFillItemsList(); }
 function addFillSection(){ const name = prompt('Nombre de la categoría (ej. Ropa):'); if(!name || !name.trim()) return; window._fillItems.push({text:'',checked:false,note:'',destino:'',priority:'',section:name.trim(),extra:{}}); renderFillItemsList(); }
@@ -5595,7 +5670,7 @@ function histExtraChange(historyId, i, colIndex, val){
   const h = DATA.historial.find(x=>x.ID===historyId); if(!h) return;
   const columns = templateColumns(DATA.plantillas.find(p=>p.ID===h.PlantillaID));
   const col = columns[colIndex]; if(col===undefined) return;
-  histMutate(historyId, items=>{ if(items[i]){ items[i].extra = items[i].extra||{}; items[i].extra[col] = val; } });
+  histMutate(historyId, items=>{ if(items[i]){ items[i].extra = items[i].extra||{}; items[i].extra[col.name] = val; } });
 }
 function histDeleteItem(id, i){ if(!confirm('¿Quitar este elemento de la lista?')) return; histMutate(id, items=>{ items.splice(i,1); }); }
 /* Borra un llenado COMPLETO (una fila de HISTORIAL — ej. "Viaje a

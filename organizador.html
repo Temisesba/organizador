@@ -578,10 +578,16 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
       <div id="tagFilterModeBar"></div>
       <div id="tagFilterBar"></div>
 
+      <div class="sb-section" data-sb="banderas">
+        <h3 onclick="toggleSbSection('banderas')">Banderas rápidas <span class="sb-arrow">▾</span></h3>
+        <div class="sb-content"><div id="flagCloud"></div></div>
+      </div>
+
       <div class="sb-section" data-sb="cuaderno">
         <h3 onclick="toggleSbSection('cuaderno')">Cuadernos <span class="sb-arrow">▾</span></h3>
         <div class="sb-content">
           <div class="nb-item" id="nbNone" onclick="setActiveNotebook('')">📥 Inbox <span class="cnt" id="inboxCount"></span></div>
+          <div class="nb-item" id="nbSinCuaderno" onclick="setActiveNotebook(NO_NOTEBOOK_SENTINEL)">📭 Sin cuaderno <span class="cnt" id="sinCuadernoCount"></span></div>
           <div id="notebookList"></div>
           <button class="mini-btn" onclick="promptNewNotebook()">+ nuevo cuaderno</button>
         </div>
@@ -593,11 +599,6 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
           <div id="savedSearchList"></div>
           <button class="mini-btn" onclick="promptSaveSearch()">+ guardar búsqueda actual</button>
         </div>
-      </div>
-
-      <div class="sb-section" data-sb="banderas">
-        <h3 onclick="toggleSbSection('banderas')">Banderas rápidas <span class="sb-arrow">▾</span></h3>
-        <div class="sb-content"><div id="flagCloud"></div></div>
       </div>
 
       <div class="sb-section" data-sb="etiquetas">
@@ -623,11 +624,15 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Posadas';
+const BUILD_VERSION = 'Comodoro';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
 const MEJORAS_NOTEBOOK = 'Mejoras Organizador';
+// Sentinel distinto de '' (Inbox = ver TODO) para el nuevo filtro "Sin
+// cuaderno" — notas cuyo campo Notebook está genuinamente vacío, no
+// "todo menos Mejoras" como Inbox.
+const NO_NOTEBOOK_SENTINEL = '__sin_cuaderno__';
 
 /* ============ Google Calendar — conexión con refresh token real
    (2026-08-01, reemplaza el flujo implícito de antes) ============
@@ -1950,6 +1955,8 @@ function renderSidebar(){
   // el contador debe coincidir con lo que Inbox realmente muestra ahora
   // (todo excepto Mejoras), no solo las notas sin cuaderno.
   document.getElementById('inboxCount').textContent = activeNotes().filter(n=>n.Notebook!==MEJORAS_NOTEBOOK).length;
+  document.getElementById('nbSinCuaderno').classList.toggle('active', activeNotebook===NO_NOTEBOOK_SENTINEL);
+  document.getElementById('sinCuadernoCount').textContent = activeNotes().filter(n=>!n.Notebook).length;
 
   const fc = document.getElementById('flagCloud');
   fc.innerHTML = allFlags().map(([t,emoji,label,color])=>{
@@ -2120,7 +2127,8 @@ function getFilteredSortedNotes(query, applyTagFilters){
     // no una condición para aparecer. La ÚNICA excepción es Mejoras
     // Organizador, que nunca debe verse fuera de Configuración. Si hay un
     // cuaderno específico elegido, ahí sí filtra estrictamente a ese.
-    if(activeNotebook){ if(n.Notebook!==activeNotebook) return false; }
+    if(activeNotebook===NO_NOTEBOOK_SENTINEL){ if(n.Notebook) return false; }
+    else if(activeNotebook){ if(n.Notebook!==activeNotebook) return false; }
     else if(n.Notebook===MEJORAS_NOTEBOOK) return false;
     if(applyTagFilters && activeTagFilters.size){
       // activeTagFilters ya siempre está en minúsculas (toggleTagFilter lo
@@ -2776,8 +2784,13 @@ function initSplitResizerOnce(){
 
 /* ============ Editor de notas ============ */
 function newBlankNote(){
-  const inherited = notebookInherited(activeNotebook);
-  return { ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(), Titulo:'', Contenido:'', Tags:inherited.join(' '), Notebook:activeNotebook, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'' };
+  // "Sin cuaderno" es un filtro de VISTA, no un cuaderno real — una nota
+  // nueva creada mientras se está viendo ese filtro debe quedar sin
+  // cuaderno de verdad (Notebook:''), no con el sentinel literal como
+  // si fuera el nombre de un cuaderno.
+  const nb = activeNotebook===NO_NOTEBOOK_SENTINEL ? '' : activeNotebook;
+  const inherited = notebookInherited(nb);
+  return { ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(), Titulo:'', Contenido:'', Tags:inherited.join(' '), Notebook:nb, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'' };
 }
 /* Si la nota que se estaba editando se queda vacía (nunca se le puso
    título ni contenido) se descarta sola en vez de quedar como basura en
@@ -5261,7 +5274,8 @@ function exportNotePDF(id){
 function exportViewPDF(){
   const notes = getFilteredSortedNotes();
   const area = document.getElementById('printArea');
-  area.innerHTML = '<h1>Organizador — ' + (activeNotebook||'Todas las notas') + '</h1>' + tableHTML(notes).replace(/<button[^>]*>.*?<\/button>/g,'');
+  const printTitle = activeNotebook===NO_NOTEBOOK_SENTINEL ? 'Sin cuaderno' : (activeNotebook||'Todas las notas');
+  area.innerHTML = '<h1>Organizador — ' + printTitle + '</h1>' + tableHTML(notes).replace(/<button[^>]*>.*?<\/button>/g,'');
   window.print();
 }
 

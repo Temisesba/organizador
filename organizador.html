@@ -553,6 +553,12 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
         </div>
       </div>
 
+      <!-- Pedido explícito: SOLO el interruptor Y/O (no los chips de
+           etiquetas activas, que se quedan junto al buscador de abajo)
+           sube arriba de Cuadernos — visible nada más cuando hay 2+
+           etiquetas activas, mismo criterio de siempre. -->
+      <div id="tagFilterModeBar"></div>
+
       <div class="sb-section" data-sb="cuaderno">
         <h3 onclick="toggleSbSection('cuaderno')">Cuadernos <span class="sb-arrow">▾</span></h3>
         <div class="sb-content">
@@ -604,7 +610,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Salta';
+const BUILD_VERSION = 'Corrientes';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -725,13 +731,17 @@ function openHorarioSettings(){
           <button class="mini-btn" style="width:auto" onclick="setHorarioFormDaysPreset('SD')">Sáb-Dom</button>
           <button class="mini-btn" style="width:auto" onclick="setHorarioFormDaysPreset('todos')">Todos</button>
         </div>
-        <button class="btn" id="horarioFormSaveBtn" onclick="saveHorarioForm()">+ agregar</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn" id="horarioFormSaveBtn" onclick="saveHorarioForm()">+ agregar</button>
+          <button class="btn secondary hidden" id="horarioFormCancelBtn" onclick="cancelHorarioEdit()">Cancelar edición</button>
+        </div>
       </div>
     </div>
   </div>`;
   overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
   document.body.appendChild(overlay);
   window._horarioFormDays = new Set();
+  window._horarioEditingId = null;
   renderHorarioFormDiasChips();
   renderHorarioList();
 }
@@ -748,6 +758,7 @@ function setHorarioFormDaysPreset(preset){
   window._horarioFormDays = new Set(map[preset]||[]);
   renderHorarioFormDiasChips();
 }
+window._horarioEditingId = null;
 async function saveHorarioForm(){
   const hora = document.getElementById('horarioFormHora').value;
   const actividad = document.getElementById('horarioFormActividad').value.trim();
@@ -755,25 +766,57 @@ async function saveHorarioForm(){
   if(!window._horarioFormDays.size){ showToast('Elige al menos un día'); return; }
   const btn = document.getElementById('horarioFormSaveBtn');
   if(btn && btn.disabled) return;
+  const wasEditing = !!window._horarioEditingId;
+  const id = window._horarioEditingId || uid();
+  // cancelHorarioEdit() (que pone el botón de vuelta en "+ agregar") se
+  // llama DESPUÉS de que withSavingFeedback termine, no adentro — su
+  // "finally" restaura el texto del botón al que tenía ANTES de guardar
+  // (útil normalmente, pero aquí ese "antes" era "💾 Guardar cambios" si
+  // se estaba editando, así que llamarlo adentro dejaba el botón mal
+  // etiquetado después de guardar).
   await withSavingFeedback(btn, async ()=>{
-    await saveEntity('HORARIO', { ID:uid(), Hora:hora, Actividad:actividad, Dias:Array.from(window._horarioFormDays).join(',') });
-    document.getElementById('horarioFormActividad').value='';
-    window._horarioFormDays = new Set();
-    renderHorarioFormDiasChips();
-    renderHorarioList();
-    showToast('Agregado a tu horario');
+    await saveEntity('HORARIO', { ID:id, Hora:hora, Actividad:actividad, Dias:Array.from(window._horarioFormDays).join(',') });
   });
+  cancelHorarioEdit();
+  renderHorarioList();
+  showToast(wasEditing ? 'Actualizado' : 'Agregado a tu horario');
+}
+/* Pedido explícito: "por si me equivoqué" — antes solo se podía borrar
+   una línea entera y volver a escribirla. ✎ precarga el formulario de
+   agregar con los valores de esa línea; guardar reutiliza el mismo ID
+   en vez de crear una fila nueva (así no se duplica). */
+function editHorarioItem(id){
+  const h = DATA.horario.find(x=>x.ID===id); if(!h) return;
+  window._horarioEditingId = id;
+  document.getElementById('horarioFormHora').value = h.Hora||'';
+  document.getElementById('horarioFormActividad').value = h.Actividad||'';
+  window._horarioFormDays = new Set(String(h.Dias||'').split(',').filter(Boolean));
+  renderHorarioFormDiasChips();
+  const btn = document.getElementById('horarioFormSaveBtn'); if(btn) btn.textContent = '💾 Guardar cambios';
+  const cancelBtn = document.getElementById('horarioFormCancelBtn'); if(cancelBtn) cancelBtn.classList.remove('hidden');
+  document.getElementById('horarioFormActividad').focus();
+}
+function cancelHorarioEdit(){
+  window._horarioEditingId = null;
+  const horaInp = document.getElementById('horarioFormHora'); if(horaInp) horaInp.value = '';
+  const actInp = document.getElementById('horarioFormActividad'); if(actInp) actInp.value = '';
+  window._horarioFormDays = new Set();
+  renderHorarioFormDiasChips();
+  const btn = document.getElementById('horarioFormSaveBtn'); if(btn) btn.textContent = '+ agregar';
+  const cancelBtn = document.getElementById('horarioFormCancelBtn'); if(cancelBtn) cancelBtn.classList.add('hidden');
 }
 function renderHorarioList(){
   const el = document.getElementById('horarioList'); if(!el) return;
   const rows = (DATA.horario||[]).slice().sort((a,b)=>String(a.Hora||'').localeCompare(String(b.Hora||'')));
   el.innerHTML = rows.length ? rows.map(h=>`<div class="settings-row">
       <span style="flex:1"><b>${escHtml(h.Hora)}</b> ${escHtml(h.Actividad)} <span style="color:var(--text-dim);font-size:11px">${escHtml(String(h.Dias||'').split(',').join(' '))}</span></span>
+      <button class="icon-btn" onclick="editHorarioItem('${h.ID}')" title="Editar">✎</button>
       <button class="icon-btn" onclick="deleteHorarioItem('${h.ID}')">🗑️</button>
     </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada todavía — agrega tu primera actividad abajo.</p>';
 }
 function deleteHorarioItem(id){
   if(!confirm('¿Quitar esta actividad de tu horario?')) return;
+  if(id===window._horarioEditingId) cancelHorarioEdit();
   deleteEntity('HORARIO', id).then(()=>{ renderHorarioList(); if(document.getElementById('calBody')) renderCalendarView(); });
 }
 /* Hábitos dentro del día de Calendario: mismo mecanismo que ✅ Registrar
@@ -1730,9 +1773,18 @@ function toggleFlagFilter(t){
 function setTagFilterMode(mode){ tagFilterMode=mode; localStorage.setItem('org_tag_filter_mode',mode); renderSidebar(); renderMain(); }
 function clearTagFilters(){ activeTagFilters.clear(); renderSidebar(); renderMain(); }
 function renderTagFilterBar(){
-  const bar = document.getElementById('tagFilterBar'); if(!bar) return;
+  const bar = document.getElementById('tagFilterBar');
+  const modeBar = document.getElementById('tagFilterModeBar');
   const n = activeTagFilters.size;
-  if(!n){ bar.innerHTML=''; return; }
+  if(!n){ if(bar) bar.innerHTML=''; if(modeBar) modeBar.innerHTML=''; return; }
+  // El interruptor Y/O vive arriba de Cuadernos (pedido explícito, para
+  // verlo sin tener que bajar), separado de los chips de etiquetas
+  // activas y "quitar todo", que se quedan donde ya estaban.
+  if(modeBar) modeBar.innerHTML = n>1 ? `<div class="tag-filter-mode" style="margin:0 0 10px">
+      <button class="${tagFilterMode==='AND'?'active':''}" onclick="setTagFilterMode('AND')" title="Nota debe tener TODAS las etiquetas elegidas">Y (todas)</button>
+      <button class="${tagFilterMode==='OR'?'active':''}" onclick="setTagFilterMode('OR')" title="Nota con CUALQUIERA de las etiquetas elegidas">O (cualquiera)</button>
+    </div>` : '';
+  if(!bar) return;
   const chips = Array.from(activeTagFilters).map(t=>
     `<span class="tag-badge hit" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" onclick="toggleTagFilter('${escAttr(t)}')" title="Quitar #${escAttr(t)} del filtro">#${escHtml(t)} ✕</span>`
   ).join('');
@@ -1748,10 +1800,6 @@ function renderTagFilterBar(){
     </div>` : '';
   bar.innerHTML = `<div class="tag-filter-bar">
     <div style="display:flex;flex-wrap:wrap;gap:4px;flex:1">${chips}</div>
-    ${n>1 ? `<div class="tag-filter-mode">
-      <button class="${tagFilterMode==='AND'?'active':''}" onclick="setTagFilterMode('AND')" title="Nota debe tener TODAS las etiquetas elegidas">Y (todas)</button>
-      <button class="${tagFilterMode==='OR'?'active':''}" onclick="setTagFilterMode('OR')" title="Nota con CUALQUIERA de las etiquetas elegidas">O (cualquiera)</button>
-    </div>` : ''}
     ${splitTargetHTML}
     <button class="tag-filter-clear" onclick="clearTagFilters()">quitar todo</button>
   </div>`;
@@ -4549,12 +4597,17 @@ async function saveQuickTask(){
     const allTags = ['task'].concat(extraTags.filter(t=>t && t!=='task'));
     const nb = await ensureTareasNotebook();
     const note = {
-      ID:'', Fecha: dueDate, FechaEdicion: new Date().toISOString(),
+      ID:uid(), Fecha: dueDate, FechaEdicion: new Date().toISOString(),
       Titulo: titulo,
       Contenido: '<p>'+escHtml(titulo)+'</p>',
       Tags: allTags.map(t=>'#'+t).join(' '), Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:''
     };
-    await saveEntity('NOTAS', note);
+    // saveEntity ya deja DATA al día de inmediato (síncrono) antes de su
+    // propio await interno al backend — esperar ESE viaje de ida y
+    // vuelta antes de refrescar la pantalla es lo que hacía sentir el
+    // guardado lento (reportado por el usuario); la tarea ya cuenta
+    // como guardada localmente sin necesidad de esperarlo.
+    saveEntity('NOTAS', note);
     allTags.forEach(t=>ensureTagsRegistered('#'+t));
     renderAll();
     showToast('⚑ Tarea guardada');
@@ -5268,76 +5321,100 @@ function renderChecklistBody(){
 }
 
 /* Los items llevan una "section" opcional (ej. "ropa", "comida") para poder
-   agrupar el checklist en categorías, una "destino" opcional (a dónde va
-   cada elemento — equipaje de mano / maleta documentada / comprar al
-   llegar en un viaje, o lo que aplique según el tipo de checklist, no es
-   exclusivo de viajes) y una "priority" opcional (alta/media/baja).
-   groupBySection ya recibe las filas filtradas+ordenadas (ver
-   filterSortRows) junto con su índice original en el arreglo real, para
-   que los onchange de cada fila sigan apuntando al elemento correcto. */
+   agrupar el checklist en categorías. Ya NO hay "destino"/"priority" como
+   campos fijos — el usuario pidió explícitamente que nada quedara
+   predefinido: cualquier columna (incluida lo que antes era destino o
+   prioridad) es solo una entrada más en `extra`, detectada o agregada a
+   mano igual que cualquier otra. groupBySection ya recibe las filas
+   filtradas+ordenadas (ver filterSortRows) junto con su índice original
+   en el arreglo real, para que los onchange de cada fila sigan apuntando
+   al elemento correcto. */
 function groupBySection(rows){
   const order = []; const seen = new Set();
   rows.forEach(({it})=>{ const s=it.section||''; if(!seen.has(s)){ seen.add(s); order.push(s); } });
   return order.map(sec=>({ sec, rows: rows.filter(x=>(x.it.section||'')===sec) }));
 }
-function distinctDestinos(items){
-  return Array.from(new Set(items.map(it=>it.destino).filter(Boolean)));
+/* Filtro genérico por columna (reemplaza al viejo "destino" fijo): junta
+   los valores vistos en esa columna a lo largo de todos los items,
+   partiendo por coma (una celda "Personal, Trabajo" cuenta para ambos
+   chips). Sirve para CUALQUIER columna, no solo una con nombre especial. */
+function distinctColumnValues(items, colName){
+  const vals = new Set();
+  items.forEach(it=>{
+    const v = (it.extra&&it.extra[colName])||'';
+    v.split(',').map(s=>s.trim()).filter(Boolean).forEach(x=>vals.add(x));
+  });
+  return Array.from(vals);
 }
-function destinoFilterBarHTML(items, activeDestino, setterName, ownerArg){
-  const destinos = distinctDestinos(items); if(!destinos.length) return '';
-  const arg = ownerArg!==undefined ? `'${escAttr(ownerArg)}',` : '';
-  return `<div class="tag-filter-mode" style="margin-bottom:8px;flex-wrap:wrap">
-    <button class="${!activeDestino?'active':''}" onclick="${setterName}(${arg}'')">Todos</button>
-    ${destinos.map(d=>`<button class="${activeDestino===d?'active':''}" onclick="${setterName}(${arg}'${escAttr(d)}')">${escHtml(d)}</button>`).join('')}
+function columnFilterBarHTML(items, columns, cfg){
+  const arg = cfg.ownerArg!==undefined ? `'${escAttr(cfg.ownerArg)}',` : '';
+  if(!columns.length) return '';
+  const colSelect = `<select onchange="${cfg.setFilterCol}(${arg}this.value)" style="font-size:12px;margin-bottom:4px">
+    <option value="">Filtrar por columna…</option>
+    ${columns.map(c=>`<option value="${escAttr(c.name)}" ${cfg.filterCol===c.name?'selected':''}>${escHtml(c.name)}</option>`).join('')}
+  </select>`;
+  if(!cfg.filterCol) return colSelect;
+  const vals = distinctColumnValues(items, cfg.filterCol);
+  if(!vals.length) return colSelect;
+  return colSelect+`<div class="tag-filter-mode" style="margin:4px 0 8px;flex-wrap:wrap">
+    <button class="${!cfg.filterVal?'active':''}" onclick="${cfg.setFilterVal}(${arg}'')">Todos</button>
+    ${vals.map(v=>`<button class="${cfg.filterVal===v?'active':''}" onclick="${cfg.setFilterVal}(${arg}'${escAttr(v)}')">${escHtml(v)}</button>`).join('')}
   </div>`;
 }
-const PRIORITY_LEVELS = [
-  { v:'alta',  label:'🔴 Alta',  rank:0 },
-  { v:'media', label:'🟡 Media', rank:1 },
-  { v:'baja',  label:'🟢 Baja',  rank:2 },
-  { v:'',      label:'—',        rank:3 }
-];
-function normalizePriority(s){ const v=String(s||'').trim().toLowerCase(); return (v==='alta'||v==='media'||v==='baja') ? v : ''; }
-function priorityRank(p){ const f=PRIORITY_LEVELS.find(x=>x.v===(p||'')); return f?f.rank:3; }
-function prioritySelectHTML(value, onchangeExpr){
-  return `<select class="hist-note" style="flex:none;width:56px;padding:2px 4px" title="Prioridad" onchange="${onchangeExpr}">${PRIORITY_LEVELS.map(l=>`<option value="${l.v}" ${(value||'')===l.v?'selected':''}>${l.label}</option>`).join('')}</select>`;
-}
-/* Búsqueda+orden+destino en un solo paso: se aplica ANTES de agrupar por
-   sección, así que cuando el orden es distinto de "orig" (el de la
-   plantilla) ya no tiene sentido seguir agrupando por categoría — el
-   usuario pidió explícitamente reordenar, así que se muestra plano. */
+/* Búsqueda+orden+filtro-por-columna en un solo paso: se aplica ANTES de
+   agrupar por sección, así que cuando el orden es distinto de "orig" (el
+   de la plantilla) ya no tiene sentido seguir agrupando por categoría —
+   el usuario pidió explícitamente reordenar, así que se muestra plano.
+   Ordenar por una columna usa el orden de SU catálogo si tiene uno
+   definido (ej. alta/media/baja en ese orden, si así se agregó) en vez
+   de alfabético — el catálogo YA captura el orden "correcto" que el
+   usuario quiso, no hace falta adivinarlo con una lista fija aparte. */
 function filterSortRows(items, opts){
   opts = opts||{};
   const search = String(opts.search||'').toLowerCase().trim();
-  const destino = opts.destino||''; const sort = opts.sort||'orig';
+  const filterCol = opts.filterCol||''; const filterVal = opts.filterVal||'';
+  const sort = opts.sort||'orig'; const columns = opts.columns||[];
   let rows = items.map((it,i)=>({it,i})).filter(({it})=>{
-    if(destino && it.destino!==destino) return false;
+    if(filterCol && filterVal){
+      const cellVals = String((it.extra&&it.extra[filterCol])||'').split(',').map(s=>s.trim());
+      if(!cellVals.includes(filterVal)) return false;
+    }
     if(search && !String(it.text||'').toLowerCase().includes(search)) return false;
     return true;
   });
-  if(sort==='priority') rows = rows.slice().sort((a,b)=>priorityRank(a.it.priority)-priorityRank(b.it.priority));
-  else if(sort==='az') rows = rows.slice().sort((a,b)=>String(a.it.text||'').localeCompare(String(b.it.text||''),'es'));
+  if(sort==='az') rows = rows.slice().sort((a,b)=>String(a.it.text||'').localeCompare(String(b.it.text||''),'es'));
   else if(sort==='pending') rows = rows.slice().sort((a,b)=>(a.it.checked?1:0)-(b.it.checked?1:0));
+  else if(sort.startsWith('col:')){
+    const col = sort.slice(4);
+    const colDef = columns.find(c=>c.name===col);
+    const order = colDef && colDef.catalog && colDef.catalog.length ? colDef.catalog : null;
+    rows = rows.slice().sort((a,b)=>{
+      const va = (a.it.extra&&a.it.extra[col])||''; const vb = (b.it.extra&&b.it.extra[col])||'';
+      if(order){ const ia=order.indexOf(va), ib=order.indexOf(vb); return (ia<0?999:ia)-(ib<0?999:ib); }
+      return va.localeCompare(vb,'es');
+    });
+  }
   return rows;
 }
 /* Barra compartida entre "Llenar" e historial: buscar (se actualiza sin
    rehacer todo el modal, para no perder el foco mientras se escribe —
-   ver setFillSearch/setHistSearch), ordenar, alternar lista/tabla, y los
-   chips de destino ya existentes. */
-function itemsToolbarHTML(items, cfg){
+   ver setFillSearch/setHistSearch), ordenar (incluye una opción "Por
+   <columna>" por cada columna definida), alternar lista/tabla, y el
+   filtro por columna. */
+function itemsToolbarHTML(items, columns, cfg){
   const arg = cfg.ownerArg!==undefined ? `'${escAttr(cfg.ownerArg)}',` : '';
-  const destinoBar = destinoFilterBarHTML(items, cfg.destino, cfg.setDestino, cfg.ownerArg);
+  const filterBar = columnFilterBarHTML(items, columns, cfg);
   return `<div class="fill-toolbar">
     <input type="text" placeholder="🔎 buscar…" value="${escAttr(cfg.search||'')}" oninput="${cfg.setSearch}(${arg}this.value)">
     <select onchange="${cfg.setSort}(${arg}this.value)">
       <option value="orig" ${cfg.sort==='orig'?'selected':''}>Orden de la lista</option>
-      <option value="priority" ${cfg.sort==='priority'?'selected':''}>Por prioridad</option>
       <option value="az" ${cfg.sort==='az'?'selected':''}>A-Z</option>
       <option value="pending" ${cfg.sort==='pending'?'selected':''}>Pendientes primero</option>
+      ${columns.map(c=>`<option value="col:${escAttr(c.name)}" ${cfg.sort==='col:'+c.name?'selected':''}>Por ${escHtml(c.name)}</option>`).join('')}
     </select>
     ${cfg.hideViewToggle?'':`<button class="icon-btn" title="${cfg.view==='table'?'Ver como lista':'Ver como tabla'}" onclick="${cfg.setView}(${arg}'${cfg.view==='table'?'list':'table'}')">${cfg.view==='table'?'📋':'🔲'}</button>`}
   </div>
-  ${destinoBar}`;
+  ${filterBar}`;
 }
 function templateColumns(p){
   if(!p) return [];
@@ -5360,13 +5437,11 @@ function itemsTableHTML(rows, h, columns){
   columns = columns||[];
   if(!rows.length) return '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
   return `${catalogDatalistsHTML(columns)}<div class="items-table-wrap"><table class="items-table">
-    <tr><th></th><th>Elemento</th><th>Categoría</th><th>Destino</th><th>Prioridad</th><th>Nota</th>${columns.map(c=>`<th>${escHtml(c.name)}</th>`).join('')}<th></th></tr>
+    <tr><th></th><th>Elemento</th><th>Categoría</th><th>Nota</th>${columns.map(c=>`<th>${escHtml(c.name)}</th>`).join('')}<th></th></tr>
     ${rows.map(({it,i})=>`<tr class="${it.checked?'done-row':''}">
       <td><input type="checkbox" ${it.checked?'checked':''} onchange="${h.checkedExpr(i)}"></td>
       <td><input type="text" value="${escAttr(it.text)}" onchange="${h.textExpr(i)}"></td>
       <td><input type="text" value="${escAttr(it.section||'')}" onchange="${h.sectionExpr(i)}"></td>
-      <td><input type="text" value="${escAttr(it.destino||'')}" onchange="${h.destinoExpr(i)}"></td>
-      <td>${prioritySelectHTML(it.priority, h.priorityExpr(i))}</td>
       <td><input type="text" value="${escAttr(it.note||'')}" onchange="${h.noteExpr(i)}"></td>
       ${columns.map((c,ci)=>`<td>${extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,h.extraExpr(i,ci))}</td>`).join('')}
       <td><button class="icon-btn" onclick="${h.delExpr(i)}">🗑️</button></td>
@@ -5374,14 +5449,15 @@ function itemsTableHTML(rows, h, columns){
   </table></div>`;
 }
 /* "Pegar varios": mismo formato de línea que al crear una plantilla
-   (categoría:, "elemento | destino | prioridad"), para copiar/pegar una
-   lista completa de otro lado en vez de darle "+ elemento" uno por uno. */
-function openBulkAddModal(onAdd){
+   (categoría:, "elemento | columna 1 | columna 2 | ..."), para copiar/
+   pegar una lista completa de otro lado en vez de darle "+ elemento" uno
+   por uno. */
+function openBulkAddModal(onAdd, columns){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
     <div class="modal-head"><b>📋 Pegar varios elementos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <p class="hint" style="color:var(--text-dim);font-size:12px;margin-bottom:8px">Uno por línea. Una línea que termina en ":" empieza una categoría nueva. "elemento | destino" o "elemento | destino | prioridad" (alta/media/baja).</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin-bottom:8px">Uno por línea. Una línea que termina en ":" empieza una categoría nueva. "elemento | lo que quieras | lo que quieras" — cada "|" de más llena una columna ya definida, en el orden en que aparecen.</p>
       <textarea id="bulkAddText" rows="8" placeholder="ropa:
 camiseta | maleta documentada
 protector solar | comprar al llegar | alta"></textarea>
@@ -5391,32 +5467,32 @@ protector solar | comprar al llegar | alta"></textarea>
   document.body.appendChild(overlay);
   document.getElementById('bulkAddText').focus();
   document.getElementById('bulkAddBtn').addEventListener('click', ()=>{
-    const parsed = parseTemplateText(document.getElementById('bulkAddText').value).map(it=>Object.assign({checked:false,note:''}, it));
+    const parsed = parseTemplateText(document.getElementById('bulkAddText').value, columns||[]).map(it=>Object.assign({checked:false,note:''}, it));
     if(parsed.length) onAdd(parsed);
     overlay.remove();
   });
 }
-/* Detección automática de columnas al pegar/escribir texto con MÁS de
-   los 3 campos fijos (elemento | destino | prioridad): cualquier
-   segmento extra (posición 4, 5...) se vuelve una columna personalizada
-   nueva, nombrada genéricamente "Columna N" (no hay encabezado en el
-   texto plano del que sacar un nombre real — el usuario la renombra
-   después con ✎ si quiere). Si una celda trae comas, cada trozo se
-   suma al catálogo sugerido de esa columna en vez de tratarse como un
-   solo valor — el pedido explícito era "yo pongo mi lista con el
-   formato que quiera y de ahí solo arma la tabla". */
+/* Detección automática de columnas al pegar/escribir texto: ya NO hay
+   ningún campo fijo aparte del elemento mismo (posición 0) — cualquier
+   "|" de más (posición 1, 2, 3...) es una columna, nombrada
+   genéricamente "Columna N" (no hay encabezado en el texto plano del
+   que sacar un nombre real — el usuario la renombra después con ✎ si
+   quiere). Si una celda trae comas, cada trozo se suma al catálogo
+   sugerido de esa columna en vez de tratarse como un solo valor — el
+   pedido explícito era "yo pongo mi lista con el formato que quiera,
+   que se te olvide todo lo previo (nada fijo) y de ahí arma la tabla". */
 function autoDetectColumnsFromText(text){
   const lines = (text||'').split('\n').map(l=>l.trim()).filter(l=>l && !/:$/.test(l));
-  let maxParts = 3;
+  let maxParts = 1;
   lines.forEach(l=>{ const n = l.split('|').length; if(n>maxParts) maxParts = n; });
   const cols = [];
-  for(let idx=3; idx<maxParts; idx++){
+  for(let idx=1; idx<maxParts; idx++){
     const catalogSet = new Set();
     lines.forEach(l=>{
       const parts = l.split('|').map(s=>s.trim());
       if(parts[idx]) parts[idx].split(',').map(s=>s.trim()).filter(Boolean).forEach(v=>catalogSet.add(v));
     });
-    cols.push({ name:'Columna '+(idx+1), catalog: Array.from(catalogSet) });
+    cols.push({ name:'Columna '+idx, catalog: Array.from(catalogSet) });
   }
   return cols;
 }
@@ -5428,10 +5504,8 @@ function parseTemplateText(text, columns){
     if(/:$/.test(line)){ section = line.slice(0,-1).trim(); return; }
     const parts = line.split('|').map(s=>s.trim());
     const extra = {};
-    columns.forEach((c,ci)=>{ const idx=ci+3; if(parts[idx]) extra[c.name] = parts[idx]; });
-    if(parts.length>=3) items.push({ text:parts[0], destino:parts[1], priority:normalizePriority(parts[2]), section, extra });
-    else if(parts.length===2) items.push({ text:parts[0], destino:parts[1], priority:'', section, extra });
-    else items.push({ text:parts[0], destino:'', priority:'', section, extra });
+    columns.forEach((c,ci)=>{ const idx=ci+1; if(parts[idx]) extra[c.name] = parts[idx]; });
+    items.push({ text:parts[0], section, extra });
   });
   return items;
 }
@@ -5444,9 +5518,7 @@ function templateItemsToText(items, columns){
     const extraVals = columns.map(c=>(it.extra&&it.extra[c.name])||'');
     while(extraVals.length && !extraVals[extraVals.length-1]) extraVals.pop();
     let line = it.text;
-    if(extraVals.length) line += ' | '+(it.destino||'')+' | '+(it.priority||'')+' | '+extraVals.join(' | ');
-    else if(it.priority) line += ' | '+(it.destino||'')+' | '+it.priority;
-    else if(it.destino) line += ' | '+it.destino;
+    if(extraVals.length) line += ' | '+extraVals.join(' | ');
     out.push(line);
   });
   return out.join('\n');
@@ -5482,13 +5554,15 @@ function finishHistNameEdit(historyId, input){
   saveEntity('HISTORIAL', Object.assign({}, h, { Nombre: name })).then(()=> renderChecklistBody());
 }
 function histEntryHTML(h, isNewest){
-  window._histDestinoFilters = window._histDestinoFilters || {};
+  window._histFilterCol = window._histFilterCol || {};
+  window._histFilterVal = window._histFilterVal || {};
   window._histSearch = window._histSearch || {};
   window._histSort = window._histSort || {};
   window._histViewMode = window._histViewMode || {};
   const collapsed = isHistCollapsed(h, isNewest);
   const displayName = h.Nombre || fmtDate(h.Fecha);
   let rawItems=[]; try{ rawItems = JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
+  const columns = templateColumns(DATA.plantillas.find(p=>p.ID===h.PlantillaID));
   return `<div class="hist-entry">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
       <span style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1;min-width:0" onclick="toggleHistCollapsed('${h.ID}',${isNewest?'true':'false'})">
@@ -5504,9 +5578,9 @@ function histEntryHTML(h, isNewest){
       </span>
     </div>
     ${collapsed ? '' : `
-      <div id="histToolbar-${h.ID}" style="margin-top:8px">${itemsToolbarHTML(rawItems, {
-        search: window._histSearch[h.ID]||'', destino: window._histDestinoFilters[h.ID]||'', sort: window._histSort[h.ID]||'orig', view: window._histViewMode[h.ID]||'list',
-        setSearch:'setHistSearch', setDestino:'setHistDestinoFilter', setSort:'setHistSort', setView:'setHistViewMode', ownerArg:h.ID
+      <div id="histToolbar-${h.ID}" style="margin-top:8px">${itemsToolbarHTML(rawItems, columns, {
+        search: window._histSearch[h.ID]||'', filterCol: window._histFilterCol[h.ID]||'', filterVal: window._histFilterVal[h.ID]||'', sort: window._histSort[h.ID]||'orig', view: window._histViewMode[h.ID]||'list',
+        setSearch:'setHistSearch', setFilterCol:'setHistFilterCol', setFilterVal:'setHistFilterVal', setSort:'setHistSort', setView:'setHistViewMode', ownerArg:h.ID
       })}</div>
       <div id="histBody-${h.ID}">${histBodyHTML(h)}</div>`}
   </div>`;
@@ -5514,18 +5588,17 @@ function histEntryHTML(h, isNewest){
 function histBodyHTML(h){
   let items=[]; try{ items = JSON.parse(h.ItemsJSON||'[]'); }catch(e){}
   const search = (window._histSearch&&window._histSearch[h.ID])||'';
-  const destino = (window._histDestinoFilters&&window._histDestinoFilters[h.ID])||'';
+  const filterCol = (window._histFilterCol&&window._histFilterCol[h.ID])||'';
+  const filterVal = (window._histFilterVal&&window._histFilterVal[h.ID])||'';
   const sort = (window._histSort&&window._histSort[h.ID])||'orig';
   const view = (window._histViewMode&&window._histViewMode[h.ID])||'list';
   const columns = templateColumns(DATA.plantillas.find(p=>p.ID===h.PlantillaID));
-  const rows = filterSortRows(items, {search, destino, sort});
+  const rows = filterSortRows(items, {search, filterCol, filterVal, sort, columns});
   if(view==='table'){
     return itemsTableHTML(rows, {
       checkedExpr:i=>`histToggle('${h.ID}',${i},this.checked)`,
       textExpr:i=>`histTextChange('${h.ID}',${i},this.value)`,
       sectionExpr:i=>`histSectionChange('${h.ID}',${i},this.value)`,
-      destinoExpr:i=>`histDestinoChange('${h.ID}',${i},this.value)`,
-      priorityExpr:i=>`histPriorityChange('${h.ID}',${i},this.value)`,
       noteExpr:i=>`histNoteChange('${h.ID}',${i},this.value)`,
       extraExpr:(i,ci)=>`histExtraChange('${h.ID}',${i},${ci},this.value)`,
       delExpr:i=>`histDeleteItem('${h.ID}',${i})`
@@ -5549,8 +5622,6 @@ function histRowHTML(historyId,it,i,columns){
   return `<li>
     <input type="checkbox" ${it.checked?'checked':''} onchange="histToggle('${historyId}',${i},this.checked)">
     <input type="text" class="hist-item-text ${it.checked?'done':''}" value="${escAttr(it.text)}" onchange="histTextChange('${historyId}',${i},this.value)">
-    <input type="text" class="hist-note" style="max-width:90px" placeholder="destino" value="${escAttr(it.destino||'')}" onchange="histDestinoChange('${historyId}',${i},this.value)">
-    ${prioritySelectHTML(it.priority, `histPriorityChange('${historyId}',${i},this.value)`)}
     <input type="text" class="hist-note" placeholder="nota (cuántos, estado…)" value="${escAttr(it.note||'')}" onchange="histNoteChange('${historyId}',${i},this.value)">
     ${columns.map((c,ci)=>extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,`histExtraChange('${historyId}',${i},${ci},this.value)`,'class="hist-note" style="max-width:110px"')).join('')}
     <button class="icon-btn" onclick="histDeleteItem('${historyId}',${i})">🗑️</button>
@@ -5561,12 +5632,15 @@ function renderHistBody(historyId){
   const h = DATA.historial.find(x=>x.ID===historyId); if(!h) return;
   el.innerHTML = histBodyHTML(h);
 }
-function setHistDestinoFilter(historyId, d){ window._histDestinoFilters=window._histDestinoFilters||{}; window._histDestinoFilters[historyId]=d; renderChecklistBody(); }
+function setHistFilterCol(historyId, c){ window._histFilterCol=window._histFilterCol||{}; window._histFilterCol[historyId]=c; window._histFilterVal=window._histFilterVal||{}; window._histFilterVal[historyId]=''; renderChecklistBody(); }
+function setHistFilterVal(historyId, v){ window._histFilterVal=window._histFilterVal||{}; window._histFilterVal[historyId]=v; renderChecklistBody(); }
 function setHistSearch(historyId, v){ window._histSearch=window._histSearch||{}; window._histSearch[historyId]=v; renderHistBody(historyId); }
 function setHistSort(historyId, v){ window._histSort=window._histSort||{}; window._histSort[historyId]=v; renderChecklistBody(); }
 function setHistViewMode(historyId, v){ window._histViewMode=window._histViewMode||{}; window._histViewMode[historyId]=v; renderChecklistBody(); }
 function openBulkAddForHist(historyId){
-  openBulkAddModal(items=>{ histMutate(historyId, arr=>{ items.forEach(it=>arr.push(it)); }); });
+  const h = DATA.historial.find(x=>x.ID===historyId);
+  const columns = templateColumns(DATA.plantillas.find(p=>p.ID===(h&&h.PlantillaID)));
+  openBulkAddModal(items=>{ histMutate(historyId, arr=>{ items.forEach(it=>arr.push(it)); }); }, columns);
 }
 /* Editar una plantilla admite dos vistas del mismo contenido: texto
    plano (rápido para pegar/escribir de un jalón) y una lista con un
@@ -5577,7 +5651,7 @@ let _tplEditView = 'text';
 function openTemplateModal(existingId){
   const existing = existingId ? DATA.plantillas.find(p=>p.ID===existingId) : null;
   let items = []; if(existing){ try{ items = JSON.parse(existing.ItemsJSON||'[]'); }catch(e){} }
-  window._tplEditItems = items.map(it=>({ text: it.text||'', section: it.section||'', destino: it.destino||'', priority: it.priority||'', extra: it.extra||{} }));
+  window._tplEditItems = items.map(it=>({ text: it.text||'', section: it.section||'', extra: it.extra||{} }));
   window._tplEditColumns = templateColumns(existing);
   _tplEditView = 'text';
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
@@ -5594,7 +5668,7 @@ function openTemplateModal(existingId){
           <button id="tplViewBtnTable" onclick="setTplEditView('table')">Tabla</button>
         </div>
       </div>
-      <p class="hint" id="tplTextHint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Uno por línea. Una línea que termine en ":" empieza una categoría nueva. "elemento | destino | prioridad" (alta/media/baja). Si agregas más "|" después de eso, cada uno se vuelve una columna nueva automáticamente (varios valores separados por coma en una celda = catálogo de opciones para esa columna) — se detectan solas al pasar a Lista/Tabla o al guardar.</p>
+      <p class="hint" id="tplTextHint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Uno por línea. Una línea que termine en ":" empieza una categoría nueva. "elemento" solo, o "elemento | lo que quieras | lo que quieras" — cada "|" de más se vuelve una columna nueva automáticamente (varios valores separados por coma en una celda = catálogo de opciones para esa columna). Nada viene predefinido — se detectan solas al pasar a Lista/Tabla o al guardar.</p>
       <textarea id="tplItemsInput" rows="10" placeholder="documentos y dinero:
 pasaporte y visa | equipaje de mano | alta
 cartera | equipaje de mano
@@ -5676,7 +5750,7 @@ function removeTplColumn(i){
   if(_tplEditView==='list') renderTplEditList();
   if(_tplEditView==='table') renderTplEditTable();
 }
-let _tplEditSearch = '', _tplEditSort = 'orig', _tplEditDestino = '';
+let _tplEditSearch = '', _tplEditSort = 'orig', _tplEditFilterCol = '', _tplEditFilterVal = '';
 function setTplEditView(view){
   const prevView = _tplEditView;
   _tplEditView = view;
@@ -5720,25 +5794,25 @@ function setTplEditView(view){
 }
 function setTplEditSearch(v){ _tplEditSearch=v; renderTplEditTableBody(); }
 function setTplEditSort(v){ _tplEditSort=v; renderTplEditTable(); }
-function setTplEditDestino(v){ _tplEditDestino=v; renderTplEditTable(); }
+function setTplEditFilterCol(c){ _tplEditFilterCol=c; _tplEditFilterVal=''; renderTplEditTable(); }
+function setTplEditFilterVal(v){ _tplEditFilterVal=v; renderTplEditTable(); }
 function renderTplEditTable(){
   const tb = document.getElementById('tplTableToolbar'); if(!tb) return;
-  tb.innerHTML = itemsToolbarHTML(window._tplEditItems, {
-    search:_tplEditSearch, destino:_tplEditDestino, sort:_tplEditSort, view:'table', hideViewToggle:true,
-    setSearch:'setTplEditSearch', setDestino:'setTplEditDestino', setSort:'setTplEditSort'
+  const columns = window._tplEditColumns||[];
+  tb.innerHTML = itemsToolbarHTML(window._tplEditItems, columns, {
+    search:_tplEditSearch, filterCol:_tplEditFilterCol, filterVal:_tplEditFilterVal, sort:_tplEditSort, view:'table', hideViewToggle:true,
+    setSearch:'setTplEditSearch', setFilterCol:'setTplEditFilterCol', setFilterVal:'setTplEditFilterVal', setSort:'setTplEditSort'
   });
   renderTplEditTableBody();
 }
 function renderTplEditTableBody(){
   const body = document.getElementById('tplTableBody'); if(!body) return;
-  const rows = filterSortRows(window._tplEditItems, {search:_tplEditSearch, destino:_tplEditDestino, sort:_tplEditSort});
   const columns = window._tplEditColumns||[];
+  const rows = filterSortRows(window._tplEditItems, {search:_tplEditSearch, filterCol:_tplEditFilterCol, filterVal:_tplEditFilterVal, sort:_tplEditSort, columns});
   body.innerHTML = itemsTableHTML(rows, {
     checkedExpr:i=>`window._tplEditItems[${i}].checked=this.checked`,
     textExpr:i=>`window._tplEditItems[${i}].text=this.value`,
     sectionExpr:i=>`window._tplEditItems[${i}].section=this.value`,
-    destinoExpr:i=>`window._tplEditItems[${i}].destino=this.value;renderTplEditTable()`,
-    priorityExpr:i=>`window._tplEditItems[${i}].priority=this.value`,
     noteExpr:i=>`window._tplEditItems[${i}].note=this.value`,
     extraExpr:(i,ci)=>`setTplEditItemExtra(${i},${ci},this.value)`,
     delExpr:i=>`removeTplEditRow(${i});renderTplEditTable()`
@@ -5760,8 +5834,6 @@ function tplEditRowHTML(it,i){
   const columns = window._tplEditColumns||[];
   return `<div class="fill-row">
     <input type="text" style="flex:1.3" value="${escAttr(it.text)}" placeholder="elemento" onchange="window._tplEditItems[${i}].text=this.value">
-    <input type="text" style="flex:.6" value="${escAttr(it.destino||'')}" placeholder="destino" onchange="window._tplEditItems[${i}].destino=this.value">
-    ${prioritySelectHTML(it.priority, `window._tplEditItems[${i}].priority=this.value`)}
     <input type="text" style="flex:.7" value="${escAttr(it.section||'')}" placeholder="categoría" onchange="window._tplEditItems[${i}].section=this.value;renderTplEditList()">
     ${columns.map((c,ci)=>extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,`setTplEditItemExtra(${i},${ci},this.value)`,'style="flex:.6"')).join('')}
     <button class="icon-btn" onclick="removeTplEditRow(${i})">🗑️</button>
@@ -5773,8 +5845,8 @@ function setTplEditItemExtra(i, colIndex, val){
   const it = window._tplEditItems[i]; if(!it) return;
   it.extra = it.extra||{}; it.extra[col.name] = val;
 }
-function addTplEditRow(section){ window._tplEditItems.push({text:'',destino:'',priority:'',section:section||'',extra:{}}); renderTplEditList(); }
-function addTplEditSection(){ const name = prompt('Nombre de la categoría (ej. Ropa):'); if(!name || !name.trim()) return; window._tplEditItems.push({text:'',destino:'',priority:'',section:name.trim(),extra:{}}); renderTplEditList(); }
+function addTplEditRow(section){ window._tplEditItems.push({text:'',section:section||'',extra:{}}); renderTplEditList(); }
+function addTplEditSection(){ const name = prompt('Nombre de la categoría (ej. Ropa):'); if(!name || !name.trim()) return; window._tplEditItems.push({text:'',section:name.trim(),extra:{}}); renderTplEditList(); }
 function removeTplEditRow(i){ window._tplEditItems.splice(i,1); renderTplEditList(); }
 function saveTemplateModal(btn, existingId){
   const nombre = document.getElementById('tplNameInput').value.trim();
@@ -5825,13 +5897,13 @@ function permanentlyDeleteTemplateUI(id){
 /* Llenar: formulario real agrupado por categoría (no un prompt) — casillas
    y nota libre por elemento, más elementos/categorías extra solo para esta
    vez, con nombre propio para esta lista llenada. */
-let _fillDestinoFilter = '', _fillSearch = '', _fillSort = 'orig', _fillViewMode = 'list';
+let _fillFilterCol = '', _fillFilterVal = '', _fillSearch = '', _fillSort = 'orig', _fillViewMode = 'list';
 function openFillModal(templateId){
   const p = DATA.plantillas.find(x=>x.ID===templateId); if(!p) return;
-  let baseItems; try{ baseItems = JSON.parse(p.ItemsJSON||'[]').map(it=>({ text: it.text!==undefined?it.text:it, checked:false, note:'', destino: it.destino||'', priority: it.priority||'', section: it.section||'', extra: it.extra||{} })); }catch(e){ baseItems=[]; }
+  let baseItems; try{ baseItems = JSON.parse(p.ItemsJSON||'[]').map(it=>({ text: it.text!==undefined?it.text:it, checked:false, note:'', section: it.section||'', extra: it.extra||{} })); }catch(e){ baseItems=[]; }
   window._fillItems = baseItems;
   window._fillColumns = templateColumns(p);
-  _fillDestinoFilter=''; _fillSearch=''; _fillSort='orig'; _fillViewMode='list';
+  _fillFilterCol=''; _fillFilterVal=''; _fillSearch=''; _fillSort='orig'; _fillViewMode='list';
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
     <div class="modal-head"><b>▶ Llenar: ${escHtml(p.Nombre)}</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
@@ -5851,18 +5923,19 @@ function openFillModal(templateId){
   document.body.appendChild(overlay);
   renderFillItemsList();
 }
-function setFillDestinoFilter(d){ _fillDestinoFilter = d; renderFillItemsList(); }
+function setFillFilterCol(c){ _fillFilterCol = c; _fillFilterVal=''; renderFillItemsList(); }
+function setFillFilterVal(v){ _fillFilterVal = v; renderFillItemsList(); }
 function setFillSearch(v){ _fillSearch = v; renderFillItemsBody(); }
 function setFillSort(v){ _fillSort = v; renderFillItemsList(); }
 function setFillViewMode(v){ _fillViewMode = v; renderFillItemsList(); }
 function openBulkAddForFill(){
-  openBulkAddModal(items=>{ window._fillItems.push(...items); renderFillItemsList(); });
+  openBulkAddModal(items=>{ window._fillItems.push(...items); renderFillItemsList(); }, window._fillColumns||[]);
 }
 function renderFillItemsList(){
   const tb = document.getElementById('fillToolbar');
-  if(tb) tb.innerHTML = itemsToolbarHTML(window._fillItems, {
-    search:_fillSearch, destino:_fillDestinoFilter, sort:_fillSort, view:_fillViewMode,
-    setSearch:'setFillSearch', setDestino:'setFillDestinoFilter', setSort:'setFillSort', setView:'setFillViewMode'
+  if(tb) tb.innerHTML = itemsToolbarHTML(window._fillItems, window._fillColumns||[], {
+    search:_fillSearch, filterCol:_fillFilterCol, filterVal:_fillFilterVal, sort:_fillSort, view:_fillViewMode,
+    setSearch:'setFillSearch', setFilterCol:'setFillFilterCol', setFilterVal:'setFillFilterVal', setSort:'setFillSort', setView:'setFillViewMode'
   });
   renderFillItemsBody();
 }
@@ -5871,20 +5944,19 @@ function renderFillItemsBody(){
   el.innerHTML = fillBodyHTML();
 }
 function fillBodyHTML(){
-  const rows = filterSortRows(window._fillItems, {search:_fillSearch, destino:_fillDestinoFilter, sort:_fillSort});
+  const columns = window._fillColumns||[];
+  const rows = filterSortRows(window._fillItems, {search:_fillSearch, filterCol:_fillFilterCol, filterVal:_fillFilterVal, sort:_fillSort, columns});
   if(_fillViewMode==='table'){
     return itemsTableHTML(rows, {
       checkedExpr:i=>`window._fillItems[${i}].checked=this.checked;renderFillItemsBody()`,
       textExpr:i=>`window._fillItems[${i}].text=this.value`,
       sectionExpr:i=>`window._fillItems[${i}].section=this.value;renderFillItemsList()`,
-      destinoExpr:i=>`window._fillItems[${i}].destino=this.value;renderFillItemsList()`,
-      priorityExpr:i=>`window._fillItems[${i}].priority=this.value;renderFillItemsBody()`,
       noteExpr:i=>`window._fillItems[${i}].note=this.value`,
       extraExpr:(i,ci)=>`setFillItemExtra(${i},${ci},this.value)`,
       delExpr:i=>`removeFillRow(${i})`
-    }, window._fillColumns||[]);
+    }, columns);
   }
-  const dl = catalogDatalistsHTML(window._fillColumns||[]);
+  const dl = catalogDatalistsHTML(columns);
   if(_fillSort!=='orig'){
     return rows.length ? dl + rows.map(({it,i})=>fillRowHTML(it,i)).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin elementos</p>';
   }
@@ -5903,8 +5975,6 @@ function fillRowHTML(it,i){
   return `<div class="fill-row">
     <input type="checkbox" ${it.checked?'checked':''} onchange="window._fillItems[${i}].checked=this.checked;renderFillItemsBody()">
     <input type="text" style="flex:1.3" value="${escAttr(it.text)}" placeholder="elemento" onchange="window._fillItems[${i}].text=this.value">
-    <input type="text" style="flex:.6" value="${escAttr(it.destino||'')}" placeholder="destino" onchange="window._fillItems[${i}].destino=this.value;renderFillItemsList()">
-    ${prioritySelectHTML(it.priority, `window._fillItems[${i}].priority=this.value;renderFillItemsBody()`)}
     <input type="text" style="flex:1" value="${escAttr(it.note||'')}" placeholder="nota (cuántos, si hace calor…)" onchange="window._fillItems[${i}].note=this.value">
     ${columns.map((c,ci)=>extraFieldInputHTML((it.extra&&it.extra[c.name]),columns,ci,`setFillItemExtra(${i},${ci},this.value)`,'style="flex:.6"')).join('')}
     <button class="icon-btn" onclick="removeFillRow(${i})">🗑️</button>
@@ -5916,8 +5986,8 @@ function setFillItemExtra(i, colIndex, val){
   const it = window._fillItems[i]; if(!it) return;
   it.extra = it.extra||{}; it.extra[col.name] = val;
 }
-function addFillRow(section){ window._fillItems.push({text:'',checked:false,note:'',destino:'',priority:'',section:section||'',extra:{}}); renderFillItemsList(); }
-function addFillSection(){ const name = prompt('Nombre de la categoría (ej. Ropa):'); if(!name || !name.trim()) return; window._fillItems.push({text:'',checked:false,note:'',destino:'',priority:'',section:name.trim(),extra:{}}); renderFillItemsList(); }
+function addFillRow(section){ window._fillItems.push({text:'',checked:false,note:'',section:section||'',extra:{}}); renderFillItemsList(); }
+function addFillSection(){ const name = prompt('Nombre de la categoría (ej. Ropa):'); if(!name || !name.trim()) return; window._fillItems.push({text:'',checked:false,note:'',section:name.trim(),extra:{}}); renderFillItemsList(); }
 function removeFillRow(i){ window._fillItems.splice(i,1); renderFillItemsList(); }
 async function saveFillModal(templateId, btn){
   const p = DATA.plantillas.find(x=>x.ID===templateId);
@@ -5943,8 +6013,6 @@ function histToggle(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].c
 function histTextChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].text = val; }); }
 function histSectionChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].section = val; }); }
 function histNoteChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].note = val; }); }
-function histDestinoChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].destino = val; }); }
-function histPriorityChange(id, i, val){ histMutate(id, items=>{ if(items[i]) items[i].priority = val; }); }
 function histExtraChange(historyId, i, colIndex, val){
   const h = DATA.historial.find(x=>x.ID===historyId); if(!h) return;
   const columns = templateColumns(DATA.plantillas.find(p=>p.ID===h.PlantillaID));
@@ -5967,7 +6035,7 @@ function histDeleteEntry(historyId){
 function histAddItem(id){
   const text = prompt('Nuevo elemento para esta lista (opcional "categoría: elemento"):'); if(!text || !text.trim()) return;
   const m = text.match(/^(.+?):\s*(.+)$/);
-  histMutate(id, items=> items.push(m ? { text:m[2].trim(), checked:false, note:'', destino:'', priority:'', section:m[1].trim() } : { text: text.trim(), checked:false, note:'', destino:'', priority:'', section:'' }));
+  histMutate(id, items=> items.push(m ? { text:m[2].trim(), checked:false, note:'', section:m[1].trim() } : { text: text.trim(), checked:false, note:'', section:'' }));
 }
 
 /* ---- Estadísticas de checklist: cumplimiento y rachas por elemento,

@@ -85,14 +85,20 @@ header .spacer{flex:1}
    ahí todo se envuelve solo — así que se apaga, y el hueco entre
    íconos/gap normal del header ya alcanza para verse bien. También un
    poco menos de relleno en los íconos del encabezado, para que + Nota
-   y + quepan en la misma fila que el resto de los íconos. */
-@media (hover:none) and (pointer:coarse){
+   y + quepan en la misma fila que el resto de los íconos.
+   Este bloque usa ancho de pantalla (max-width:400px), NO el detector
+   táctil (hover:none/pointer:coarse) que usa el resto de la app — así
+   la laptop táctil del usuario (ventana ancha, mouse+teclado) nunca
+   entra acá y mantiene los íconos a tamaño normal sin importar si
+   pointer:coarse se evalúa como touch en su hardware; sólo pantallas
+   angostas de verdad (celulares) reciben el achique. */
+@media (max-width:400px){
   header .spacer{display:none}
   #headerNewNoteBtn{margin-left:0}
-  header .icon-btn{padding:6px 6px}
-  header .btn{padding:6px 8px;font-size:13px}
-  header .view-switch button{padding:6px 6px}
-  header{gap:4px;padding:8px 8px}
+  header .icon-btn{padding:5px 4px}
+  header .btn{padding:5px 6px;font-size:12.5px}
+  header .view-switch button{padding:5px 5px}
+  header{gap:2px;padding:8px 5px}
 }
 #syncDot{width:9px;height:9px;border-radius:50%;background:var(--success);display:inline-block}
 #syncDot.off{background:var(--danger)}
@@ -624,7 +630,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Bariloche';
+const BUILD_VERSION = 'Iguazú';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.

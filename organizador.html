@@ -659,7 +659,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Ensenada';
+const BUILD_VERSION = 'Guanajuato';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1121,6 +1121,7 @@ function renderCalNotesToday(){
    entre sí por cuándo de verdad se crearon. */
 function quickNoteForCalDay(){
   document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#calBody')) o.remove(); });
+  closeStaleEditingSurfaces();
   if(editingNoteId) abandonEmptyDraftIfAny();
   const note = newBlankNote();
   note.ID = uid();
@@ -3173,6 +3174,11 @@ async function openNoteEditor(id, scrollToCue, pane){
       if(!ok) return;
     }
   }
+  // Cierra/guarda cualquier otro editor de nota que hubiera quedado
+  // vivo (minimizado, o abierto en el panel dividido) ANTES de tocar
+  // editingNoteId — si no, puede quedar más de un id="mainArea" a la
+  // vez y el guardado termina escribiendo en la nota equivocada.
+  closeStaleEditingSurfaces();
   if(editingNoteId && editingNoteId!==id) abandonEmptyDraftIfAny();
   let note;
   if(id){
@@ -3213,9 +3219,11 @@ function renderNoteModal(note, scrollToCue){
    con todo lo escrito) y queda una píldora flotante para volver. Se
    guarda de una vez al minimizar (por las dudas), aunque el
    autoguardado normal ya debería tenerla al día. */
+let _minimizedNoteId = null;
 function minimizeNoteEditor(){
   const overlay = document.getElementById('editorOverlay'); if(!overlay) return;
   doSaveNow();
+  _minimizedNoteId = editingNoteId;
   overlay.style.display = 'none';
   const note = editingNoteId ? getNote(editingNoteId) : null;
   let chip = document.getElementById('editorMinChip');
@@ -3228,9 +3236,42 @@ function minimizeNoteEditor(){
   }
   chip.textContent = '📝 ' + (note && note.Titulo ? note.Titulo : '(sin título)') + ' — tocar para ver';
 }
+/* Mientras estaba minimizado puede haberse abierto OTRA nota en el
+   panel dividido (editingNoteId ya no apunta a la nota minimizada) —
+   hay que cerrar ese panel (guardando lo que tuviera) antes de volver
+   a mostrar el modal, si no quedan dos id="mainArea" a la vez. */
 function restoreNoteEditor(){
-  const overlay = document.getElementById('editorOverlay'); if(overlay){ overlay.style.display=''; bringToFront(overlay); }
+  const overlay = document.getElementById('editorOverlay'); if(!overlay) return;
+  if(_splitOpenSide){
+    const side = _splitOpenSide;
+    if(document.getElementById('mainArea')) doSaveNow();
+    _splitOpenSide = null;
+    renderSplitPane(side);
+  }
+  if(_minimizedNoteId) editingNoteId = _minimizedNoteId;
+  _minimizedNoteId = null;
+  overlay.style.display=''; bringToFront(overlay);
   const chip = document.getElementById('editorMinChip'); if(chip) chip.remove();
+}
+/* Punto único de limpieza antes de abrir CUALQUIER editor de nota
+   (modal o panel dividido). editorInnerHTML() genera id="mainArea" en
+   ambos casos, y doSaveNow()/collectNoteFromForm() lo leen sin
+   distinguir cuál es cuál (document.getElementById se queda con el
+   primero en orden del DOM, sin relación con editingNoteId) — si
+   queda un editor minimizado o un panel dividido abierto de ANTES sin
+   cerrar, el siguiente guardado puede escribir el contenido de una
+   nota bajo el ID de otra, o duplicarla entera. Se guarda primero lo
+   que hubiera (mismo par editingNoteId/#mainArea todavía válido en
+   ese instante) para no perder nada. */
+function closeStaleEditingSurfaces(){
+  if(document.getElementById('mainArea')) doSaveNow();
+  const prevOverlay = document.getElementById('editorOverlay'); if(prevOverlay) prevOverlay.remove();
+  const minChip = document.getElementById('editorMinChip'); if(minChip){ minChip.remove(); _minimizedNoteId = null; }
+  if(_splitOpenSide){
+    const side = _splitOpenSide;
+    _splitOpenSide = null;
+    renderSplitPane(side);
+  }
 }
 /* Salta directo a un campo/cue específico dentro de la nota que se
    acaba de abrir (ej. al abrir desde una tarjetita de #importante en
@@ -3828,9 +3869,17 @@ window.addEventListener('pagehide', doSaveNow);
 window.addEventListener('beforeunload', doSaveNow);
 async function persistCurrentNote(note, expectedFecha){
   autoRouteNotebook(note);
+  const originalId = note.ID;
   const saved = await saveEntity('NOTAS', note, expectedFecha);
-  if(saved && saved.conflict){ openNoteConflictModal(saved.attempted, saved.currentRow); return saved; }
-  editingNoteId = saved.ID;
+  // Este guardado es async — mientras estaba en vuelo el usuario puede
+  // haber cerrado esta nota y abierto otra (editingNoteId ya cambió).
+  // Si no se chequea, un guardado tardío de la nota VIEJA pisa
+  // editingNoteId de vuelta a ella (o abre un modal de conflicto) por
+  // encima de la nota NUEVA que ya está en pantalla — causa real
+  // confirmada de contenido guardado bajo el ID equivocado.
+  const stillEditingThisNote = editingNoteId===originalId;
+  if(saved && saved.conflict){ if(stillEditingThisNote) openNoteConflictModal(saved.attempted, saved.currentRow); return saved; }
+  if(stillEditingThisNote) editingNoteId = saved.ID;
   ensureTagsRegistered(effectiveTags(saved).join(' '));
   renderSidebar();
   if(currentView!=='table'){ /* keep list roughly fresh without losing focus */ }

@@ -652,7 +652,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Morelia';
+const BUILD_VERSION = 'Monterrey';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1490,7 +1490,17 @@ function showToast(msg){ const t=document.getElementById('toast'); t.textContent
    sea que se abra/restaure por encima de TODO lo anterior — sin
    importar el z-index "de base" que traiga por CSS — así siempre gana
    el más reciente, no uno fijo de antemano. */
-let _topZCounter = 300;
+/* Arrancaba en 300 — bastaba para ordenar el editor/transcripción/IA
+   entre ELLOS, pero .modal-overlay (Configuración, +Dato general,
+   cualquier modal genérico) tiene z-index:2000 fijo por CSS, así que
+   abrir una nota (o traer el panel de transcripción/IA al frente)
+   mientras un modal genérico seguía abierto la dejaba TAPADA detrás
+   de ese modal en vez de encima — bug real reportado: "clic a una
+   nota y se abre abajo" (al tocar una nota desde la lista de +Dato
+   general, que no se cierra sola). Arrancar por encima de 2000
+   garantiza que el editor/paneles siempre ganan, sin importar qué
+   modal genérico haya quedado abierto detrás. */
+let _topZCounter = 2100;
 function bringToFront(el){ if(el) el.style.zIndex = ++_topZCounter; }
 /* Botones de "crear/guardar" que arman una fila NUEVA (ID vacío) no son
    idempotentes — si no hay ninguna señal de que ya está guardando, es muy

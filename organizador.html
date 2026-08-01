@@ -647,7 +647,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Mérida';
+const BUILD_VERSION = 'Xalapa';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1577,8 +1577,22 @@ async function syncNow(manual){
     // y el bucle sigue con el resto de la cola en vez de rendirse ahí —
     // un cambio atascado ya no le impide subir a los demás.
     for(const op of queue){
+      // Un cambio ya marcado como conflicto (ver más abajo) no se
+      // reintenta solo — con el mismo expectedFechaEdicion viejo va a
+      // volver a chocar siempre, así que solo desperdicia una llamada
+      // de red cada ciclo hasta que la persona lo resuelva a mano
+      // desde el modal de pendientes (guardar como nota nueva, o
+      // descartar).
+      if(op._conflict) continue;
       try{
         const r = await apiPostReal(op.action, op.params);
+        if(r && r.conflict){
+          const q2 = loadQueue();
+          const stuck = q2.find(x=>x._opId===op._opId);
+          if(stuck){ stuck._conflict = true; stuck._currentRow = r.currentRow; stuck._lastError = 'Esta nota cambió en otro dispositivo mientras este estaba sin conexión — no se subió para no perder ninguna de las dos versiones.'; }
+          saveQueue(q2);
+          continue;
+        }
         if(!(r && r.ok)) throw new Error((r&&r.error)||'error');
         saveQueue(loadQueue().filter(x=>x._opId!==op._opId));
       }catch(e){
@@ -1658,6 +1672,25 @@ function discardQueueOp(opId){
   document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#pendingSyncRows')) o.remove(); });
   openPendingSyncModal();
 }
+/* Recuperación de un conflicto que ocurrió mientras el dispositivo
+   estaba sin conexión (ver syncNow) — la nota que se intentó subir NO
+   se pierde: se guarda como una nota nueva aparte (misma jugada segura
+   que el modal de conflicto en vivo), dejando la que ya está en el
+   servidor tal cual está. */
+async function resolveQueuedConflictAsNewNote(opId){
+  const q = loadQueue();
+  const op = q.find(x=>x._opId===opId); if(!op) return;
+  const row = op.params && op.params.row;
+  if(row){
+    const dup = Object.assign({}, row, { ID: uid(), Titulo: (row.Titulo||'(sin título)') + ' (conflicto)', FechaEdicion: new Date().toISOString() });
+    await saveEntity('NOTAS', dup);
+    renderAll();
+  }
+  saveQueue(loadQueue().filter(x=>x._opId!==opId));
+  document.querySelectorAll('.modal-overlay').forEach(o=>{ if(o.querySelector('#pendingSyncRows')) o.remove(); });
+  openPendingSyncModal();
+  showToast('Guardado como nota nueva');
+}
 function openPendingSyncModal(){
   // Se relee la cola y se refresca el indicador de "N pend." al abrir —
   // si por lo que sea el botón de arriba se había quedado desactualizado
@@ -1674,8 +1707,10 @@ function openPendingSyncModal(){
       const lastError = (op && op._lastError) || '';
       const errLine = lastError ? `<div style="color:var(--danger,#c0392b);font-size:11px;margin-top:2px">⚠ ${escHtml(lastError)}</div>` : '';
       const opId = op && op._opId || '';
+      const conflictBtn = (op && op._conflict) ? `<button class="icon-btn" onclick="resolveQueuedConflictAsNewNote('${escAttr(opId)}')" title="Guardar esta versión como nota nueva, sin tocar la que ya está en el servidor">📄 Guardar aparte</button>` : '';
       return `<div class="settings-row" style="align-items:flex-start">
         <div style="flex:1">${escHtml(label)}${errLine}</div>
+        ${conflictBtn}
         ${lastError ? `<button class="icon-btn" onclick="discardQueueOp('${escAttr(opId)}')" title="Descartar este intento — sigue guardado en el dispositivo, solo deja de reintentar subirlo">🗑️</button>` : ''}
       </div>`;
     }catch(e){
@@ -1712,14 +1747,31 @@ function normalizeData(d){
 /* ============ CRUD genérico local + remoto ============ */
 const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas', HABITOS:'habitos', HABITO_LOG:'habito_log', COMANDOS:'comandos', HORARIO:'horario', HORARIO_LOG:'horario_log' };
 function cacheData(){ try{ localStorage.setItem('org_data_cache', JSON.stringify(DATA)); }catch(e){} }
-async function saveEntity(table, obj){
+/* expectedFechaEdicion (opcional, 3er parámetro): ver la nota extensa
+   junto a saveRow() en el backend. Si el guardado vuelve con conflicto
+   (otro dispositivo cambió esta misma fila mientras tanto), el cambio
+   local optimista se REVIERTE — no debe quedar la ilusión de que se
+   guardó cuando en realidad el servidor lo rechazó — y se regresa
+   {conflict:true, currentRow, attempted} en vez de la fila guardada,
+   para que quien llamó decida qué hacer (ver [[bug-pattern-lost-update-multi-device]]). */
+async function saveEntity(table, obj, expectedFechaEdicion){
   if(!obj.ID) obj.ID = uid();
   const key = TABLE_KEY[table];
   const arr = DATA[key];
   const idx = arr.findIndex(x=>x.ID===obj.ID);
+  const prevLocal = idx>=0 ? Object.assign({}, arr[idx]) : null;
   if(idx>=0) arr[idx]=obj; else arr.push(obj);
   cacheData();
-  await apiPost('saveRow', { table, row: obj });
+  const params = { table, row: obj };
+  if(expectedFechaEdicion!==undefined) params.expectedFechaEdicion = expectedFechaEdicion;
+  const r = await apiPost('saveRow', params);
+  if(r && r.conflict){
+    const idx2 = arr.findIndex(x=>x.ID===obj.ID);
+    if(prevLocal){ if(idx2>=0) arr[idx2]=prevLocal; }
+    else if(idx2>=0) arr.splice(idx2,1);
+    cacheData();
+    return { conflict:true, currentRow:r.currentRow, attempted:obj };
+  }
   return obj;
 }
 async function deleteEntity(table, id){
@@ -3574,12 +3626,24 @@ function scheduleSave(){
   clearTimeout(_saveDebounce);
   _saveDebounce = setTimeout(doSaveNow, 500);
 }
+/* Se pausa el autoguardado mientras el modal de conflicto está abierto
+   — si no, un siguiente tick del debounce podría reintentar guardar
+   con la MISMA base vieja y volver a chocar en bucle antes de que la
+   persona alcance a elegir qué hacer. */
+let _noteConflictOpen = false;
 async function doSaveNow(){
   clearTimeout(_saveDebounce);
   if(!document.getElementById('mainArea')) return; // no hay editor abierto
+  if(_noteConflictOpen) return;
   const note = collectNoteFromForm();
+  // Lo que este dispositivo cree que hay en el servidor ahorita mismo:
+  // la FechaEdicion que él mismo escribió la última vez (o la de
+  // creación, si nunca se ha guardado). Si al llegar al servidor esa
+  // fecha ya no coincide, alguien más la cambió mientras tanto.
+  const expectedFecha = note.FechaEdicion;
   note.FechaEdicion = new Date().toISOString();
-  await persistCurrentNote(note);
+  const result = await persistCurrentNote(note, expectedFecha);
+  if(result && result.conflict) return; // el modal de conflicto ya se encargó de avisar
   const st2 = document.getElementById('saveStatus'); if(st2) st2.textContent='Guardado '+fmtTime(new Date());
 }
 /* Guarda YA (sin esperar el debounce de 500ms) cuando la pestaña se oculta,
@@ -3589,15 +3653,103 @@ async function doSaveNow(){
 document.addEventListener('visibilitychange', ()=>{ if(document.hidden) doSaveNow(); });
 window.addEventListener('pagehide', doSaveNow);
 window.addEventListener('beforeunload', doSaveNow);
-async function persistCurrentNote(note){
-  const isNew = !note.ID;
+async function persistCurrentNote(note, expectedFecha){
   autoRouteNotebook(note);
-  const saved = await saveEntity('NOTAS', note);
+  const saved = await saveEntity('NOTAS', note, expectedFecha);
+  if(saved && saved.conflict){ openNoteConflictModal(saved.attempted, saved.currentRow); return saved; }
   editingNoteId = saved.ID;
   ensureTagsRegistered(effectiveTags(saved).join(' '));
   renderSidebar();
   if(currentView!=='table'){ /* keep list roughly fresh without losing focus */ }
   return saved;
+}
+/* Aviso de edición concurrente (bug real reportado: "escribí en la
+   compu y en el cel casi al mismo tiempo, se borró la versión de la
+   compu") — en vez de que gane en silencio quien guardó último, se
+   muestra qué hay de cada lado y la persona decide. Las tres salidas
+   están pensadas para que NINGUNA pierda datos sin que alguien lo haya
+   elegido a propósito: usar la guardada (descarta lo de acá, pero lo
+   de acá nunca llegó a pisar nada), guardarla aparte (ambas quedan,
+   como dos notas), o forzar (sobrescribe a propósito, con el mismo
+   riesgo de siempre pero ahora informado). */
+window._pendingNoteConflict = null;
+function openNoteConflictModal(attempted, currentRow){
+  _noteConflictOpen = true;
+  window._pendingNoteConflict = { attempted, currentRow };
+  document.querySelectorAll('#noteConflictOverlay').forEach(o=>o.remove());
+  const localSnippet = stripHtmlToText(attempted.Contenido||'').trim().slice(0,220) || '(vacío)';
+  const serverSnippet = stripHtmlToText(currentRow.Contenido||'').trim().slice(0,220) || '(vacío)';
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print'; overlay.id='noteConflictOverlay';
+  overlay.innerHTML = `<div class="modal" style="width:min(560px,100%)">
+    <div class="modal-head"><b>⚠️ Esta nota cambió en otro dispositivo</b></div>
+    <div class="modal-body">
+      <p class="hint" style="color:var(--text-dim);font-size:13px;margin:0 0 10px">Mientras la editabas aquí, se guardó una versión distinta (probablemente desde otro dispositivo tuyo). Elegí qué hacer para no perder ninguna de las dos sin querer.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px;min-width:0">
+          <b style="font-size:12px">Tu versión (sin guardar)</b>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:4px;white-space:pre-wrap;word-break:break-word">${escHtml(attempted.Titulo||'(sin título)')}<br>${escHtml(localSnippet)}</div>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px;min-width:0">
+          <b style="font-size:12px">Versión guardada (${escHtml(fmtDate(currentRow.FechaEdicion))})</b>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:4px;white-space:pre-wrap;word-break:break-word">${escHtml(currentRow.Titulo||'(sin título)')}<br>${escHtml(serverSnippet)}</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button class="btn" onclick="resolveNoteConflict('server')">Usar la versión guardada (descarta lo que tenías sin guardar aquí)</button>
+        <button class="btn secondary" onclick="resolveNoteConflict('newnote')">Guardar tu versión como nota nueva (conserva las dos)</button>
+        <button class="btn secondary" onclick="resolveNoteConflict('force')">Sobrescribir de todas formas con tu versión</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+async function resolveNoteConflict(action){
+  const ctx = window._pendingNoteConflict; if(!ctx) return;
+  const { attempted, currentRow } = ctx;
+  const overlay = document.getElementById('noteConflictOverlay'); if(overlay) overlay.remove();
+  window._pendingNoteConflict = null;
+  if(action==='server'){
+    const idx = DATA.notas.findIndex(n=>n.ID===attempted.ID);
+    if(idx>=0) DATA.notas[idx]=currentRow; else DATA.notas.push(currentRow);
+    cacheData();
+    if(editingNoteId===attempted.ID && document.getElementById('mainArea')){
+      const editorOverlay = document.getElementById('editorOverlay');
+      if(editorOverlay) editorOverlay.remove();
+      renderNoteModal(currentRow);
+    }
+    _noteConflictOpen = false;
+    renderAll();
+    showToast('Se cargó la versión guardada');
+  } else if(action==='newnote'){
+    // La nota ORIGINAL queda exactamente como está en el servidor (nunca
+    // se toca) — se actualiza también acá en local, igual que la opción
+    // "usar la guardada", porque si no, el DATA local se queda con la
+    // versión vieja de antes del conflicto (ni la del servidor ni la que
+    // se acaba de guardar aparte) hasta el próximo getAll.
+    const idx = DATA.notas.findIndex(n=>n.ID===attempted.ID);
+    if(idx>=0) DATA.notas[idx]=currentRow; else DATA.notas.push(currentRow);
+    const dup = Object.assign({}, attempted, { ID: uid(), Titulo: (attempted.Titulo||'(sin título)') + ' (conflicto)', FechaEdicion: new Date().toISOString() });
+    await saveEntity('NOTAS', dup);
+    // El editor sigue abierto con lo que la persona tenía escrito — pero
+    // eso YA se guardó como la nota nueva de arriba, así que el editor
+    // debe "adoptar" esa nota nueva de ahora en más. Si se quedara
+    // apuntando a la ID original, el siguiente autoguardado volvería a
+    // intentar guardar sobre la original (ahora con la base correcta,
+    // así que SÍ lo lograría) y terminaría pisando la versión guardada
+    // igual — justo lo que "guardar aparte" prometía evitar.
+    if(editingNoteId===attempted.ID) editingNoteId = dup.ID;
+    _noteConflictOpen = false;
+    renderAll();
+    showToast('Guardado como nota nueva: "'+dup.Titulo+'"');
+  } else if(action==='force'){
+    const forced = Object.assign({}, attempted, { FechaEdicion: new Date().toISOString() });
+    const saved = await saveEntity('NOTAS', forced, currentRow.FechaEdicion);
+    if(saved && saved.conflict){ openNoteConflictModal(saved.attempted, saved.currentRow); return; } // volvió a cambiar justo ahora
+    if(editingNoteId===forced.ID) editingNoteId = saved.ID;
+    _noteConflictOpen = false;
+    renderAll();
+    showToast('Sobrescrito');
+  }
 }
 function findTagByName(name){
   const key = (name||'').trim().toLowerCase();

@@ -85,7 +85,7 @@ function doPost(e) {
     if      (action === 'ping')                 result = { ok: true };
     else if (action === 'init')                 result = initSheet(body.sheetId);
     else if (action === 'getAll')                result = getAllData(body.sheetId);
-    else if (action === 'saveRow')              result = saveRow(body.sheetId, body.table, body.row);
+    else if (action === 'saveRow')              result = saveRow(body.sheetId, body.table, body.row, body.expectedFechaEdicion);
     else if (action === 'deleteRow')            result = deleteRow(body.sheetId, body.table, body.id);
     else if (action === 'fillTemplate')         result = fillTemplate(body.sheetId, body.plantillaId);
     else if (action === 'toggleHistorialItem')  result = toggleHistorialItem(body.sheetId, body.historialId, body.index);
@@ -208,7 +208,20 @@ function getAllData(sheetId) {
 // filas con el mismo ID — justo el bug reportado ("se veía doble, borré
 // una y se borró la otra"). LockService serializa esta sección para que
 // solo una ejecución esté adentro a la vez.
-function saveRow(sheetId, table, row) {
+// expectedFechaEdicion (opcional): si el llamador la manda, es "lo que
+// este dispositivo cree que hay ahorita en el servidor" (normalmente,
+// el FechaEdicion que él mismo escribió la última vez). Si la fila ya
+// existe y su FechaEdicion actual NO coincide, significa que OTRO
+// dispositivo la cambió desde entonces — en vez de pisarla en
+// silencio (el bug real reportado: "escribí en la compu y en el cel
+// casi al mismo tiempo, se borró una versión"), se rechaza el guardado
+// y se regresa la fila actual completa para que el frontend decida qué
+// hacer (ver la versión más reciente, guardar la propia como nota
+// nueva, o forzar sobrescribir). Solo se activa cuando el llamador
+// manda expectedFechaEdicion Y la tabla tiene esa columna — así ningún
+// otro guardado del resto de la app (que no manda este parámetro)
+// cambia de comportamiento.
+function saveRow(sheetId, table, row, expectedFechaEdicion) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -218,6 +231,16 @@ function saveRow(sheetId, table, row) {
     const sh = getTable(ss, table);
     if (!row.ID) row.ID = Utilities.getUuid();
     const rowIdx = findRowIndexById(sh, row.ID);
+    const fechaColIdx = headers.indexOf('FechaEdicion');
+    if (rowIdx > 0 && expectedFechaEdicion !== undefined && expectedFechaEdicion !== null && expectedFechaEdicion !== '' && fechaColIdx >= 0) {
+      const currentVals = sh.getRange(rowIdx, 1, 1, headers.length).getValues()[0];
+      const currentFecha = currentVals[fechaColIdx];
+      if (String(currentFecha) !== String(expectedFechaEdicion)) {
+        const currentRow = {};
+        headers.forEach((h, i) => { currentRow[h] = currentVals[i]; });
+        return { ok: false, conflict: true, currentRow: currentRow };
+      }
+    }
     const values = headers.map(h => (row[h] !== undefined && row[h] !== null) ? row[h] : '');
     if (rowIdx > 0) sh.getRange(rowIdx, 1, 1, headers.length).setValues([values]);
     else sh.appendRow(values);

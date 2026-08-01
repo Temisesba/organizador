@@ -102,8 +102,14 @@ header .btn{padding:11px 18px;font-size:15px}
   header{gap:4px;padding:8px 8px}
 }
 #syncDot{width:9px;height:9px;border-radius:50%;background:var(--success);display:inline-block}
-#syncDot.off{background:var(--danger)}
 #syncDot.busy{background:#c9a227}
+/* Antes "algo por sincronizar" era un punto rojo APARTE de un botón ℹ️
+   propio (dos elementos, dos huecos en el header) — pedido explícito:
+   que el punto verde se quede verde, y que cuando haya algo pendiente
+   sea directamente la "i" en el mismo lugar, sin gastar espacio en un
+   botón adicional. Mismo <span>, solo cambia si lleva la clase .info
+   (texto "ℹ️", sin círculo de fondo) o no (punto de color liso). */
+#syncDot.info{width:auto;height:auto;border-radius:0;background:none;font-size:11px;line-height:1;vertical-align:middle}
 .view-switch{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
 .view-switch button{border:none;border-radius:0;padding:7px 10px;background:var(--bg-elev)}
 .view-switch button.active{background:var(--accent);color:var(--accent-text)}
@@ -546,9 +552,8 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print desktop-only" onclick="openGeneralExplorer()" title="Explorador de archivos — guarda varias carpetas como accesos rápidos, etiqueta y busca dentro de ellas">📁</button>
     <button class="icon-btn no-print" onclick="openAIDrawer()" title="Asistente IA">✨</button>
     <button class="icon-btn no-print" onclick="openCalendarModal()" title="Calendario (Google)">📅</button>
-    <button class="icon-btn no-print" id="syncBtn" onclick="forceSync()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel" class="desktop-only">Sync</span></button>
+    <button class="icon-btn no-print" id="syncBtn" onclick="syncBtnClick()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel" class="desktop-only">Sync</span></button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
-    <button class="icon-btn no-print hidden" id="pendingInfoBtn" onclick="openPendingSyncModal()" title="Ver qué falta por sincronizar">ℹ️</button>
     <button class="btn no-print" id="headerNewNoteBtn" onclick="openNoteEditor(null)">+ Nota</button>
     <button class="btn no-print" onclick="openCreateMenu()" title="Dato general, plantilla o registro de tiempo">+</button>
   </header>
@@ -647,7 +652,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Oaxaca';
+const BUILD_VERSION = 'Morelia';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1626,12 +1631,23 @@ function updateSyncIndicator(){
   if(!dot) return;
   const pending = loadQueue().length;
   const offline = !navigator.onLine;
-  dot.className = _syncing ? 'busy' : ((pending||offline) ? 'off' : '');
+  // Ya no hay un botón ℹ️ aparte — cuando hay algo que avisar (pendiente
+  // o sin conexión), el propio punto se vuelve la "i" en vez de quedar
+  // rojo sin más; tocarlo lleva al detalle (ver syncBtnClick). Verde y
+  // "sincronizando" (amarillo) siguen siendo solo el punto de color.
+  dot.className = _syncing ? 'busy' : ((pending||offline) ? 'info' : '');
+  dot.textContent = (!_syncing && (pending||offline)) ? 'ℹ️' : '';
   lbl.textContent = _syncing ? '…' : (pending ? pending+' pend.' : (offline ? 'Sin conexión' : 'Sync'));
   const btn = document.getElementById('syncBtn');
-  if(btn) btn.title = _syncing ? 'Sincronizando…' : (pending ? pending+' cambio(s) por sincronizar' : (offline ? 'Sin conexión' : '✓ Sincronizado'));
-  const infoBtn = document.getElementById('pendingInfoBtn');
-  if(infoBtn) infoBtn.classList.toggle('hidden', !pending);
+  if(btn) btn.title = _syncing ? 'Sincronizando…' : (pending ? pending+' cambio(s) por sincronizar — toca para ver el detalle' : (offline ? 'Sin conexión' : '✓ Sincronizado'));
+}
+/* Reemplaza el onclick fijo de "forceSync" del botón: con algo
+   pendiente o sin conexión, tocar el punto/"i" abre el detalle (lo que
+   antes hacía el botón ℹ️ aparte) en vez de solo reintentar a ciegas;
+   ya sincronizado, sigue siendo un forceSync manual como siempre. */
+function syncBtnClick(){
+  if(loadQueue().length || !navigator.onLine) openPendingSyncModal();
+  else forceSync();
 }
 /* "N pend." solo decía CUÁNTOS cambios faltan por subir, no CUÁLES —
    el usuario pidió poder ver el detalle. Cada item en cola (enqueue())
@@ -2333,6 +2349,18 @@ function getFilteredSortedNotes(query, applyTagFilters){
   notes.sort((a,b)=>{
     let av=a[sortState.col], bv=b[sortState.col];
     if(sortState.col==='Pinned'){ av=a.Pinned?1:0; bv=b.Pinned?1:0; }
+    // Para una Tarea, Fecha es su fecha LÍMITE (puede estar en el
+    // futuro), no cuándo se creó/editó — usarla tal cual en "Más
+    // recientes" hacía que Tareas quedara siempre arriba de todo con
+    // solo tener UNA tarea con vencimiento lejano, tapando notas
+    // genuinamente más recientes (reportado: "sale hasta arriba
+    // tareas y no la última nota"). Para el orden general por Fecha se
+    // usa FechaEdicion en su lugar — el mismo significado ("cuándo se
+    // tocó por última vez") que Fecha ya tiene para cualquier otra
+    // nota. El orden POR vencimiento dentro del propio capítulo de
+    // Tareas (sortTasksUrgentFirst) no se toca, sigue usando Fecha.
+    if(sortState.col==='Fecha' && a.Notebook===TAREAS_NOTEBOOK) av = a.FechaEdicion||a.Fecha;
+    if(sortState.col==='Fecha' && b.Notebook===TAREAS_NOTEBOOK) bv = b.FechaEdicion||b.Fecha;
     if(av===undefined) av=''; if(bv===undefined) bv='';
     const dyn = sortState.col.startsWith('kv:');
     if(dyn){ const k=sortState.col.slice(3); av=keyValueTags(a)[k]||''; bv=keyValueTags(b)[k]||''; }
@@ -2565,6 +2593,7 @@ function cardsHTML(notes, query, pane){
   // mismo día se saltan porque ya quedaron incluidos ahí.
   const seenTimeLogDays = new Set();
   const seenTaskChapters = new Set();
+  const seenDatoChapters = new Set();
   const cards = notes.map(n=>{
     if(n.PlantillaPropID===TIMELOG_MARKER){
       const dayKey = new Date(n.Fecha).toDateString();
@@ -2587,6 +2616,19 @@ function cardsHTML(notes, query, pane){
         return (taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente')||'')===chapterTag;
       });
       return taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane);
+    }
+    // Mismo criterio que Tareas — pedido explícito: "que sea como con
+    // tareas y que se vayan agrupando los mismos #, ej. canción, libro,
+    // etc." Cada nota de +Dato general ya trae una sola etiqueta (la
+    // que se escribió como "#tag, texto"), así que esa MISMA etiqueta
+    // es el capítulo, sin necesidad de excluir ninguna como en Tareas
+    // (ahí #task/#hecho/#urgente son de control; acá no hay equivalente).
+    if(n.Notebook==='Datos generales'){
+      const chapterTag = (n.Tags||'').replace(/^#/,'').trim();
+      if(seenDatoChapters.has(chapterTag)) return '';
+      seenDatoChapters.add(chapterTag);
+      const chapterNotes = notes.filter(x=>x.Notebook==='Datos generales' && (x.Tags||'').replace(/^#/,'').trim()===chapterTag);
+      return datoGeneralChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane);
     }
     const pairs = extractFieldPairs(n);
     if(!pairs.length) return noteCardHTML(n, pane);
@@ -2758,6 +2800,42 @@ function taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pan
   const label = chapterTag ? '#'+chapterTag : 'Sin categoría';
   return `<div class="chapter-group" onclick="openQuickTaskModal()">
     <div class="chapter-title">⚑ Tareas — ${escHtml(label)}<span class="chapter-meta">${rows.length} tarea${rows.length===1?'':'s'}</span></div>
+    <div class="field-cards-row">${miniCards}</div>
+  </div>`;
+}
+/* Mismo espíritu que taskChapterHTML: pedido explícito para que
+   +Dato general deje de llenar la vista principal de tarjetitas
+   sueltas — cada # (canción, libro…) se agrupa en su propio capítulo.
+   A diferencia de Tareas no hace falta excluir ninguna etiqueta de
+   control (no hay #hecho/#urgente aquí), así que el capítulo es
+   directamente la etiqueta de la nota. */
+function datoGeneralChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane){
+  let rows = chapterNotes;
+  if(q || (activeTags && activeTags.length)){
+    rows = rows.filter(n=>{
+      const textoL = stripHtmlToText(n.Contenido||'').toLowerCase();
+      const tituloL = (n.Titulo||'').toLowerCase();
+      const tagL = (n.Tags||'').toLowerCase();
+      if(q && (textoL.includes(q) || tituloL.includes(q) || tagL.includes(q))) return true;
+      return activeTags.some(t => tagL.includes(t));
+    });
+    if(!rows.length) return '';
+  }
+  rows = rows.slice().sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha)));
+  const miniCards = rows.map(n=>{
+    const tagName = chapterTag;
+    const hit = tagName && highlight.includes(tagName.toLowerCase());
+    const innerTags = tagName ? `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(tagName)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(tagName)}')" title="Filtrar por #${escAttr(tagName)}">#${escHtml(tagName)}</span>` : '';
+    const text = noteSnippetText(n).slice(0,90);
+    return `<div class="field-card" onclick="event.stopPropagation();openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})">
+      <div class="field-card-tag">${escHtml(fmtDate(n.Fecha))}</div>
+      <div class="field-card-text">${escHtml(text)}</div>
+      ${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}
+    </div>`;
+  }).join('');
+  const label = chapterTag ? '#'+chapterTag : 'Sin etiqueta';
+  return `<div class="chapter-group" onclick="openQuickDatoModal()">
+    <div class="chapter-title">🗒️ Datos generales — ${escHtml(label)}<span class="chapter-meta">${rows.length} dato${rows.length===1?'':'s'}</span></div>
     <div class="field-cards-row">${miniCards}</div>
   </div>`;
 }
@@ -3347,6 +3425,8 @@ const TOOLBAR_TOOLS = [
   { key:'color', icon:'🎨', title:'Color de texto', action:"toggleSwatches('color')" },
   { key:'fieldtpl', icon:'🏷️', title:'Plantilla de campos', action:'openFieldTemplatePicker()' },
   { key:'dic', icon:'📖', title:'Diccionario', action:'sendSelectionToDic()' },
+  { key:'searchgoogle', icon:'🔎', title:'Buscar seleccionado en Google', action:"searchSelectionExternal('google')" },
+  { key:'searchyoutube', icon:'▶️', title:'Buscar seleccionado en YouTube', action:"searchSelectionExternal('youtube')" },
   { key:'timestamp', icon:'🕐', title:'Fecha y hora', action:'insertTimestamp()' },
   { key:'tag', icon:'#', title:'Etiqueta', action:'insertHashAndSuggest()' },
   { key:'ai', icon:'✨', title:'Asistente IA', action:'openAIDrawer()' },
@@ -3502,6 +3582,8 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V, o insertar OCR) — se puede agrandar/achicar jalando la esquina">🖼️</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openFieldTemplatePicker()" title="Insertar plantilla de campos (#campo + valor)">🏷️</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="sendSelectionToDic()" title="Mandar palabra/frase seleccionada al diccionario">📖</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="searchSelectionExternal('google')" title="Buscar en Google lo que tienes seleccionado (abre en otra pestaña)">🔎</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="searchSelectionExternal('youtube')" title="Buscar en YouTube lo que tienes seleccionado (abre en otra pestaña)">▶️</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertTimestamp()" title="Insertar fecha y hora (para notas de captura rápida)">🕐</button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertHashAndSuggest()" title="Insertar # aquí y mostrar sugerencias de etiquetas ya usadas">#</button>
     <span class="sep"></span>
@@ -4511,6 +4593,20 @@ async function sendSelectionToDic(){
   await saveEntity('DICCIONARIO', { ID:uid(), Termino:text, Traduccion:trad, Notas:'', Fecha:new Date().toISOString() });
   showToast('Guardado en el diccionario');
 }
+/* Pedido explícito: atajo para buscar lo seleccionado en Google/YouTube
+   sin copiar/pegar a mano — sí "saca" de la app (abre pestaña nueva),
+   como el usuario aceptó de entrada que iba a pasar; no hay forma de
+   buscar en esos sitios sin salir. Mismo patrón de leer la selección
+   que sendSelectionToDic. */
+function searchSelectionExternal(engine){
+  const sel = window.getSelection();
+  const text = sel && sel.toString().trim();
+  if(!text){ showToast('Selecciona texto primero'); return; }
+  const url = engine==='youtube'
+    ? 'https://www.youtube.com/results?search_query='+encodeURIComponent(text)
+    : 'https://www.google.com/search?q='+encodeURIComponent(text);
+  window.open(url, '_blank', 'noopener');
+}
 
 /* ============ Markdown → HTML (parser propio, ligero) ============ */
 function mdToHtml(src){
@@ -5246,7 +5342,12 @@ async function saveQuickDato(){
       Contenido: '<p>'+escHtml(texto)+'</p>',
       Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:''
     };
-    await saveEntity('NOTAS', note);
+    // saveEntity ya deja DATA al día de inmediato (síncrono) antes de su
+    // propio await interno al backend — esperar ESE viaje de ida y
+    // vuelta antes de refrescar la pantalla es lo que hacía sentir el
+    // guardado lento (reportado por el usuario, mismo patrón ya
+    // arreglado antes en Tareas/Horario/Cuadernos).
+    saveEntity('NOTAS', note);
     if(tag) ensureTagsRegistered('#'+tag);
     renderAll();
     showToast(autoNb ? ('📥→📓 Guardado en "'+autoNb.Nombre+'"') : '✅ Guardado en Datos generales');

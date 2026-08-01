@@ -647,7 +647,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Xalapa';
+const BUILD_VERSION = 'Oaxaca';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3696,12 +3696,76 @@ function openNoteConflictModal(attempted, currentRow){
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         <button class="btn" onclick="resolveNoteConflict('server')">Usar la versión guardada (descarta lo que tenías sin guardar aquí)</button>
-        <button class="btn secondary" onclick="resolveNoteConflict('newnote')">Guardar tu versión como nota nueva (conserva las dos)</button>
+        <button class="btn secondary" onclick="openNoteConflictMergeModal()">🔀 Combinar las dos a mano en una sola nota</button>
+        <button class="btn secondary" onclick="resolveNoteConflict('newnote')">Guardar tu versión como nota nueva (conserva las dos por separado)</button>
         <button class="btn secondary" onclick="resolveNoteConflict('force')">Sobrescribir de todas formas con tu versión</button>
       </div>
     </div>
   </div>`;
   document.body.appendChild(overlay);
+}
+/* Pedido explícito: no solo "una u otra completa", sino poder elegir
+   qué pedazo de cada versión conservar y que quede todo en UNA sola
+   nota — se ponen ambos contenidos completos, uno debajo del otro con
+   un separador, dentro de un área editable normal (mismo look que el
+   cuerpo de una nota) para que la persona borre/reordene a mano lo que
+   no quiere y quede el texto final que sí quiere guardar. No hay
+   fusión automática por línea/párrafo (eso necesitaría un algoritmo de
+   diff aparte) — acá la persona ES el merge. */
+function openNoteConflictMergeModal(){
+  const ctx = window._pendingNoteConflict; if(!ctx) return;
+  const { attempted, currentRow } = ctx;
+  const baseOverlay = document.getElementById('noteConflictOverlay'); if(baseOverlay) baseOverlay.remove();
+  document.querySelectorAll('#noteConflictMergeOverlay').forEach(o=>o.remove());
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print'; overlay.id='noteConflictMergeOverlay';
+  overlay.innerHTML = `<div class="modal" style="width:min(700px,100%)">
+    <div class="modal-head"><b>🔀 Combinar en una sola nota</b></div>
+    <div class="modal-body">
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 8px">Abajo están las dos versiones completas, una debajo de la otra. Borrá o reordená lo que quieras — al guardar, esto reemplaza la nota con lo que quede.</p>
+      <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Título</label>
+      <input type="text" id="mergeTitleInput" value="${escAttr(attempted.Titulo||currentRow.Titulo||'')}">
+      <label style="font-size:12px;font-weight:600;display:block;margin:10px 0 4px">Contenido combinado</label>
+      <div id="mergeContentArea" class="rich-editor" contenteditable="true" style="min-height:240px;max-height:50vh;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:10px">
+        <p><b>— Tu versión (sin guardar) —</b></p>
+        ${attempted.Contenido||'<p><br></p>'}
+        <p><b>— Versión guardada (${escHtml(fmtDate(currentRow.FechaEdicion))}) —</b></p>
+        ${currentRow.Contenido||'<p><br></p>'}
+      </div>
+      <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn" onclick="saveMergedNoteConflict()">Guardar como una sola nota</button>
+        <button class="btn secondary" onclick="document.getElementById('noteConflictMergeOverlay').remove();openNoteConflictModal(window._pendingNoteConflict.attempted, window._pendingNoteConflict.currentRow)">← Volver</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('mergeTitleInput').focus();
+}
+async function saveMergedNoteConflict(){
+  const ctx = window._pendingNoteConflict; if(!ctx) return;
+  const { attempted, currentRow } = ctx;
+  const titleEl = document.getElementById('mergeTitleInput');
+  const contentEl = document.getElementById('mergeContentArea');
+  const merged = Object.assign({}, currentRow, {
+    Titulo: (titleEl && titleEl.value) || currentRow.Titulo,
+    Contenido: normalizeContentHTML((contentEl && contentEl.innerHTML) || currentRow.Contenido),
+    FechaEdicion: new Date().toISOString()
+  });
+  const overlay = document.getElementById('noteConflictMergeOverlay'); if(overlay) overlay.remove();
+  window._pendingNoteConflict = null;
+  // Se manda currentRow.FechaEdicion como base — es la que de verdad
+  // está en el servidor ahora, así que este guardado sí debería
+  // aceptarse; si justo en este instante cambió OTRA vez, se vuelve a
+  // preguntar en vez de arriesgarse a pisar una tercera versión.
+  const saved = await saveEntity('NOTAS', merged, currentRow.FechaEdicion);
+  if(saved && saved.conflict){ openNoteConflictModal(saved.attempted, saved.currentRow); return; }
+  if(editingNoteId===attempted.ID || editingNoteId===currentRow.ID) editingNoteId = saved.ID;
+  if(document.getElementById('mainArea')){
+    const editorOverlay = document.getElementById('editorOverlay'); if(editorOverlay) editorOverlay.remove();
+    renderNoteModal(saved);
+  }
+  _noteConflictOpen = false;
+  renderAll();
+  showToast('Nota combinada guardada');
 }
 async function resolveNoteConflict(action){
   const ctx = window._pendingNoteConflict; if(!ctx) return;

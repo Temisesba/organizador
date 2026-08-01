@@ -652,7 +652,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Monterrey';
+const BUILD_VERSION = 'Saltillo';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2749,7 +2749,13 @@ function timeLogChapterHTML(dateObj, dayNotes, highlight, q, activeTags, pane){
       const textoL = stripHtmlToText(n.Contenido||'').toLowerCase();
       const tagL = (n.Tags||'').toLowerCase();
       if(q && (textoL.includes(q) || tagL.includes(q))) return true;
-      return activeTags.some(t => tagL===t || textoL.includes('#'+t));
+      // effectiveTags (Tags + heredadas del cuaderno + sueltas del
+      // cuerpo) en vez de solo comparar contra el campo Tags — mismo
+      // arreglo que taskChapterHTML/datoGeneralChapterHTML, para que
+      // una etiqueta escrita SUELTA dentro del bloque también cuente
+      // acá, no solo por texto libre coincidente con "#tag".
+      const et = effectiveTags(n).map(t=>t.toLowerCase());
+      return activeTags.some(t => et.includes(t));
     });
     if(!ranges.length) return '';
   }
@@ -2786,7 +2792,16 @@ function taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pan
       const tituloL = (n.Titulo||'').toLowerCase();
       const tagL = (n.Tags||'').toLowerCase();
       if(q && (textoL.includes(q) || tituloL.includes(q) || tagL.includes(q))) return true;
-      return activeTags.some(t => tagL.includes(t));
+      // Filtrar solo contra n.Tags (el campo dedicado) se perdía las
+      // etiquetas sueltas escritas DENTRO del cuerpo (ej. "#enojo" a
+      // mitad de una nota de +Dato general con Tags="Lot") — el 👁 del
+      // panel lateral SÍ las encontraba (usa effectiveTags), pero
+      // tocar la etiqueta para filtrar no, porque este capítulo
+      // comparaba contra el string crudo. effectiveTags ya junta
+      // Tags + heredadas del cuaderno + las sueltas del cuerpo, mismo
+      // criterio que usa el filtro general de la lista de notas.
+      const et = effectiveTags(n).map(t=>t.toLowerCase());
+      return activeTags.some(t => et.includes(t));
     });
     if(!rows.length) return '';
   }
@@ -2827,7 +2842,16 @@ function datoGeneralChapterHTML(chapterTag, chapterNotes, highlight, q, activeTa
       const tituloL = (n.Titulo||'').toLowerCase();
       const tagL = (n.Tags||'').toLowerCase();
       if(q && (textoL.includes(q) || tituloL.includes(q) || tagL.includes(q))) return true;
-      return activeTags.some(t => tagL.includes(t));
+      // Filtrar solo contra n.Tags (el campo dedicado) se perdía las
+      // etiquetas sueltas escritas DENTRO del cuerpo (ej. "#enojo" a
+      // mitad de una nota de +Dato general con Tags="Lot") — el 👁 del
+      // panel lateral SÍ las encontraba (usa effectiveTags), pero
+      // tocar la etiqueta para filtrar no, porque este capítulo
+      // comparaba contra el string crudo. effectiveTags ya junta
+      // Tags + heredadas del cuaderno + las sueltas del cuerpo, mismo
+      // criterio que usa el filtro general de la lista de notas.
+      const et = effectiveTags(n).map(t=>t.toLowerCase());
+      return activeTags.some(t => et.includes(t));
     });
     if(!rows.length) return '';
   }
@@ -4610,8 +4634,17 @@ async function sendSelectionToDic(){
    que sendSelectionToDic. */
 function searchSelectionExternal(engine){
   const sel = window.getSelection();
-  const text = sel && sel.toString().trim();
-  if(!text){ showToast('Selecciona texto primero'); return; }
+  let text = sel && sel.toString().trim();
+  // Pedido explícito: si no hay nada seleccionado, no hace falta
+  // obligar a seleccionar primero — se asume que se quiere buscar la
+  // nota completa. Se recorta a un largo razonable (una nota entera
+  // como término de búsqueda no tiene mucho sentido más allá de eso,
+  // y evita una URL exageradamente larga).
+  if(!text){
+    const mainEl = document.getElementById('mainArea');
+    text = mainEl ? stripHtmlToText(mainEl.innerHTML).trim().slice(0,300) : '';
+  }
+  if(!text){ showToast('No hay texto que buscar'); return; }
   const url = engine==='youtube'
     ? 'https://www.youtube.com/results?search_query='+encodeURIComponent(text)
     : 'https://www.google.com/search?q='+encodeURIComponent(text);

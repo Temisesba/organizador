@@ -659,7 +659,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Guanajuato';
+const BUILD_VERSION = 'Puebla';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -9227,6 +9227,14 @@ async function forceReloadApp(){
       await Promise.all(regs.map(r=>r.unregister()));
     }
   } catch(e){}
+  // El texto del botón promete borrar "la copia guardada (caché)" — pero
+  // hasta ahora solo limpiaba el caché del Service Worker (el código de
+  // la app), NO org_data_cache (las notas/tareas/etc. que boot() carga
+  // de entrada desde localStorage, antes de que syncNow() alcance a
+  // traer la versión real del servidor). Una corrupción local vieja
+  // (ej. una nota con el ID de otra) sobrevivía intacta a "recargar" — no
+  // era el botón cumpliendo lo que dice, sino solo refrescando el código.
+  try{ localStorage.removeItem('org_data_cache'); }catch(e){}
   location.href = location.pathname + '?_r=' + Date.now();
 }
 /* Las banderas/búsquedas personalizadas empezaron viviendo solo en

@@ -205,6 +205,10 @@ table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{backgrou
 .split-handle{width:7px;flex:none;cursor:col-resize;background:var(--border);border-radius:4px;margin:0 4px}
 .split-handle:hover,.split-handle:active{background:var(--accent)}
 .split-right{flex:1;min-width:220px;overflow-y:auto;padding-left:6px}
+/* box-shadow inset en vez de outline: outline se corta con
+   overflow-y:auto cuando la lista hace scroll; box-shadow inset queda
+   siempre dentro del borde y no se recorta. */
+.split-pane-selected{box-shadow:inset 0 0 0 2px var(--accent);border-radius:6px}
 
 /* editor */
 /* z-index 220, por ENCIMA de .transcribe-side-panel/.ai-side-panel
@@ -659,7 +663,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Querétaro';
+const BUILD_VERSION = 'Tepoztlán';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2463,7 +2467,17 @@ function pendingRemindersToday(){
   });
   DATA.habitos.filter(h=>h.Activo!=='0').forEach(h=>{
     const last = lastHabitLog(h.ID);
-    if(isReminderDue(last, h.Recordatorio)) pending.push({ type:'habito', id:h.ID, nombre:(h.Emoji||'✅')+' '+h.Nombre });
+    if(isReminderDue(last, h.Recordatorio)){
+      // Con meta >1 (ej. "tomar agua" 8 veces al día) el chip mostraba
+      // solo el nombre, sin decir cuántas ya llevabas hoy — pedido
+      // explícito: "que me deje ver cuántos llevo". Con meta=1 (la
+      // mayoría de hábitos simples) el contador no aporta nada, así
+      // que solo se agrega cuando realmente hay una meta múltiple.
+      const goal = habitGoal(h);
+      const count = goal>1 ? habitCountOnDate(h.ID, todayStr()) : 0;
+      const sufijo = goal>1 ? ' ('+count+'/'+goal+')' : '';
+      pending.push({ type:'habito', id:h.ID, nombre:(h.Emoji||'✅')+' '+h.Nombre+sufijo });
+    }
   });
   return pending;
 }
@@ -2639,8 +2653,18 @@ function cardsHTML(notes, query, pane){
   // un bloque de ese día en la lista ya ordenada; los demás bloques del
   // mismo día se saltan porque ya quedaron incluidos ahí.
   const seenTimeLogDays = new Set();
-  const seenTaskChapters = new Set();
-  const seenDatoChapters = new Set();
+  // Antes cada capítulo (#viajes, #dge, #amigos…) se imprimía la primera
+  // vez que su nota aparecía en la lista YA ordenada (por título, fecha,
+  // etc.) — así que el orden de los capítulos dependía del orden de
+  // notas, no de la etiqueta, y salía revuelto (ej. #viajes antes que
+  // #amigos con "Título Z-A" activo). Pedido explícito: que los
+  // capítulos mismos queden ordenados alfabéticamente por etiqueta. Para
+  // eso, en vez de ir emitiendo un capítulo por cada primera-aparición,
+  // se vuelcan TODOS los capítulos de ese tipo (ya ordenados) en el
+  // lugar donde habría aparecido el primero.
+  let taskChaptersRendered = false;
+  let datoChaptersRendered = false;
+  const sortChapterTags = tags => tags.sort((a,b)=> a===''?1 : b===''?-1 : a.localeCompare(b,'es'));
   const cards = notes.map(n=>{
     if(n.PlantillaPropID===TIMELOG_MARKER){
       const dayKey = new Date(n.Fecha).toDateString();
@@ -2655,14 +2679,14 @@ function cardsHTML(notes, query, pane){
     // una — pedido explícito tras ver la vista principal llena de
     // tarjetitas de #task sueltas.
     if(n.Notebook===TAREAS_NOTEBOOK){
-      const chapterTag = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente') || '';
-      if(seenTaskChapters.has(chapterTag)) return '';
-      seenTaskChapters.add(chapterTag);
-      const chapterNotes = notes.filter(x=>{
-        if(x.Notebook!==TAREAS_NOTEBOOK) return false;
-        return (taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente')||'')===chapterTag;
-      });
-      return taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane);
+      if(taskChaptersRendered) return '';
+      taskChaptersRendered = true;
+      const taskNotes = notes.filter(x=>x.Notebook===TAREAS_NOTEBOOK);
+      const chapterTags = sortChapterTags(Array.from(new Set(taskNotes.map(x=>taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente') || ''))));
+      return chapterTags.map(chapterTag=>{
+        const chapterNotes = taskNotes.filter(x=>(taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente')||'')===chapterTag);
+        return taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane);
+      }).join('');
     }
     // Mismo criterio que Tareas — pedido explícito: "que sea como con
     // tareas y que se vayan agrupando los mismos #, ej. canción, libro,
@@ -2671,11 +2695,14 @@ function cardsHTML(notes, query, pane){
     // es el capítulo, sin necesidad de excluir ninguna como en Tareas
     // (ahí #task/#hecho/#urgente son de control; acá no hay equivalente).
     if(n.Notebook==='Datos generales'){
-      const chapterTag = (n.Tags||'').replace(/^#/,'').trim();
-      if(seenDatoChapters.has(chapterTag)) return '';
-      seenDatoChapters.add(chapterTag);
-      const chapterNotes = notes.filter(x=>x.Notebook==='Datos generales' && (x.Tags||'').replace(/^#/,'').trim()===chapterTag);
-      return datoGeneralChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane);
+      if(datoChaptersRendered) return '';
+      datoChaptersRendered = true;
+      const datoNotes = notes.filter(x=>x.Notebook==='Datos generales');
+      const chapterTags = sortChapterTags(Array.from(new Set(datoNotes.map(x=>(x.Tags||'').replace(/^#/,'').trim()))));
+      return chapterTags.map(chapterTag=>{
+        const chapterNotes = datoNotes.filter(x=>(x.Tags||'').replace(/^#/,'').trim()===chapterTag);
+        return datoGeneralChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane);
+      }).join('');
     }
     const pairs = extractFieldPairs(n);
     if(!pairs.length) return noteCardHTML(n, pane);
@@ -3075,6 +3102,17 @@ let _splitOpenSide = null;
    es independiente de todos modos. */
 let splitTagTarget = localStorage.getItem('org_split_tag_target') || 'both';
 function setSplitTagTarget(t){ splitTagTarget=t; localStorage.setItem('org_split_tag_target', t); renderSidebar(); renderMain(); }
+/* Pedido explícito: en vez de solo los botones "aplicar a: Izq/Der",
+   presionar directamente el panel (su lista, no una tarjeta ni el
+   buscador) también lo selecciona como destino de los filtros — con un
+   contorno (.split-pane-selected, ver splitHTML) marcando cuál es.
+   Mismo estado (splitTagTarget) que los botones, solo otra forma de
+   cambiarlo. No se ofrece mientras el panel tiene una nota abierta
+   (ver la rama de editorInnerHTML abajo, que no lleva este onclick):
+   un clic ahí es para poner el cursor a escribir, no para elegir
+   panel, y forzar un re-render completo de la vista dividida a mitad
+   de un clic de edición cortaría el foco/cursor. */
+function selectSplitPane(side){ if(splitTagTarget!==side) setSplitTagTarget(side); }
 function splitPaneHTML(side){
   if(_splitOpenSide===side && editingNoteId){
     const note = getNote(editingNoteId);
@@ -3085,14 +3123,16 @@ function splitPaneHTML(side){
   const notes = getFilteredSortedNotes(query, applyTagFilters);
   const inputId = side==='left' ? 'splitLeftSearchInput' : 'splitRightSearchInput';
   const areaId = side==='left' ? 'splitLeftCardsArea' : 'splitRightCardsArea';
-  return `<input type="search" id="${inputId}" placeholder="Buscar en esta lista…" value="${escAttr(query)}" oninput="onSplitSearchInput('${side}',this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
-    <div id="${areaId}">${cardsHTML(notes, query, side)}</div>`;
+  return `<div onclick="selectSplitPane('${side}')" style="min-height:100%">
+    <input type="search" id="${inputId}" placeholder="Buscar en esta lista…" value="${escAttr(query)}" oninput="onSplitSearchInput('${side}',this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
+    <div id="${areaId}">${cardsHTML(notes, query, side)}</div>
+  </div>`;
 }
 function splitHTML(){
   return `<div class="split-wrap" id="splitWrap">
-    <div class="split-left" id="splitLeft" style="flex:0 0 ${splitRatio}%">${splitPaneHTML('left')}</div>
+    <div class="split-left${splitTagTarget==='left'?' split-pane-selected':''}" id="splitLeft" style="flex:0 0 ${splitRatio}%">${splitPaneHTML('left')}</div>
     <div class="split-handle" id="splitHandle"></div>
-    <div class="split-right" id="splitRightPane">${splitPaneHTML('right')}</div>
+    <div class="split-right${splitTagTarget==='right'?' split-pane-selected':''}" id="splitRightPane">${splitPaneHTML('right')}</div>
   </div>`;
 }
 function renderSplitPane(side){

@@ -663,7 +663,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Cuernavaca';
+const BUILD_VERSION = 'Toluca';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2143,7 +2143,23 @@ async function setActiveNotebook(name){
     const ok = await unlockNotebookPrompt(name);
     if(!ok) return; // se quedó donde estaba, no lo cambiamos a medias
   }
-  activeNotebook = name; localStorage.setItem('org_active_notebook', name);
+  // Pedido explícito: "quiero tener el cuaderno A del lado derecho y el
+  // cuaderno B del izq" — en Vista Dividida con un panel elegido como
+  // destino (splitTagTarget, ver selectSplitPane/initSplitPaneSelectOnce)
+  // el cuaderno se asigna SOLO a ese panel, no al cuaderno global de la
+  // barra lateral (que Cards/Tabla siguen usando tal cual). Con "Ambas"
+  // (o fuera de Vista Dividida) se comporta como siempre.
+  if(currentView==='split' && splitTagTarget==='left'){
+    splitLeftNotebook = name; localStorage.setItem('org_split_left_notebook', name);
+  } else if(currentView==='split' && splitTagTarget==='right'){
+    splitRightNotebook = name; localStorage.setItem('org_split_right_notebook', name);
+  } else if(currentView==='split'){
+    splitLeftNotebook = name; splitRightNotebook = name;
+    localStorage.setItem('org_split_left_notebook', name);
+    localStorage.setItem('org_split_right_notebook', name);
+  } else {
+    activeNotebook = name; localStorage.setItem('org_active_notebook', name);
+  }
   renderSidebar(); renderMain();
 }
 function promptNewNotebook(){
@@ -2164,8 +2180,19 @@ function promptNewNotebook(){
 }
 function randomColor(){ const c=['#8a5a3b','#3d7a4f','#4a6fa5','#b3432b','#7d5ba6','#c9a227']; return c[Math.floor(Math.random()*c.length)]; }
 
+/* Qué cuaderno resaltar como "activo" en la barra lateral — en Vista
+   Dividida con un panel elegido como destino, es el cuaderno DE ESE
+   PANEL (splitLeftNotebook/splitRightNotebook), no el global; con
+   "Ambas" (o fuera de Vista Dividida) sigue siendo el de siempre. */
+function sidebarActiveNotebookValue(){
+  if(currentView==='split' && splitTagTarget==='left') return splitLeftNotebook;
+  if(currentView==='split' && splitTagTarget==='right') return splitRightNotebook;
+  if(currentView==='split') return splitLeftNotebook; // "Ambas": se asignan juntos, deberían coincidir
+  return activeNotebook;
+}
 function renderSidebar(){
   renderTagFilterBar();
+  const highlightNb = sidebarActiveNotebookValue();
   const nbList = document.getElementById('notebookList');
   nbList.innerHTML = DATA.notebooks.filter(nb=>nb.Nombre!==MEJORAS_NOTEBOOK).map(nb=>{
     const locked = isNotebookLocked(nb.Nombre);
@@ -2173,18 +2200,18 @@ function renderSidebar(){
     // contara con ella el número siempre daría 0 ahí. Se muestra 🔒 en
     // vez de un número para no filtrar ni siquiera cuántas notas tiene.
     const cntHTML = locked ? '🔒' : activeNotes().filter(n=>n.Notebook===nb.Nombre).length;
-    return `<div class="nb-item tag-chip-row ${activeNotebook===nb.Nombre?'active':''}">
+    return `<div class="nb-item tag-chip-row ${highlightNb===nb.Nombre?'active':''}">
       <span onclick="setActiveNotebook('${escAttr(nb.Nombre)}')" style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;cursor:pointer">
         <span class="nb-dot" style="background:${nb.Color||'#8a5a3b'}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(nb.Nombre)}</span>${nb.Password?' <small title="Cuaderno con contraseña">'+(locked?'🔒':'🔓')+'</small>':''}${nb.TagAuto?' <small title="se auto-enruta desde el Inbox con #'+escAttr(nb.TagAuto)+'">🔀</small>':''}<span class="cnt">${cntHTML}</span>
       </span>
       <button class="icon-btn" style="padding:2px 5px" onclick="event.stopPropagation();openNotebookFolder('${escAttr(nb.ID)}','${escAttr(nb.Nombre)}')" title="Vincular/abrir carpeta de este cuaderno">📁</button>
     </div>`;
   }).join('');
-  document.getElementById('nbNone').classList.toggle('active', activeNotebook==='');
+  document.getElementById('nbNone').classList.toggle('active', highlightNb==='');
   // el contador debe coincidir con lo que Inbox realmente muestra ahora
   // (todo excepto Mejoras), no solo las notas sin cuaderno.
   document.getElementById('inboxCount').textContent = activeNotes().filter(n=>n.Notebook!==MEJORAS_NOTEBOOK).length;
-  document.getElementById('nbSinCuaderno').classList.toggle('active', activeNotebook===NO_NOTEBOOK_SENTINEL);
+  document.getElementById('nbSinCuaderno').classList.toggle('active', highlightNb===NO_NOTEBOOK_SENTINEL);
   document.getElementById('sinCuadernoCount').textContent = activeNotes().filter(n=>!n.Notebook).length;
 
   const fc = document.getElementById('flagCloud');
@@ -2263,7 +2290,10 @@ function toggleTagFilter(t){
    notas; si no, verla filtrada solo al cuaderno actual no tiene sentido
    (podrías tener tareas en otros cuadernos que no se mostrarían). */
 function toggleFlagFilter(t){
-  if(activeNotebook){ activeNotebook=''; localStorage.setItem('org_active_notebook',''); }
+  if(currentView==='split' && splitTagTarget!=='both'){
+    if(splitTagTarget==='left' && splitLeftNotebook){ splitLeftNotebook=''; localStorage.setItem('org_split_left_notebook',''); }
+    if(splitTagTarget==='right' && splitRightNotebook){ splitRightNotebook=''; localStorage.setItem('org_split_right_notebook',''); }
+  } else if(activeNotebook){ activeNotebook=''; localStorage.setItem('org_active_notebook',''); }
   toggleTagFilter(t);
 }
 function setTagFilterMode(mode){ tagFilterMode=mode; localStorage.setItem('org_tag_filter_mode',mode); renderSidebar(); renderMain(); }
@@ -2347,17 +2377,23 @@ function toggleModalFullscreen(btn){
   btn.title = on ? 'Salir de pantalla completa' : 'Pantalla completa';
 }
 
-function getFilteredSortedNotes(query, applyTagFilters){
+function getFilteredSortedNotes(query, applyTagFilters, notebookOverride){
   if(applyTagFilters===undefined) applyTagFilters = true;
+  // En Vista Dividida cada panel puede tener su PROPIO cuaderno elegido
+  // (splitLeftNotebook/splitRightNotebook, ver splitPaneHTML) en vez de
+  // depender del cuaderno global de la barra lateral — notebookOverride
+  // (undefined = "usa el global activeNotebook", cualquier string
+  // incluyendo '' = usarlo tal cual, mismo patrón que query/applyTagFilters).
+  const nb = notebookOverride!==undefined ? notebookOverride : activeNotebook;
   const q = (query!==undefined ? query : (document.getElementById('searchInput').value||'')).toLowerCase().trim();
   let notes = activeNotes().filter(n=>{
-    // Inbox (activeNotebook==='') es realmente "ver TODO", como cualquier
-    // otra app de notas — cuadernos son solo una forma extra de filtrar,
-    // no una condición para aparecer. La ÚNICA excepción es Mejoras
-    // Organizador, que nunca debe verse fuera de Configuración. Si hay un
-    // cuaderno específico elegido, ahí sí filtra estrictamente a ese.
-    if(activeNotebook===NO_NOTEBOOK_SENTINEL){ if(n.Notebook) return false; }
-    else if(activeNotebook){ if(n.Notebook!==activeNotebook) return false; }
+    // Inbox (nb==='') es realmente "ver TODO", como cualquier otra app de
+    // notas — cuadernos son solo una forma extra de filtrar, no una
+    // condición para aparecer. La ÚNICA excepción es Mejoras Organizador,
+    // que nunca debe verse fuera de Configuración. Si hay un cuaderno
+    // específico elegido, ahí sí filtra estrictamente a ese.
+    if(nb===NO_NOTEBOOK_SENTINEL){ if(n.Notebook) return false; }
+    else if(nb){ if(n.Notebook!==nb) return false; }
     else if(n.Notebook===MEJORAS_NOTEBOOK) return false;
     if(applyTagFilters && activeTagFilters.size){
       // activeTagFilters ya siempre está en minúsculas (toggleTagFilter lo
@@ -3093,6 +3129,13 @@ function renderDateFilterUI(activePreset){
    trae el editor puesto ahorita. */
 let splitLeftQuery = localStorage.getItem('org_split_left_search') || '';
 let splitRightQuery = localStorage.getItem('org_split_right_search') || '';
+/* Cada panel puede tener su PROPIO cuaderno elegido, independiente del
+   cuaderno global de la barra lateral (que Cards/Tabla siguen usando) —
+   pedido explícito: "quiero tener el cuaderno A del lado derecho y el
+   cuaderno B del izq". Se asignan desde setActiveNotebook() cuando hay
+   un panel elegido como destino (splitTagTarget), ver ahí. */
+let splitLeftNotebook = localStorage.getItem('org_split_left_notebook') || '';
+let splitRightNotebook = localStorage.getItem('org_split_right_notebook') || '';
 let _splitOpenSide = null;
 /* El filtro de etiquetas del panel lateral (activeTagFilters) es UNA
    sola selección global — con dos listas independientes, aplicarlo
@@ -3144,7 +3187,8 @@ function splitPaneHTML(side){
   }
   const query = side==='left' ? splitLeftQuery : splitRightQuery;
   const applyTagFilters = splitTagTarget==='both' || splitTagTarget===side;
-  const notes = getFilteredSortedNotes(query, applyTagFilters);
+  const notebookOverride = side==='left' ? splitLeftNotebook : splitRightNotebook;
+  const notes = getFilteredSortedNotes(query, applyTagFilters, notebookOverride);
   const inputId = side==='left' ? 'splitLeftSearchInput' : 'splitRightSearchInput';
   const areaId = side==='left' ? 'splitLeftCardsArea' : 'splitRightCardsArea';
   return `<input type="search" id="${inputId}" placeholder="Buscar en esta lista…" value="${escAttr(query)}" oninput="onSplitSearchInput('${side}',this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
@@ -3181,8 +3225,9 @@ function onSplitSearchInput(side, val){
   if(side==='left'){ splitLeftQuery = val; localStorage.setItem('org_split_left_search', val); }
   else { splitRightQuery = val; localStorage.setItem('org_split_right_search', val); }
   const applyTagFilters = splitTagTarget==='both' || splitTagTarget===side;
+  const notebookOverride = side==='left' ? splitLeftNotebook : splitRightNotebook;
   const area = document.getElementById(side==='left' ? 'splitLeftCardsArea' : 'splitRightCardsArea');
-  if(area) area.innerHTML = cardsHTML(getFilteredSortedNotes(val, applyTagFilters), val, side);
+  if(area) area.innerHTML = cardsHTML(getFilteredSortedNotes(val, applyTagFilters, notebookOverride), val, side);
 }
 function getNote(id){ return DATA.notas.find(n=>n.ID===id); }
 

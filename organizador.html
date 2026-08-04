@@ -663,7 +663,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Tepoztlán';
+const BUILD_VERSION = 'Cuernavaca';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3103,16 +3103,40 @@ let _splitOpenSide = null;
 let splitTagTarget = localStorage.getItem('org_split_tag_target') || 'both';
 function setSplitTagTarget(t){ splitTagTarget=t; localStorage.setItem('org_split_tag_target', t); renderSidebar(); renderMain(); }
 /* Pedido explícito: en vez de solo los botones "aplicar a: Izq/Der",
-   presionar directamente el panel (su lista, no una tarjeta ni el
-   buscador) también lo selecciona como destino de los filtros — con un
-   contorno (.split-pane-selected, ver splitHTML) marcando cuál es.
-   Mismo estado (splitTagTarget) que los botones, solo otra forma de
-   cambiarlo. No se ofrece mientras el panel tiene una nota abierta
-   (ver la rama de editorInnerHTML abajo, que no lleva este onclick):
-   un clic ahí es para poner el cursor a escribir, no para elegir
-   panel, y forzar un re-render completo de la vista dividida a mitad
-   de un clic de edición cortaría el foco/cursor. */
+   presionar directamente el panel también lo selecciona como destino
+   de los filtros — con un contorno (.split-pane-selected, ver
+   splitHTML) marcando cuál es. Mismo estado (splitTagTarget) que los
+   botones, solo otra forma de cambiarlo.
+   Primer intento (un onclick en la lista, fuera de las tarjetas) no
+   servía en la práctica: con la vista llena de tarjetas casi no queda
+   "hueco" en blanco donde hacer clic — pedido de seguimiento: "que el
+   primer clic en cada panel lo seleccione, no q abra la nota, para
+   poder dar clic dnd no sea ya (una) vez que está activo". Ahora se
+   intercepta en fase de CAPTURA (initSplitPaneSelectOnce, atado una
+   sola vez en boot()) sobre TODO el panel, tarjetas incluidas: si ese
+   lado todavía no es el seleccionado, el clic se consume ahí mismo
+   (selecciona el panel, no dispara el onclick de la tarjeta/lo que
+   sea debajo) — recién el SIGUIENTE clic, con el panel ya
+   seleccionado, actúa normal (abre la nota, etc.). No se intercepta
+   mientras ese panel ya tiene una nota abierta (ahí un clic es para
+   poner el cursor a escribir, no para elegir panel). */
 function selectSplitPane(side){ if(splitTagTarget!==side) setSplitTagTarget(side); }
+function initSplitPaneSelectOnce(){
+  document.addEventListener('click', e=>{
+    if(currentView!=='split') return;
+    const leftEl = document.getElementById('splitLeft');
+    const rightEl = document.getElementById('splitRightPane');
+    let side = null;
+    if(leftEl && leftEl.contains(e.target)) side = 'left';
+    else if(rightEl && rightEl.contains(e.target)) side = 'right';
+    if(!side) return;
+    if(_splitOpenSide===side && editingNoteId) return; // nota abierta en este lado: el clic es para editar
+    if(splitTagTarget===side) return; // ya seleccionado: dejar pasar el clic normal
+    e.stopPropagation();
+    e.preventDefault();
+    selectSplitPane(side);
+  }, true);
+}
 function splitPaneHTML(side){
   if(_splitOpenSide===side && editingNoteId){
     const note = getNote(editingNoteId);
@@ -3123,10 +3147,8 @@ function splitPaneHTML(side){
   const notes = getFilteredSortedNotes(query, applyTagFilters);
   const inputId = side==='left' ? 'splitLeftSearchInput' : 'splitRightSearchInput';
   const areaId = side==='left' ? 'splitLeftCardsArea' : 'splitRightCardsArea';
-  return `<div onclick="selectSplitPane('${side}')" style="min-height:100%">
-    <input type="search" id="${inputId}" placeholder="Buscar en esta lista…" value="${escAttr(query)}" oninput="onSplitSearchInput('${side}',this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
-    <div id="${areaId}">${cardsHTML(notes, query, side)}</div>
-  </div>`;
+  return `<input type="search" id="${inputId}" placeholder="Buscar en esta lista…" value="${escAttr(query)}" oninput="onSplitSearchInput('${side}',this.value);updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()" style="margin-bottom:10px">
+    <div id="${areaId}">${cardsHTML(notes, query, side)}</div>`;
 }
 function splitHTML(){
   return `<div class="split-wrap" id="splitWrap">
@@ -9229,6 +9251,7 @@ function boot(){
   renderAll();
   syncNow(false).then(migrateLocalFlagsAndSearchesOnce).then(autoPurgeOldTrash).then(migrateTimeLogToRegistroPersonal).then(ensurePersonasTemplate).then(renderAll);
   initSplitResizerOnce();
+  initSplitPaneSelectOnce();
   initEditorResizerOnce();
   initResizableTablesObserver();
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }

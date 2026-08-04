@@ -494,7 +494,8 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 /* calendario: vistas de semana/mes */
 .cal-grid-head{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:11px;color:var(--text-dim);margin-top:10px}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:4px}
-.cal-grid-week .cal-cell{min-height:74px}
+.cal-grid-week .cal-cell{min-height:90px;justify-content:flex-start;align-items:stretch}
+.cal-grid-week .cal-cell .cal-wd,.cal-grid-week .cal-cell .cal-daynum{align-self:center}
 .cal-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 2px;border-radius:8px;cursor:pointer;min-height:40px;background:var(--bg-elev)}
 .cal-cell:hover{background:var(--bg-soft)}
 .cal-cell.dim{opacity:.35}
@@ -502,9 +503,13 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .cal-cell .cal-daynum{font-size:13px}
 .cal-cell .cal-wd{font-size:10px;text-transform:uppercase;color:var(--text-dim)}
 .cal-dot{width:5px;height:5px;border-radius:50%;background:var(--accent)}
-/* chips de resumen por día en Calendario → Semana (tareas/eventos/notas) */
+/* chips de resumen por día en Calendario → Semana (notas) */
 .cal-cell-summary{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%}
 .cal-mini-chip{font-size:9.5px;line-height:1.4;background:var(--bg-soft);border-radius:6px;padding:0 4px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+/* títulos de eventos/tareas listados por día en Calendario → Semana */
+.cal-week-items{display:flex;flex-direction:column;gap:1px;width:100%;margin-top:2px}
+.cal-week-item{font-size:9.5px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;padding:0 2px;border-radius:4px}
+.cal-week-item:hover{background:var(--bg-soft)}
 
 /* Calendario → Día como tablero: agenda (izq, ~65-70%) + notas del día
    (der, ~30-35%) en escritorio, apiladas en celular — mismo criterio de
@@ -666,7 +671,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Pachuca';
+const BUILD_VERSION = 'Zacatecas';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1261,13 +1266,11 @@ function renderCalMonthGrid(){
 /* Pedido explícito: "en semana en calendario q se vean los pendientes
    calendario eventos etc de esos días no solo los días" — antes cada
    celda de la semana solo mostraba el número del día y un puntito
-   genérico de "hay notas", sin decir NADA de tareas pendientes ni
-   eventos — había que entrar a Día uno por uno para enterarte. Ahora
-   cada celda muestra chips chicos con conteos (⚑ tareas pendientes sin
-   cumplir, 📅 eventos de Google, 📝 notas) — clic en la celda sigue
-   llevando a Día para el detalle completo. Los eventos de Google se
-   piden en UN solo llamado por los 7 días (fetchGoogleEvents acepta un
-   rango), no 7 llamados sueltos. */
+   genérico de "hay notas". Ahora cada celda lista los títulos de
+   eventos/tareas de ese día (ver renderCalWeekCells) y un resumen de
+   notas — clic en la celda sigue llevando a Día para el detalle
+   completo. Los eventos de Google se piden en UN solo llamado por los
+   7 días (fetchGoogleEvents acepta un rango), no 7 llamados sueltos. */
 function renderCalWeekGrid(){
   const body = document.getElementById('calBody'); if(!body) return;
   const startOffset = (_calViewDate.getDay()+6)%7;
@@ -1298,24 +1301,40 @@ function renderCalWeekGrid(){
     }).catch(()=>{});
   }
 }
+/* Seguimiento: los chips con solo el NÚMERO ("⚑ 2", "📅 3") no
+   alcanzaban — pedido explícito: "que se vean los eventos del
+   calendario y tareas con esa fecha", osea el título de cada uno, no
+   nomás cuántos hay. Ahora se listan los títulos (eventos primero,
+   tareas después — mismo orden que la agenda de Día), topados a
+   CAL_WEEK_MAX_ITEMS para que una semana con un día muy cargado no
+   estire desmedidamente TODA la fila (el grid usa una sola altura de
+   fila para las 7 celdas); el resto queda resumido en "+N más". Cada
+   tarea es clickeable (abre la nota directo, igual que en Día); los
+   eventos no (editarlos de verdad necesita el estado de Día, que acá
+   no se carga) — el clic en el resto de la celda sigue llevando a Día
+   para el detalle completo, incluido ver los eventos que no entraron. */
+const CAL_WEEK_MAX_ITEMS = 4;
 function renderCalWeekCells(days, todayStr){
   const grid = document.getElementById('calWeekGrid'); if(!grid) return;
   const eventsByDay = window._calWeekEventsByDay||{};
   grid.innerHTML = days.map(d=>{
     const iso = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     const dayKey = d.toDateString();
-    const pendingCount = tasksForDate(d).filter(n=>!isTaskDone(n)).length;
-    const eventCount = (eventsByDay[dayKey]||[]).length;
+    const dayEvents = eventsByDay[dayKey]||[];
+    const dayTasks = tasksForDate(d).filter(n=>!isTaskDone(n));
     const notesCount = notesOnDate(d).length;
-    const chips = [
-      pendingCount ? `<span class="cal-mini-chip" title="${pendingCount} tarea${pendingCount===1?'':'s'} pendiente${pendingCount===1?'':'s'}">⚑ ${pendingCount}</span>` : '',
-      eventCount ? `<span class="cal-mini-chip" title="${eventCount} evento${eventCount===1?'':'s'} en Google Calendar">📅 ${eventCount}</span>` : '',
-      notesCount ? `<span class="cal-mini-chip" title="${notesCount} nota${notesCount===1?'':'s'} este día">📝 ${notesCount}</span>` : ''
-    ].join('');
+    const eventItems = dayEvents.map(ev=>`<div class="cal-week-item" title="${escAttr(ev.summary||'(sin título)')}">📅 ${escHtml(ev.summary||'(sin título)')}</div>`);
+    const taskItems = dayTasks.map(n=>`<div class="cal-week-item" style="cursor:pointer" title="${escAttr(n.Titulo||'(sin título)')}" onclick="event.stopPropagation();openNoteFromCalendar('${escAttr(n.ID)}')">⚑ ${escHtml(n.Titulo||'(sin título)')}</div>`);
+    const allItems = eventItems.concat(taskItems);
+    const shown = allItems.slice(0, CAL_WEEK_MAX_ITEMS);
+    const extra = allItems.length - shown.length;
+    const itemsHTML = shown.join('') + (extra>0 ? `<div class="cal-week-item" style="color:var(--text-dim)">+${extra} más</div>` : '');
+    const notesChip = notesCount ? `<span class="cal-mini-chip" title="${notesCount} nota${notesCount===1?'':'s'} este día">📝 ${notesCount}</span>` : '';
     return `<div class="cal-cell${d.toDateString()===todayStr?' today':''}" onclick="selectCalDay('${iso}')">
       <span class="cal-wd">${d.toLocaleDateString('es-MX',{weekday:'short'})}</span>
       <span class="cal-daynum">${d.getDate()}</span>
-      ${chips?`<div class="cal-cell-summary">${chips}</div>`:''}
+      ${itemsHTML?`<div class="cal-week-items">${itemsHTML}</div>`:''}
+      ${notesChip?`<div class="cal-cell-summary">${notesChip}</div>`:''}
     </div>`;
   }).join('');
 }

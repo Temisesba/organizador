@@ -671,7 +671,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Aguascalientes';
+const BUILD_VERSION = 'Chihuahua';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3728,6 +3728,7 @@ const TOOLBAR_TOOLS = [
   { key:'italic', icon:'<i>I</i>', title:'Cursiva', action:"runCmd('italic')" },
   { key:'underline', icon:'<u>S</u>', title:'Subrayado', action:"runCmd('underline')" },
   { key:'strike', icon:'<s>S</s>', title:'Tachado', action:"runCmd('strikeThrough')" },
+  { key:'removeformat', icon:'✕', title:'Quitar formato (deja el texto plano — útil tras pegar algo con letra/fondo raros)', action:"runCmd('removeFormat')" },
   { key:'fontsize', icon:'Aa', title:'Tamaño de letra', isSelect:true },
   { key:'h1', icon:'H1', title:'Título', action:"runCmd('formatBlock','H1')" },
   { key:'h2', icon:'H2', title:'Subtítulo', action:"runCmd('formatBlock','H2')" },
@@ -3958,13 +3959,38 @@ function toggleCornell(){
     ).join('') + '</table>';
     note.Cornell='1';
   }
-  persistCurrentNote(note);
-  reopenEditorFor(note);
+  persistAndReopen(note);
 }
 function reopenEditorFor(note){
   if(currentView==='split' && _splitOpenSide){ renderSplitPane(_splitOpenSide); bindEditorEvents(note); return; }
   const panel = document.getElementById('editorPanel');
   if(panel){ panel.innerHTML = editorInnerHTML(note,true); bindEditorEvents(note); }
+}
+/* reopenEditorFor reemplaza el <div id="mainArea"> por uno nuevo YA — no
+   se espera a que el guardado de red termine, para que el cambio se vea
+   al toque. Pero eso significa que el mainArea VIEJO (si tenía el foco,
+   lo normal mientras se edita) pierde el foco al ser reemplazado —
+   dispara un 'blur' SINCRÓNICO ahí mismo, y su listener (puesto por el
+   bindEditorEvents de ANTES de este cambio) llama a doSaveNow(). Bug
+   real confirmado con captura de pila (reportado desde el modo Cornell,
+   pero el patrón "persistCurrentNote(note); reopenEditorFor(note);" sin
+   este candado es la causa, no algo específico de Cornell): en ese
+   instante exacto document.getElementById('mainArea') todavía
+   encontraba el DOM VIEJO (pre-cambio) — ese autoguardado atrapado por
+   el blur volvía a guardar el contenido VIEJO justo ENCIMA del que este
+   mismo cambio acababa de guardar un instante antes, en la misma ráfaga
+   síncrona — el cambio "no hacía nada" (o, con contenido roto de un
+   pegado previo, se veía como que el contenido "desaparecía"). Usar
+   siempre esta función (no persistCurrentNote+reopenEditorFor sueltos)
+   para cualquier acción que reconstruye el editor tras guardar —
+   _saveInFlight (mismo candado que ya sirve para desincronizar
+   guardados encimados, ver doSaveNow) hace que ESE doSaveNow espere a
+   que termine este guardado — y reintente después, ya con el DOM nuevo
+   — en vez de competir con él. */
+function persistAndReopen(note, expectedFecha){
+  _saveInFlight = persistCurrentNote(note, expectedFecha);
+  _saveInFlight.finally(()=>{ _saveInFlight = null; });
+  reopenEditorFor(note);
 }
 /* Migra notas viejas guardadas como Markdown/texto plano a HTML la primera
    vez que se abren — la app ahora edita y guarda HTML directamente. */
@@ -6530,12 +6556,24 @@ function parsePastedTableRows(html){
    trata cada línea como una fila y cada tabulación como un salto de
    columna — funciona igual de bien para pegar sobre una tabla Cornell
    (columna 1 = pista, columna 2 = desarrollo) aunque el origen nunca fue
-   una tabla de verdad. */
+   una tabla de verdad.
+   Bug real reportado: pegar texto/código copiado de otro lado (ej. VS
+   Code, con tabs de indentación en algunas líneas sí y otras no) se
+   interpretaba como "pegar una tabla" con solo UN tab colado en UNA
+   línea — el resto del párrafo terminaba partido en columnas sin
+   sentido (peor aún dentro de una celda Cornell, donde crea una tabla
+   anidada rota). Un pegado tabular DE VERDAD (Excel/Sheets/Numbers)
+   siempre trae el MISMO número de columnas en cada fila — código o
+   texto con tabs sueltos casi nunca cae en eso, así que ahora se exige
+   esa consistencia antes de tratarlo como tabla. */
 function parsePastedPlainTextRows(text){
   if(!text || !text.includes('\t')) return null;
   const lines = text.split(/\r\n|\r|\n/).filter(l=>l.trim()!=='');
   if(!lines.length) return null;
-  return lines.map(line => line.split('\t').map(c=>c.trim()));
+  const rows = lines.map(line => line.split('\t').map(c=>c.trim()));
+  const colCount = rows[0].length;
+  if(colCount<2 || !rows.every(r=>r.length===colCount)) return null;
+  return rows;
 }
 /* Si el cursor ya está dentro de una de nuestras tablas al pegar, la
    tabla copiada se escribe ENCIMA de esa (empezando en la celda donde
@@ -8074,8 +8112,7 @@ function insertFieldTemplateAsCornell(id){
     const trs = campos.map(c=>'<tr><td class="cornell-cue-cell">#'+escHtml(c)+'</td><td><br></td></tr>').join('');
     note.Contenido = '<table class="rt-table cornell-table">'+trs+'</table>';
     note.Cornell = '1';
-    persistCurrentNote(note);
-    reopenEditorFor(note);
+    persistAndReopen(note);
   }
 }
 function prettyFieldLabel(c){ const s = String(c||'').replace(/_/g,' '); return s.charAt(0).toUpperCase()+s.slice(1); }

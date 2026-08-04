@@ -671,7 +671,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Zacatecas';
+const BUILD_VERSION = 'Aguascalientes';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -4061,10 +4061,29 @@ function scheduleSave(){
    con la MISMA base vieja y volver a chocar en bucle antes de que la
    persona alcance a elegir qué hacer. */
 let _noteConflictOpen = false;
+/* Bug real reportado: "me sale el modal de conflicto aun cuando SOLO la
+   estoy usando en la computadora" — pasaba sin ningún otro dispositivo
+   de por medio. Causa: doSaveNow() no tenía ningún candado contra sí
+   mismo — visibilitychange/pagehide/beforeunload pueden disparar VARIAS
+   veces casi juntos (ej. al cambiar de pestaña o minimizar), cada uno
+   llamando doSaveNow() de nuevo sin esperar a que el anterior terminara
+   su viaje de red. Dos guardados de la MISMA nota quedaban en vuelo a
+   la vez, cada uno con su propio expectedFechaEdicion calculado en un
+   instante distinto — si el segundo (que ya vio la FechaEdicion nueva
+   que el primero acababa de escribir en DATA.notas, sincrónico antes
+   del await) le llegaba al backend ANTES que el primero (nada garantiza
+   el orden de llegada de dos fetch en vuelo), el backend rechazaba el
+   PRIMERO por "expected" desactualizado — un conflicto contra SÍ MISMO,
+   sin ningún otro dispositivo real involucrado. _saveInFlight serializa:
+   si ya hay un guardado en camino, este llamado espera a que termine (y
+   entonces reintenta, por si quedó algo más nuevo que guardar) en vez
+   de mandar un segundo request en paralelo. */
+let _saveInFlight = null;
 async function doSaveNow(){
   clearTimeout(_saveDebounce);
   if(!document.getElementById('mainArea')) return; // no hay editor abierto
   if(_noteConflictOpen) return;
+  if(_saveInFlight){ await _saveInFlight.catch(()=>{}); return doSaveNow(); }
   const note = collectNoteFromForm();
   // Lo que este dispositivo cree que hay en el servidor ahorita mismo:
   // la FechaEdicion que él mismo escribió la última vez (o la de
@@ -4072,7 +4091,9 @@ async function doSaveNow(){
   // fecha ya no coincide, alguien más la cambió mientras tanto.
   const expectedFecha = note.FechaEdicion;
   note.FechaEdicion = new Date().toISOString();
-  const result = await persistCurrentNote(note, expectedFecha);
+  _saveInFlight = persistCurrentNote(note, expectedFecha);
+  let result;
+  try{ result = await _saveInFlight; } finally { _saveInFlight = null; }
   if(result && result.conflict) return; // el modal de conflicto ya se encargó de avisar
   const st2 = document.getElementById('saveStatus'); if(st2) st2.textContent='Guardado '+fmtTime(new Date());
 }

@@ -671,7 +671,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Chihuahua';
+const BUILD_VERSION = 'Torreón';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3869,6 +3869,7 @@ function editorInnerHTML(note, isModal){
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('italic')" title="Cursiva"><i>I</i></button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('underline')" title="Subrayado"><u>S</u></button>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('strikeThrough')" title="Tachado"><s>S</s></button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('removeFormat')" title="Quitar formato (deja el texto plano — útil tras pegar algo con letra/fondo raros)">✕</button>
     <select id="fontSizeSelect" style="width:auto;padding:6px 4px" onchange="setFontSize(this.value)" title="Tamaño de letra">
       <option value="">Tamaño</option>
       <option value="2">Chico</option>

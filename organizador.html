@@ -494,7 +494,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 /* calendario: vistas de semana/mes */
 .cal-grid-head{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:11px;color:var(--text-dim);margin-top:10px}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:4px}
-.cal-grid-week .cal-cell{min-height:56px}
+.cal-grid-week .cal-cell{min-height:74px}
 .cal-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 2px;border-radius:8px;cursor:pointer;min-height:40px;background:var(--bg-elev)}
 .cal-cell:hover{background:var(--bg-soft)}
 .cal-cell.dim{opacity:.35}
@@ -502,6 +502,9 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .cal-cell .cal-daynum{font-size:13px}
 .cal-cell .cal-wd{font-size:10px;text-transform:uppercase;color:var(--text-dim)}
 .cal-dot{width:5px;height:5px;border-radius:50%;background:var(--accent)}
+/* chips de resumen por día en Calendario → Semana (tareas/eventos/notas) */
+.cal-cell-summary{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%}
+.cal-mini-chip{font-size:9.5px;line-height:1.4;background:var(--bg-soft);border-radius:6px;padding:0 4px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 
 /* Calendario → Día como tablero: agenda (izq, ~65-70%) + notas del día
    (der, ~30-35%) en escritorio, apiladas en celular — mismo criterio de
@@ -663,7 +666,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Toluca';
+const BUILD_VERSION = 'Pachuca';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -957,10 +960,12 @@ function toggleHabitOnCalDay(habitoId){
   if(existing){ deleteEntity('HABITO_LOG', existing.ID); }
   else{ saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:_calViewDate.toISOString() }); }
   renderCalDayDynamic();
+  renderReminderBanner();
 }
 function incrementHabitOnCalDay(habitoId){
   saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:_calViewDate.toISOString() });
   renderCalDayDynamic();
+  renderReminderBanner();
 }
 function decrementHabitOnCalDay(habitoId){
   const dateStr = _calViewDate.toDateString();
@@ -968,6 +973,7 @@ function decrementHabitOnCalDay(habitoId){
   if(!todays.length) return;
   deleteEntity('HABITO_LOG', todays[0].ID);
   renderCalDayDynamic();
+  renderReminderBanner();
 }
 /* Fila de un hábito dentro de Calendario → Día — reusada tanto por la
    agenda (hábitos CON hora asignada) como por "✅ Hábitos de hoy"
@@ -1252,6 +1258,16 @@ function renderCalMonthGrid(){
     <div class="cal-grid-head"><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
     <div class="cal-grid">${cells}</div>`;
 }
+/* Pedido explícito: "en semana en calendario q se vean los pendientes
+   calendario eventos etc de esos días no solo los días" — antes cada
+   celda de la semana solo mostraba el número del día y un puntito
+   genérico de "hay notas", sin decir NADA de tareas pendientes ni
+   eventos — había que entrar a Día uno por uno para enterarte. Ahora
+   cada celda muestra chips chicos con conteos (⚑ tareas pendientes sin
+   cumplir, 📅 eventos de Google, 📝 notas) — clic en la celda sigue
+   llevando a Día para el detalle completo. Los eventos de Google se
+   piden en UN solo llamado por los 7 días (fetchGoogleEvents acepta un
+   rango), no 7 llamados sueltos. */
 function renderCalWeekGrid(){
   const body = document.getElementById('calBody'); if(!body) return;
   const startOffset = (_calViewDate.getDay()+6)%7;
@@ -1260,26 +1276,55 @@ function renderCalWeekGrid(){
   const days = [];
   for(let i=0;i<7;i++){ const d=new Date(weekStart); d.setDate(d.getDate()+i); days.push(d); }
   const rangeLabel = days[0].toLocaleDateString('es-MX',{day:'numeric',month:'short'})+' – '+days[6].toLocaleDateString('es-MX',{day:'numeric',month:'short'});
-  const cells = days.map(d=>{
-    const iso = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-    const hasNotes = notesOnDate(d).length>0;
-    return `<div class="cal-cell${d.toDateString()===todayStr?' today':''}" onclick="selectCalDay('${iso}')">
-      <span class="cal-wd">${d.toLocaleDateString('es-MX',{weekday:'short'})}</span>
-      <span class="cal-daynum">${d.getDate()}</span>
-      ${hasNotes?'<span class="cal-dot" title="Hay notas este día"></span>':''}
-    </div>`;
-  }).join('');
   body.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
       <button class="icon-btn" onclick="shiftCalDate(-1)">◀</button>
       <b>${escHtml(rangeLabel)}</b>
       <button class="icon-btn" onclick="shiftCalDate(1)">▶</button>
     </div>
-    <div class="cal-grid cal-grid-week">${cells}</div>`;
+    <div class="cal-grid cal-grid-week" id="calWeekGrid"></div>`;
+  window._calWeekEventsByDay = {};
+  renderCalWeekCells(days, todayStr);
+  if(googleAccessToken){
+    fetchGoogleEvents(days[0], days[6]).then(events=>{
+      const byDay = {};
+      events.forEach(ev=>{
+        const startStr = ev.start.dateTime || ev.start.date;
+        const key = new Date(startStr).toDateString();
+        (byDay[key] = byDay[key]||[]).push(ev);
+      });
+      window._calWeekEventsByDay = byDay;
+      renderCalWeekCells(days, todayStr);
+    }).catch(()=>{});
+  }
 }
-async function fetchGoogleEvents(dateObj){
+function renderCalWeekCells(days, todayStr){
+  const grid = document.getElementById('calWeekGrid'); if(!grid) return;
+  const eventsByDay = window._calWeekEventsByDay||{};
+  grid.innerHTML = days.map(d=>{
+    const iso = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    const dayKey = d.toDateString();
+    const pendingCount = tasksForDate(d).filter(n=>!isTaskDone(n)).length;
+    const eventCount = (eventsByDay[dayKey]||[]).length;
+    const notesCount = notesOnDate(d).length;
+    const chips = [
+      pendingCount ? `<span class="cal-mini-chip" title="${pendingCount} tarea${pendingCount===1?'':'s'} pendiente${pendingCount===1?'':'s'}">⚑ ${pendingCount}</span>` : '',
+      eventCount ? `<span class="cal-mini-chip" title="${eventCount} evento${eventCount===1?'':'s'} en Google Calendar">📅 ${eventCount}</span>` : '',
+      notesCount ? `<span class="cal-mini-chip" title="${notesCount} nota${notesCount===1?'':'s'} este día">📝 ${notesCount}</span>` : ''
+    ].join('');
+    return `<div class="cal-cell${d.toDateString()===todayStr?' today':''}" onclick="selectCalDay('${iso}')">
+      <span class="cal-wd">${d.toLocaleDateString('es-MX',{weekday:'short'})}</span>
+      <span class="cal-daynum">${d.getDate()}</span>
+      ${chips?`<div class="cal-cell-summary">${chips}</div>`:''}
+    </div>`;
+  }).join('');
+}
+async function fetchGoogleEvents(dateObj, endDateObj){
+  // endDateObj opcional: por defecto es el mismo día que dateObj (uso
+  // original, Calendario → Día). Vista Semana pide un solo rango de 7
+  // días en vez de 7 llamadas sueltas a la API.
   const dayStart = new Date(dateObj); dayStart.setHours(0,0,0,0);
-  const dayEnd = new Date(dateObj); dayEnd.setHours(23,59,59,999);
+  const dayEnd = new Date(endDateObj||dateObj); dayEnd.setHours(23,59,59,999);
   const params = new URLSearchParams({ timeMin: dayStart.toISOString(), timeMax: dayEnd.toISOString(), singleEvents:'true', orderBy:'startTime' });
   let res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?'+params.toString(), { headers:{ Authorization:'Bearer '+googleAccessToken } });
   if(res.status===401){
@@ -5180,10 +5225,16 @@ function toggleHabitToday(habitoId){
   if(existing){ deleteEntity('HABITO_LOG', existing.ID); }
   else{ saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:new Date().toISOString() }); }
   renderHabitCaptureList();
+  // Reportado: el contador "(n/meta)" del aviso "⏰ Pendiente" (arriba,
+  // detrás del modal) no se actualizaba al registrar un hábito acá —
+  // renderHabitCaptureList solo repinta la lista DENTRO de este modal,
+  // nunca la barra de pendientes de la pantalla principal.
+  renderReminderBanner();
 }
 function incrementHabitToday(habitoId){
   saveEntity('HABITO_LOG', { ID:uid(), HabitoID:habitoId, Fecha:new Date().toISOString() });
   renderHabitCaptureList();
+  renderReminderBanner();
 }
 function decrementHabitToday(habitoId){
   const todayStr = new Date().toDateString();
@@ -5191,6 +5242,7 @@ function decrementHabitToday(habitoId){
   if(!todays.length) return;
   deleteEntity('HABITO_LOG', todays[0].ID);
   renderHabitCaptureList();
+  renderReminderBanner();
 }
 function openHabitCapture(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';

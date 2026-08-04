@@ -659,7 +659,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Puebla';
+const BUILD_VERSION = 'Querétaro';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1801,7 +1801,19 @@ async function saveEntity(table, obj, expectedFechaEdicion){
   const r = await apiPost('saveRow', params);
   if(r && r.conflict){
     const idx2 = arr.findIndex(x=>x.ID===obj.ID);
+    // Si YA había una copia local antes de este intento, se regresa a
+    // esa (el guardado no se aplicó, nada que cambiar de más). Pero si
+    // NO había copia local (prevLocal null) — el caso real es "esta
+    // nota sí existe en el servidor pero se había perdido de
+    // DATA.notas local" — antes esto la volvía a quitar del arreglo
+    // (splice), dejándola otra vez "perdida" y con el mismo problema
+    // de origen sin resolver: el próximo autoguardado la volvería a
+    // reconstruir con ID en blanco y a chocar en conflicto de nuevo,
+    // en bucle. Se adopta currentRow (lo que el servidor SÍ tiene) en
+    // su lugar, así DATA.notas queda con algo real de una vez y el
+    // siguiente guardado ya encuentra la nota y actualiza normal.
     if(prevLocal){ if(idx2>=0) arr[idx2]=prevLocal; }
+    else if(r.currentRow && r.currentRow.ID){ if(idx2>=0) arr[idx2]=r.currentRow; else arr.push(r.currentRow); }
     else if(idx2>=0) arr.splice(idx2,1);
     cacheData();
     return { conflict:true, currentRow:r.currentRow, attempted:obj };
@@ -3818,8 +3830,41 @@ function normalizeContentHTML(html){
   flush();
   return out.innerHTML;
 }
+/* Bug real, muy serio, encontrado y confirmado con captura del usuario
+   (18 notas "(sin título)" con el mismo texto creciendo de a poco,
+   fecha 04 ago 26): si editingNoteId apunta a un ID que YA NO está en
+   DATA.notas (por la razón que sea — una sincronización de fondo, una
+   condición de carrera con otra pestaña, lo que sea), este `base` se
+   armaba con `Object.assign({}, undefined)` → {} → SIN campo ID. En
+   saveEntity, "if(!obj.ID) obj.ID = uid()" le pone un ID nuevo
+   ALEATORIO — o sea que ESE guardado crea una nota nueva. Y como
+   persistCurrentNote comparaba editingNoteId contra el ID ORIGINAL
+   (undefined, capturado ANTES de que saveEntity mutara el objeto),
+   nunca actualizaba editingNoteId al ID nuevo — así que el SIGUIENTE
+   autoguardado repetía exactamente lo mismo: otra nota nueva, con lo
+   que se llevaba escrito hasta ese momento. Cada tecleo con una pausa
+   de por medio (el debounce de 500ms) generaba una nota más — de ahí
+   las 18 versiones parciales del mismo texto creciendo de a poco.
+   Arreglo: si la nota de editingNoteId ya no existe en DATA.notas, en
+   vez de perder el ID, se reconstruye un borrador nuevo PERO
+   conservando ese mismo ID — así el próximo guardado la vuelve a
+   insertar bajo el ID de siempre (autocuración) y deja de duplicarse
+   en cada guardado siguiente. No se pudo confirmar con certeza total
+   qué hace que la nota desaparezca de DATA.notas en primer lugar (ver
+   isEditingActive()/closeStaleEditingSurfaces()), pero esto corta la
+   cascada de duplicados sin importar la causa. */
 function collectNoteFromForm(){
-  const base = editingNoteId ? Object.assign({}, getNote(editingNoteId)) : newBlankNote();
+  let base;
+  if(editingNoteId){
+    const existing = getNote(editingNoteId);
+    if(existing) base = Object.assign({}, existing);
+    else {
+      console.warn('[Organizador] La nota que se estaba editando (ID '+editingNoteId+') ya no estaba en DATA.notas — se reconstruye con el mismo ID en vez de crear una nueva.');
+      base = Object.assign(newBlankNote(), { ID: editingNoteId });
+    }
+  } else {
+    base = newBlankNote();
+  }
   const titleEl = document.getElementById('noteTitle');
   if(titleEl) base.Titulo = titleEl.value;
   const nbEl = document.getElementById('noteNotebook');

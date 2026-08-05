@@ -671,7 +671,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Durango';
+const BUILD_VERSION = 'Culiacán';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3490,6 +3490,62 @@ function initEditorResizerOnce(){
   document.addEventListener('touchstart', e=>{ if(e.target && e.target.id==='editorResizeHandle') _editorResizing=true; }, {passive:true});
   document.addEventListener('touchmove', e=>{ if(_editorResizing && e.touches[0]) onMove(e.touches[0].clientX); }, {passive:true});
   document.addEventListener('touchend', ()=>{ if(_editorResizing){ _editorResizing=false; localStorage.setItem('org_editor_width', editorWidth); } });
+}
+/* Redimensionar imágenes insertadas jalando la esquina inferior derecha —
+   pedido explícito ("cuando pegue imágenes o inserte pueda ajustar el
+   tamaño estirándole"), y el tooltip del botón 🖼️ ya lo prometía
+   ("se puede agrandar/achicar jalando la esquina") pero nunca funcionaba
+   de verdad: la CSS `resize:both` en `.rich-editor img` no sirve de nada
+   ahí porque el elemento vive DENTRO de un contenteditable — los
+   navegadores no muestran/activan el asa nativa de resize en ese
+   contexto, y encima una <img> dentro de contenteditable es arrastrable
+   por HTML5 drag-and-drop por defecto, lo que se roba el mousedown antes
+   de que cualquier lógica de resize lo vea. Implementado a mano en vez
+   de depender de la CSS: se detecta el mousedown/touchstart dentro de
+   los últimos ~18px de la esquina inferior derecha de la imagen (con
+   getBoundingClientRect — no depende de ningún wrapper ni de tocar el
+   HTML guardado, así que funciona igual con imágenes viejas insertadas
+   antes de este arreglo) y se desactiva el arrastre nativo de <img>
+   dentro del editor (si no, jalar la imagen — no solo la esquina — la
+   "arrastra" en vez de nada). */
+let _imgResizing = null;
+function initImageResizerOnce(){
+  const CORNER = 18;
+  const nearCorner = (img, clientX, clientY) => {
+    const r = img.getBoundingClientRect();
+    return (r.right-clientX) <= CORNER && (r.right-clientX) >= -4 && (r.bottom-clientY) <= CORNER && (r.bottom-clientY) >= -4;
+  };
+  const moveResize = (clientX, clientY) => {
+    if(!_imgResizing) return;
+    const { img, startX, startY, startW, startH } = _imgResizing;
+    const container = img.closest('.rich-editor');
+    const maxW = container ? container.clientWidth : 2000;
+    let w = Math.min(maxW, Math.max(60, startW + (clientX-startX)));
+    let h = Math.max(40, startH + (clientY-startY));
+    img.style.width = w+'px'; img.style.height = h+'px';
+  };
+  document.addEventListener('dragstart', e=>{ if(e.target && e.target.tagName==='IMG' && e.target.closest('.rich-editor')) e.preventDefault(); });
+  document.addEventListener('mousedown', e=>{
+    if(e.target && e.target.tagName==='IMG' && e.target.closest('.rich-editor') && nearCorner(e.target, e.clientX, e.clientY)){
+      e.preventDefault();
+      const r = e.target.getBoundingClientRect();
+      _imgResizing = { img:e.target, startX:e.clientX, startY:e.clientY, startW:r.width, startH:r.height };
+    }
+  });
+  document.addEventListener('mousemove', e=>{
+    if(_imgResizing){ moveResize(e.clientX, e.clientY); return; }
+    if(e.target && e.target.tagName==='IMG' && e.target.closest('.rich-editor')) e.target.style.cursor = nearCorner(e.target, e.clientX, e.clientY) ? 'nwse-resize' : '';
+  });
+  document.addEventListener('mouseup', ()=>{ if(_imgResizing){ _imgResizing=null; scheduleSave(); } });
+  document.addEventListener('touchstart', e=>{
+    const t = e.target;
+    if(t && t.tagName==='IMG' && t.closest('.rich-editor') && e.touches[0] && nearCorner(t, e.touches[0].clientX, e.touches[0].clientY)){
+      const r = t.getBoundingClientRect();
+      _imgResizing = { img:t, startX:e.touches[0].clientX, startY:e.touches[0].clientY, startW:r.width, startH:r.height };
+    }
+  }, {passive:true});
+  document.addEventListener('touchmove', e=>{ if(_imgResizing && e.touches[0]) moveResize(e.touches[0].clientX, e.touches[0].clientY); }, {passive:true});
+  document.addEventListener('touchend', ()=>{ if(_imgResizing){ _imgResizing=null; scheduleSave(); } });
 }
 async function closeNoteEditor(){
   // OJO: cerrar la nota ya NO cierra el panel de transcripción (vive
@@ -6566,11 +6622,20 @@ function parsePastedTableRows(html){
    anidada rota). Un pegado tabular DE VERDAD (Excel/Sheets/Numbers)
    siempre trae el MISMO número de columnas en cada fila — código o
    texto con tabs sueltos casi nunca cae en eso, así que ahora se exige
-   esa consistencia antes de tratarlo como tabla. */
+   esa consistencia antes de tratarlo como tabla.
+   Seguimiento (mismo bug, otro disparador): esa exigencia de columnas
+   uniformes se cumple SOLA con una sola línea (una fila siempre es
+   "uniforme" consigo misma) — un párrafo/cita de una sola línea con UN
+   tab (ej. "[1]" + tab + el texto de una nota al pie, copiado de un
+   procesador de texto) seguía disparando la tabla. Un pegado tabular
+   de verdad (Excel/Sheets) casi siempre trae 2+ filas — copiar
+   deliberadamente una sola fila de 2 celdas es un caso mucho más raro
+   que "un párrafo con un tab perdido adentro", así que ahora también
+   se exige más de una línea. */
 function parsePastedPlainTextRows(text){
   if(!text || !text.includes('\t')) return null;
   const lines = text.split(/\r\n|\r|\n/).filter(l=>l.trim()!=='');
-  if(!lines.length) return null;
+  if(lines.length<2) return null;
   const rows = lines.map(line => line.split('\t').map(c=>c.trim()));
   const colCount = rows[0].length;
   if(colCount<2 || !rows.every(r=>r.length===colCount)) return null;
@@ -9428,6 +9493,7 @@ function boot(){
   initSplitResizerOnce();
   initSplitPaneSelectOnce();
   initEditorResizerOnce();
+  initImageResizerOnce();
   initResizableTablesObserver();
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
 }

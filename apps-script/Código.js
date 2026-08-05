@@ -120,7 +120,16 @@ function getSS(sheetId) {
 // formato de texto ("@") en estas columnas evita que Sheets convierta
 // el valor en primer lugar — nunca se guarda como Hora-de-Sheets, así
 // que nunca hay nada que reconstruir/adivinar en zona horaria alguna.
-const TEXT_FORMAT_COLUMNS = { HABITOS: ['Hora', 'HorasJSON'], HORARIO: ['Hora'] };
+// NOTAS.FechaEdicion se mandaba ahí por el MISMO motivo (una fecha-hora
+// ISO completa "se ve" a Sheets como fecha/hora real) — con el agravante
+// de que saveRow() la usa para detectar conflictos comparando
+// String(valor actual) === String(lo que el navegador esperaba). Un
+// Date de Apps Script y el string ISO original casi NUNCA producen el
+// mismo String() (ver saveRow) — eso disparaba el aviso "esta nota
+// cambió en otro dispositivo" con un solo dispositivo de por medio,
+// bug real reportado varias veces seguidas antes de encontrar esta
+// causa de fondo.
+const TEXT_FORMAT_COLUMNS = { HABITOS: ['Hora', 'HorasJSON'], HORARIO: ['Hora'], NOTAS: ['FechaEdicion'] };
 function getTable(ss, tableName) {
   const headers = TABLE_DEFS[tableName];
   if (!headers) throw new Error('Tabla desconocida: ' + tableName);
@@ -235,7 +244,25 @@ function saveRow(sheetId, table, row, expectedFechaEdicion) {
     if (rowIdx > 0 && expectedFechaEdicion !== undefined && expectedFechaEdicion !== null && expectedFechaEdicion !== '' && fechaColIdx >= 0) {
       const currentVals = sh.getRange(rowIdx, 1, 1, headers.length).getValues()[0];
       const currentFecha = currentVals[fechaColIdx];
-      if (String(currentFecha) !== String(expectedFechaEdicion)) {
+      // Bug real reportado varias veces ("me sale que la nota cambió en
+      // otro dispositivo aun usando solo uno"): un ISO completo como
+      // FechaEdicion "se ve" a Sheets como fecha/hora real y se auto-
+      // convierte a su tipo Fecha interno al guardarse (TEXT_FORMAT_COLUMNS
+      // arriba lo evita de aquí en adelante, pero filas YA guardadas antes
+      // de ese arreglo se quedan así hasta que se reescriban). getValues()
+      // entonces regresa un Date de Apps Script, no el string original —
+      // String(date) produce algo como "Wed Aug 05 2026 14:23:11 GMT-0500"
+      // mientras que expectedFechaEdicion sigue siendo el ISO tal cual
+      // ("2026-08-05T14:23:11.111Z") — NUNCA coinciden como texto aunque
+      // sea EXACTAMENTE el mismo instante, así que todo guardado después
+      // del primero de esa nota disparaba un conflicto falso. Comparar el
+      // instante real (milisegundos desde época) en vez del texto crudo
+      // funciona sin importar si la celda quedó como Date o como texto.
+      const currentMs = currentFecha instanceof Date ? currentFecha.getTime() : new Date(currentFecha).getTime();
+      const expectedMs = new Date(expectedFechaEdicion).getTime();
+      const sonComparables = !isNaN(currentMs) && !isNaN(expectedMs);
+      const hayConflicto = sonComparables ? (currentMs !== expectedMs) : (String(currentFecha) !== String(expectedFechaEdicion));
+      if (hayConflicto) {
         const currentRow = {};
         headers.forEach((h, i) => { currentRow[h] = currentVals[i]; });
         return { ok: false, conflict: true, currentRow: currentRow };

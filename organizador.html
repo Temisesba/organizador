@@ -209,6 +209,12 @@ table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{backgrou
    overflow-y:auto cuando la lista hace scroll; box-shadow inset queda
    siempre dentro del borde y no se recorta. */
 .split-pane-selected{box-shadow:inset 0 0 0 2px var(--accent);border-radius:6px}
+/* Título/negrita/Cornell etc. de la nota abierta en Vista Dividida se
+   quedan pegados arriba de su mitad al hacer scroll con texto largo —
+   .split-left/.split-right (no un contenedor interno) son quienes
+   hacen scroll ahí, así que sticky va relativo a ellos. Fondo opaco
+   obligatorio: si no, el texto de la nota se ve pasar por detrás. */
+.split-editor-sticky-head{position:sticky;top:0;z-index:5;background:var(--bg-elev);padding-bottom:4px;margin-bottom:4px}
 
 /* editor */
 /* z-index 220, por ENCIMA de .transcribe-side-panel/.ai-side-panel
@@ -684,7 +690,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Nogales';
+const BUILD_VERSION = 'Ensenada';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1577,6 +1583,64 @@ let tagFilterMode = localStorage.getItem('org_tag_filter_mode') || 'AND';
 let sortState = { col:'Fecha', dir:'desc' };
 let editingNoteId = null;
 let editingCornell = false;
+/* ============ Vista Dividida: dos notas editables a la vez ============
+   Pedido explícito: "por qué en vista dividida no puedo tener dos notas
+   abiertas al mismo tiempo? abro de lado derecho y me saca del lado
+   izquierdo". Hasta ahora TODO el editor (mainArea, noteTitle,
+   editingNoteId, el debounce de guardado, etc.) era un singleton
+   global — abrir una nota en un lado necesariamente cerraba la del
+   otro, porque literalmente eran los MISMOS ids de DOM y la MISMA
+   variable "cuál nota estoy editando".
+   En vez de reescribir cada función para recibir el LADO ('left'/
+   'right', concepto que openNoteEditor ya usa con el nombre "pane") en
+   TODO su árbol de llamadas (altísimo riesgo de reintroducir alguno de
+   los bugs de pérdida/duplicación de notas ya arreglados — ver
+   [[bug_pattern_sheets_number_coercion]] y los fixes de "stale editor
+   surfaces"/"blur race" en memoria), se agrega una SEGUNDA copia
+   paralela, mínima, del estado de edición — la nota "primaria" (slot
+   sin sufijo, editingNoteId, ids sin cambios: mainArea, noteTitle...)
+   sigue funcionando EXACTAMENTE como antes en todos los casos de
+   siempre (modal, un solo lado abierto) — cero riesgo de regresión ahí.
+   Solo cuando el SEGUNDO lado de Vista Dividida también abre una nota
+   (mientras el primero sigue abierto) esa segunda nota usa la copia
+   "secundaria" (ids con sufijo "2": mainArea2, noteTitle2...,
+   editingNoteId2, su propio debounce/candado de guardado).
+   IMPORTANTE — a propósito NO se llama "pane" a esto (ese nombre ya lo
+   usa openNoteEditor/cardsHTML para 'left'|'right', un concepto
+   DISTINTO): esto es un "slot" ('secondary' o primario/undefined) —
+   qué COPIA del estado de edición usar, sin importar en qué lado de la
+   pantalla termine viviendo. eid(base, slot) resuelve el id de DOM
+   correcto según cuál slot se está generando/tocando. */
+let editingNoteId2 = null;
+let editingCornell2 = false;
+let _splitPrimarySide = null;  // 'left'|'right'|null — qué lado tiene la nota PRIMARIA abierta
+let _splitSecondarySide = null; // 'left'|'right'|null — qué lado tiene la SECUNDARIA abierta
+function eid(base, slot){ return slot==='secondary' ? base+'2' : base; }
+function slotEditingId(slot){ return slot==='secondary' ? editingNoteId2 : editingNoteId; }
+function setSlotEditingId(slot, id){ if(slot==='secondary') editingNoteId2=id; else editingNoteId=id; }
+/* Lado (izq/der) al que corresponde un slot ('secondary' o primario/
+   undefined) AHORA MISMO — para volver a pintar/cerrar el lado
+   correcto de Vista Dividida sin tener que pasarlo a mano por todas
+   partes. */
+function sideForSlot(slot){ return slot==='secondary' ? _splitSecondarySide : _splitPrimarySide; }
+function slotForSide(side){ if(side && side===_splitSecondarySide) return 'secondary'; return undefined; }
+/* Qué slot le toca a un LADO si se abre una nota ahí ahora mismo — SOLO
+   se llama en el instante de abrir (openNoteEditor/openNoteInSplitPane
+   se lo preguntan a esta MISMA función, nunca por su cuenta, para que
+   nunca puedan quedar desincronizados entre sí):
+   - Ese lado YA es el primario o el secundario → sigue siéndolo (solo
+     cambia de nota dentro del mismo slot).
+   - Nada primario todavía en ningún lado → este lado se vuelve el
+     primario (mismo comportamiento de siempre cuando solo hay una nota
+     abierta — ids sin sufijo, cero cambio de riesgo ahí).
+   - El OTRO lado ya es el primario → este se vuelve el secundario (acá
+     es donde de verdad quedan las DOS notas editables a la vez). */
+function determineSlotForSide(side){
+  if(side===_splitPrimarySide) return undefined;
+  if(side===_splitSecondarySide) return 'secondary';
+  if(!_splitPrimarySide) return undefined;
+  return 'secondary';
+}
 /* Asistente IA (2026-07-30, panel no-bloqueante con hilo de conversación):
    antes había 1 sola respuesta a la vez (aiLastResult/aiLastOriginal/
    aiLastMode, sobrescritos en cada petición) — ahora aiConversation
@@ -1761,7 +1825,7 @@ async function syncNow(manual){
   finally{ _syncing=false; updateSyncIndicator(); }
 }
 function isEditingActive(){
-  return !!document.getElementById('editorOverlay') || (currentView==='split' && !!_splitOpenSide);
+  return !!document.getElementById('editorOverlay') || (currentView==='split' && !!(_splitPrimarySide || _splitSecondarySide));
 }
 function updateSyncIndicator(){
   const dot = document.getElementById('syncDot'); const lbl = document.getElementById('syncLabel');
@@ -2448,10 +2512,10 @@ function renderTagFilterBar(){
 
 /* Banderas rápidas: si hay una nota abierta, marcan/quitan la etiqueta de
    esa nota; si no hay ninguna abierta, actúan como filtro rápido lateral. */
-function quickFlag(tag){
-  const mainEl = document.getElementById('mainArea');
+function quickFlag(tag, slot){
+  const mainEl = document.getElementById(eid('mainArea',slot));
   if(mainEl){
-    focusMainEditor();
+    focusMainEditor(slot);
     // se inserta como una "píldora" visible (mismo estilo que el resto
     // de la app) en vez de texto plano — pedido explícito: con mucho
     // texto alrededor, "#importante" como texto suelto se perdía de
@@ -2459,7 +2523,7 @@ function quickFlag(tag){
     // (stripHtmlToText lo lee igual), así que nada que ya dependa de
     // encontrar la etiqueta como texto dentro de la nota se rompe.
     document.execCommand('insertHTML', false, '<span class="tag-badge" style="border-color:'+tagColor(tag)+'">#'+escHtml(tag)+'</span>&nbsp;');
-    scheduleSave();
+    scheduleSave(slot);
     ensureTagsRegistered('#'+tag);
     showToast('Agregada #'+tag);
     return;
@@ -3251,7 +3315,6 @@ let splitRightQuery = localStorage.getItem('org_split_right_search') || '';
    un panel elegido como destino (splitTagTarget), ver ahí. */
 let splitLeftNotebook = localStorage.getItem('org_split_left_notebook') || '';
 let splitRightNotebook = localStorage.getItem('org_split_right_notebook') || '';
-let _splitOpenSide = null;
 /* El filtro de etiquetas del panel lateral (activeTagFilters) es UNA
    sola selección global — con dos listas independientes, aplicarlo
    siempre a ambas a la vez confundía ("busco en etiquetas y filtra en
@@ -3288,7 +3351,8 @@ function initSplitPaneSelectOnce(){
     if(leftEl && leftEl.contains(e.target)) side = 'left';
     else if(rightEl && rightEl.contains(e.target)) side = 'right';
     if(!side) return;
-    if(_splitOpenSide===side && editingNoteId) return; // nota abierta en este lado: el clic es para editar
+    // nota abierta en este lado (primaria o secundaria): el clic es para editar
+    if((side===_splitPrimarySide && editingNoteId) || (side===_splitSecondarySide && editingNoteId2)) return;
     if(splitTagTarget===side) return; // ya seleccionado: dejar pasar el clic normal
     e.stopPropagation();
     e.preventDefault();
@@ -3296,9 +3360,13 @@ function initSplitPaneSelectOnce(){
   }, true);
 }
 function splitPaneHTML(side){
-  if(_splitOpenSide===side && editingNoteId){
+  if(side===_splitPrimarySide && editingNoteId){
     const note = getNote(editingNoteId);
-    if(note) return `<button class="mini-btn" style="margin-bottom:8px" onclick="closeSplitPaneNote('${side}')">← volver a la lista</button>${editorInnerHTML(note, false)}`;
+    if(note) return editorInnerHTML(note, false, undefined, side);
+  }
+  if(side===_splitSecondarySide && editingNoteId2){
+    const note = getNote(editingNoteId2);
+    if(note) return editorInnerHTML(note, false, 'secondary', side);
   }
   const query = side==='left' ? splitLeftQuery : splitRightQuery;
   const applyTagFilters = splitTagTarget==='both' || splitTagTarget===side;
@@ -3320,20 +3388,32 @@ function renderSplitPane(side){
   const container = document.getElementById(side==='left' ? 'splitLeft' : 'splitRightPane');
   if(container) container.innerHTML = splitPaneHTML(side);
 }
+/* Pedido explícito: "por qué en vista dividida no puedo tener dos notas
+   abiertas al mismo tiempo? abro de lado derecho y me saca del lado
+   izquierdo aun cuando sean notas diferentes" — antes, abrir CUALQUIER
+   nota en un lado cerraba la del otro sin excepción (un solo
+   _splitOpenSide). Ahora: si ese lado ya es la primaria o la
+   secundaria, solo cambia de nota ahí (el otro lado ni se entera). Si
+   es un lado nuevo (mostrando su lista) Y no hay nada primario
+   todavía, se vuelve la primaria. Si el OTRO lado YA es la primaria,
+   este se vuelve la secundaria — ahí es donde de verdad quedan las DOS
+   notas editables (y autoguardándose) a la vez, cada una en su propio
+   lado, sin pisarse (ver determineSlotForSide arriba). */
 function openNoteInSplitPane(side, id, scrollToCue){
-  const otherSide = side==='left' ? 'right' : 'left';
-  const wasOpenOnOther = _splitOpenSide===otherSide;
-  _splitOpenSide = side; // fijarlo ANTES de repintar — si no, splitPaneHTML(otherSide) todavía se ve a sí mismo como "abierto" y no vuelve a la lista
-  if(wasOpenOnOther) renderSplitPane(otherSide);
+  const slot = determineSlotForSide(side);
+  if(slot===undefined) _splitPrimarySide = side; else _splitSecondarySide = side;
+  setSlotEditingId(slot, id);
   renderSplitPane(side);
   const note = getNote(id);
-  if(note) bindEditorEvents(note);
-  if(scrollToCue) scrollNoteToTag(scrollToCue);
+  if(note) bindEditorEvents(note, slot);
+  if(scrollToCue) scrollNoteToTag(scrollToCue, slot);
 }
 function closeSplitPaneNote(side){
-  if(editingNoteId) abandonEmptyDraftIfAny();
-  editingNoteId = null;
-  _splitOpenSide = null;
+  const slot = side===_splitSecondarySide ? 'secondary' : (side===_splitPrimarySide ? undefined : null);
+  if(slot===null) return; // no había nada abierto en este lado
+  if(slotEditingId(slot)) abandonEmptyDraftIfAny(slot);
+  setSlotEditingId(slot, null);
+  if(slot==='secondary') _splitSecondarySide = null; else _splitPrimarySide = null;
   renderSplitPane(side);
 }
 function onSplitSearchInput(side, val){
@@ -3380,14 +3460,17 @@ function newBlankNote(){
 /* Si la nota que se estaba editando se queda vacía (nunca se le puso
    título ni contenido) se descarta sola en vez de quedar como basura en
    la lista — cubre tanto "+ Nota" seguido de cerrar sin escribir, como
-   cambiar de nota en la vista dividida a media edición. */
-function abandonEmptyDraftIfAny(){
-  if(!editingNoteId) return;
-  const note = getNote(editingNoteId);
+   cambiar de nota en la vista dividida a media edición. slot: cuál
+   copia del estado de edición revisar (ver bloque de Vista Dividida
+   arriba) — undefined/sin mandar = la primaria de siempre. */
+function abandonEmptyDraftIfAny(slot){
+  const id = slotEditingId(slot);
+  if(!id) return;
+  const note = getNote(id);
   if(note && !note.Titulo.trim() && !stripHtmlToText(note.Contenido).trim()){
-    DATA.notas = DATA.notas.filter(n=>n.ID!==editingNoteId);
+    DATA.notas = DATA.notas.filter(n=>n.ID!==id);
     cacheData();
-    apiPost('deleteRow', { table:'NOTAS', id: editingNoteId });
+    apiPost('deleteRow', { table:'NOTAS', id });
   }
 }
 /* pane ('left'|'right') solo lo mandan los clics dentro de una de las
@@ -3395,7 +3478,10 @@ function abandonEmptyDraftIfAny(){
    timeLogChapterHTML, que reciben 'pane' según en cuál de las dos
    listas se dibujaron) — cualquier otro llamado (Cards/Tabla, Ajustes,
    Calendario, "+ Nota"...) lo deja undefined y sigue abriendo el modal
-   de siempre, sin cambios. */
+   de siempre, sin cambios. OJO: este "pane" es el LADO de la pantalla
+   ('left'/'right') — un concepto DISTINTO del "slot" (primaria/
+   secundaria, ver bloque de Vista Dividida arriba) que decide cuál
+   copia del estado de edición usa ese lado. */
 async function openNoteEditor(id, scrollToCue, pane){
   // Bloquea también el acceso INDIRECTO a una nota de un cuaderno con
   // contraseña (ej. un clic guardado de antes de ponerle candado) — no
@@ -3409,26 +3495,41 @@ async function openNoteEditor(id, scrollToCue, pane){
     }
   }
   // Cierra/guarda cualquier otro editor de nota que hubiera quedado
-  // vivo (minimizado, o abierto en el panel dividido) ANTES de tocar
-  // editingNoteId — si no, puede quedar más de un id="mainArea" a la
-  // vez y el guardado termina escribiendo en la nota equivocada.
+  // vivo (minimizado, o el modal) ANTES de tocar nada — si no, puede
+  // quedar más de un id="mainArea" a la vez y el guardado termina
+  // escribiendo en la nota equivocada. Si nos quedamos en Vista
+  // Dividida, las notas YA abiertas ahí (primaria y/o secundaria) NO
+  // se tocan — eso es justo lo que permite tener las dos a la vez.
   closeStaleEditingSurfaces();
+  if(currentView==='split'){
+    const side = pane || 'right';
+    const slot = determineSlotForSide(side);
+    const curId = slotEditingId(slot);
+    if(curId && curId!==id) abandonEmptyDraftIfAny(slot);
+    if(!id){
+      // Se le asigna ID y se registra localmente DE UNA VEZ (no hasta
+      // que se guarde algo) — así cualquier guardado parcial por
+      // blur/cierre de pestaña siempre apunta al mismo registro, en
+      // vez de que una condición de carrera cree dos notas.
+      const blank = newBlankNote();
+      blank.ID = uid();
+      DATA.notas.push(blank);
+      id = blank.ID;
+    }
+    openNoteInSplitPane(side, id, scrollToCue);
+    return;
+  }
   if(editingNoteId && editingNoteId!==id) abandonEmptyDraftIfAny();
   let note;
   if(id){
     editingNoteId = id;
     note = getNote(id);
   } else {
-    // Se le asigna ID y se registra localmente DE UNA VEZ (no hasta que se
-    // guarde algo) — así cualquier guardado parcial por blur/cierre de
-    // pestaña siempre apunta al mismo registro, en vez de que una
-    // condición de carrera cree dos notas (una vacía, otra con el texto).
     note = newBlankNote();
     note.ID = uid();
     DATA.notas.push(note);
     editingNoteId = note.ID;
   }
-  if(currentView==='split'){ openNoteInSplitPane(pane || 'right', note.ID, scrollToCue); return; }
   renderNoteModal(note, scrollToCue);
 }
 function renderNoteModal(note, scrollToCue){
@@ -3476,10 +3577,16 @@ function minimizeNoteEditor(){
    a mostrar el modal, si no quedan dos id="mainArea" a la vez. */
 function restoreNoteEditor(){
   const overlay = document.getElementById('editorOverlay'); if(!overlay) return;
-  if(_splitOpenSide){
-    const side = _splitOpenSide;
+  if(_splitPrimarySide){
+    const side = _splitPrimarySide;
     if(document.getElementById('mainArea')) doSaveNow();
-    _splitOpenSide = null;
+    _splitPrimarySide = null; editingNoteId = null;
+    renderSplitPane(side);
+  }
+  if(_splitSecondarySide){
+    const side = _splitSecondarySide;
+    if(document.getElementById('mainArea2')) doSaveNow('secondary');
+    _splitSecondarySide = null; editingNoteId2 = null;
     renderSplitPane(side);
   }
   if(_minimizedNoteId) editingNoteId = _minimizedNoteId;
@@ -3489,22 +3596,34 @@ function restoreNoteEditor(){
 }
 /* Punto único de limpieza antes de abrir CUALQUIER editor de nota
    (modal o panel dividido). editorInnerHTML() genera id="mainArea" en
-   ambos casos, y doSaveNow()/collectNoteFromForm() lo leen sin
-   distinguir cuál es cuál (document.getElementById se queda con el
-   primero en orden del DOM, sin relación con editingNoteId) — si
-   queda un editor minimizado o un panel dividido abierto de ANTES sin
+   el modal Y en el slot PRIMARIO de Vista Dividida (mismo id, a
+   propósito — ver bloque de Vista Dividida arriba), y doSaveNow()/
+   collectNoteFromForm() lo leen sin distinguir cuál es cuál
+   (document.getElementById se queda con el primero en orden del DOM)
+   — si queda un editor minimizado o el modal abierto de ANTES sin
    cerrar, el siguiente guardado puede escribir el contenido de una
    nota bajo el ID de otra, o duplicarla entera. Se guarda primero lo
    que hubiera (mismo par editingNoteId/#mainArea todavía válido en
-   ese instante) para no perder nada. */
+   ese instante) para no perder nada.
+   Las notas YA abiertas en Vista Dividida (primaria Y/O secundaria)
+   SOLO se cierran acá si estamos saliendo de Vista Dividida (yendo al
+   modal) — el modal reusa los ids SIN sufijo del slot primario, así
+   que sí chocarían. Si nos quedamos en Vista Dividida, se dejan
+   intactas — openNoteEditor decide por su cuenta en qué lado/slot
+   entra la nota nueva sin tocar la del otro lado. */
 function closeStaleEditingSurfaces(){
   if(document.getElementById('mainArea')) doSaveNow();
+  if(document.getElementById('mainArea2')) doSaveNow('secondary');
   const prevOverlay = document.getElementById('editorOverlay'); if(prevOverlay) prevOverlay.remove();
   const minChip = document.getElementById('editorMinChip'); if(minChip){ minChip.remove(); _minimizedNoteId = null; }
-  if(_splitOpenSide){
-    const side = _splitOpenSide;
-    _splitOpenSide = null;
-    renderSplitPane(side);
+  // OJO: NO se toca editingNoteId acá — openNoteEditor todavía lo
+  // necesita tal cual para su propio chequeo de "¿había un borrador
+  // vacío en la primaria?" justo después de esta llamada. La
+  // secundaria no tiene ese chequeo aparte río abajo, así que se
+  // resuelve acá mismo antes de soltarla.
+  if(currentView!=='split'){
+    if(_splitPrimarySide){ const side=_splitPrimarySide; _splitPrimarySide=null; renderSplitPane(side); }
+    if(_splitSecondarySide){ const side=_splitSecondarySide; abandonEmptyDraftIfAny('secondary'); _splitSecondarySide=null; editingNoteId2=null; renderSplitPane(side); }
   }
 }
 /* Salta directo a un campo/cue específico dentro de la nota que se
@@ -3512,9 +3631,9 @@ function closeStaleEditingSurfaces(){
    Cards) en vez de dejar que se busque a mano en una nota larga —
    busca la celda Cornell o el párrafo cuyo texto coincide exacto con
    ese cue, lo centra en la vista y lo resalta un momento. */
-function scrollNoteToTag(cue){
+function scrollNoteToTag(cue, slot){
   setTimeout(()=>{
-    const mainEl = document.getElementById('mainArea'); if(!mainEl) return;
+    const mainEl = document.getElementById(eid('mainArea',slot)); if(!mainEl) return;
     const needle = String(cue).trim().toLowerCase();
     const candidates = Array.from(mainEl.querySelectorAll('td.cornell-cue-cell, p, div'));
     const target = candidates.find(el => (el.textContent||'').trim().toLowerCase() === needle);
@@ -3606,7 +3725,6 @@ async function closeNoteEditor(){
   const minChip = document.getElementById('editorMinChip'); if(minChip) minChip.remove();
   abandonEmptyDraftIfAny();
   editingNoteId=null;
-  _splitOpenSide=null;
   renderMain();
 }
 /* Transcripción en vivo (Web Speech API — solo Chrome/Edge, Firefox/
@@ -3634,14 +3752,15 @@ let _transcribeTargetNoteId = null; // la nota donde se guarda — sigue siendo 
    uno (de esta nota o de otra que cerraste), lo restaura en vez de
    tocar el "escuchar/detener" — así no se detiene sin querer una
    transcripción en curso solo por abrir otra nota y tocar el ícono. */
-function openOrRestoreTranscribePanel(){
+function openOrRestoreTranscribePanel(slot){
   let panel = document.getElementById('transcribePanel');
   if(panel){
     if(panel.style.display==='none') restoreTranscribePanel();
     else bringToFront(panel);
     return;
   }
-  if(!editingNoteId) return;
+  const targetId = slotEditingId(slot);
+  if(!targetId) return;
   panel = document.createElement('div');
   panel.id = 'transcribePanel'; panel.className = 'transcribe-side-panel';
   panel.innerHTML = `
@@ -3667,7 +3786,7 @@ function openOrRestoreTranscribePanel(){
   document.body.appendChild(panel);
   bringToFront(panel);
   document.body.classList.add('has-transcribe-panel');
-  _transcribeTargetNoteId = editingNoteId;
+  _transcribeTargetNoteId = targetId;
 }
 function toggleTranscription(){
   if(_transcribing){ stopTranscription(); } else { startTranscription(); }
@@ -3735,12 +3854,17 @@ async function saveTranscriptionIntoCurrentNote(){
   // hizo nada y no había ninguna pista de por qué; ahora al menos avisan.
   const noteId = _transcribeTargetNoteId;
   if(!noteId){ showToast('No se pudo guardar: no hay una nota destino para esta transcripción'); return; }
-  const mainEl = document.getElementById('mainArea');
-  if(mainEl && editingNoteId===noteId){
+  // Si la nota destino está abierta (primaria O secundaria), hay que
+  // agregarse al DOM de ESE editor y guardar con SU slot — si no, el
+  // siguiente doSaveNow de ese editor lee su DOM (sin este texto) y lo
+  // guarda encima, borrando la transcripción recién agregada.
+  const slot = editingNoteId2===noteId ? 'secondary' : (editingNoteId===noteId ? undefined : null);
+  const mainEl = slot!==null ? document.getElementById(eid('mainArea',slot)) : null;
+  if(mainEl){
     const cueP = document.createElement('p'); cueP.innerHTML = '<b>#transcripcion</b>';
     mainEl.appendChild(cueP);
     text.split(/\n+/).forEach(line=>{ if(!line.trim()) return; const p=document.createElement('p'); p.textContent=line; mainEl.appendChild(p); });
-    await doSaveNow();
+    await doSaveNow(slot);
   } else {
     const note = getNote(noteId);
     if(!note){ showToast('No se pudo guardar: la nota destino ya no existe'); return; }
@@ -3831,16 +3955,16 @@ function updateTranscribeBtn(){
    usuario decide si quiere ver pocas o casi todas (antes se topaba en
    3 a la fuerza, quitado a pedido explícito). */
 const TOOLBAR_TOOLS = [
-  { key:'bold', icon:'<b>B</b>', title:'Negrita', action:"runCmd('bold')" },
-  { key:'italic', icon:'<i>I</i>', title:'Cursiva', action:"runCmd('italic')" },
-  { key:'underline', icon:'<u>S</u>', title:'Subrayado', action:"runCmd('underline')" },
-  { key:'strike', icon:'<s>S</s>', title:'Tachado', action:"runCmd('strikeThrough')" },
-  { key:'removeformat', icon:'✕', title:'Quitar formato (deja el texto plano — útil tras pegar algo con letra/fondo raros)', action:"runCmd('removeFormat')" },
+  { key:'bold', icon:'<b>B</b>', title:'Negrita', action:"runCmd('bold',null)" },
+  { key:'italic', icon:'<i>I</i>', title:'Cursiva', action:"runCmd('italic',null)" },
+  { key:'underline', icon:'<u>S</u>', title:'Subrayado', action:"runCmd('underline',null)" },
+  { key:'strike', icon:'<s>S</s>', title:'Tachado', action:"runCmd('strikeThrough',null)" },
+  { key:'removeformat', icon:'✕', title:'Quitar formato (deja el texto plano — útil tras pegar algo con letra/fondo raros)', action:"runCmd('removeFormat',null)" },
   { key:'fontsize', icon:'Aa', title:'Tamaño de letra', isSelect:true },
   { key:'h1', icon:'H1', title:'Título', action:"runCmd('formatBlock','H1')" },
   { key:'h2', icon:'H2', title:'Subtítulo', action:"runCmd('formatBlock','H2')" },
   { key:'quote', icon:'❝', title:'Cita', action:"runCmd('formatBlock','BLOCKQUOTE')" },
-  { key:'bullet', icon:'•', title:'Viñeta', action:"runCmd('insertUnorderedList')" },
+  { key:'bullet', icon:'•', title:'Viñeta', action:"runCmd('insertUnorderedList',null)" },
   { key:'check', icon:'☑', title:'Casilla', action:'insertChecklistItem()' },
   { key:'image', icon:'🖼️', title:'Imagen', action:'triggerImage()' },
   { key:'table', icon:'▦', title:'Insertar tabla', action:'insertRichTable()' },
@@ -3866,13 +3990,23 @@ function toolbarFlagTools(){
 function allToolbarPickableTools(){ return TOOLBAR_TOOLS.concat(toolbarFlagTools()); }
 function toolbarToolByKey(key){ return allToolbarPickableTools().find(t=>t.key===key) || null; }
 let toolbarFavs = (() => { try{ return JSON.parse(localStorage.getItem('org_toolbar_favs')) || ['bold','check','tag']; }catch(e){ return ['bold','check','tag']; } })();
-function toolbarFavButtonsHTML(){
+/* Mete el slot ('secondary', o nada para la primaria) como ÚLTIMO
+   argumento de un action string ya armado (ej. "runCmd('bold',null)"
+   → "runCmd('bold',null,'secondary')") — todas las entradas de
+   TOOLBAR_TOOLS/toolbarFlagTools están normalizadas a terminar en ")"
+   sin paréntesis anidados en los argumentos, así que este empalme
+   simple siempre cae en el lugar correcto. */
+function withSlotArg(actionStr, slot){
+  if(!slot || !actionStr.endsWith(')')) return actionStr;
+  return actionStr.endsWith('()') ? actionStr.slice(0,-1)+`'${slot}')` : actionStr.slice(0,-1)+`,'${slot}')`;
+}
+function toolbarFavButtonsHTML(slot){
   return toolbarFavs.map(key=>{
     const t = toolbarToolByKey(key); if(!t) return '';
-    if(t.isSelect) return `<select style="width:auto;padding:6px 4px;font-size:12px" onchange="setFontSize(this.value)" title="${escAttr(t.title)}">
+    if(t.isSelect) return `<select style="width:auto;padding:6px 4px;font-size:12px" onchange="setFontSize(this.value${slot?`,'${slot}'`:''})" title="${escAttr(t.title)}">
       <option value="">Tamaño</option><option value="2">Chico</option><option value="3">Normal</option><option value="5">Grande</option><option value="7">Enorme</option>
     </select>`;
-    return `<button class="icon-btn" onmousedown="event.preventDefault()" onclick="${t.action}" title="${escAttr(t.title)}"${t.color?` style="color:${escAttr(t.color)}"`:''}>${t.icon}</button>`;
+    return `<button class="icon-btn" onmousedown="event.preventDefault()" onclick="${withSlotArg(t.action,slot)}" title="${escAttr(t.title)}"${t.color?` style="color:${escAttr(t.color)}"`:''}>${t.icon}</button>`;
   }).join('');
 }
 function toggleToolbarExpanded(btn){
@@ -3923,61 +4057,73 @@ function saveToolbarFavs(){
   if(favRow) favRow.innerHTML = toolbarFavButtonsHTML() + `<button class="icon-btn" onclick="toggleToolbarExpanded(this)" title="Más herramientas">▾</button><button class="icon-btn" onclick="openToolbarFavPicker()" title="Elegir herramientas favoritas" style="font-size:12px">⭐</button>`;
   showToast('Favoritos actualizados');
 }
-function editorInnerHTML(note, isModal){
-  editingCornell = isCornellNote(note);
+/* slot: undefined/sin mandar = primaria (ids sin sufijo, comportamiento
+   IDÉNTICO a como era esto antes — modal y "un solo lado de Vista
+   Dividida abierto" pasan por acá). 'secondary' = ids con sufijo "2",
+   solo se usa cuando el otro lado de Vista Dividida YA tiene la
+   primaria abierta (ver bloque de Vista Dividida arriba). Cada botón
+   que actúa sobre "la nota que se está editando" lleva el slot metido
+   a mano en su propio onclick — más explícito y más seguro que
+   adivinarlo de dónde está el foco al momento del clic. */
+function editorInnerHTML(note, isModal, slot, backSide){
+  if(slot==='secondary') editingCornell2 = isCornellNote(note); else editingCornell = isCornellNote(note);
+  const cornellOn = slot==='secondary' ? editingCornell2 : editingCornell;
   ensureHtmlContent(note);
+  const s = slot ? `,'${slot}'` : ''; // sufijo listo para pegar en cualquier onclick(...) de aquí abajo
+  const sOnly = slot ? `'${slot}'` : ''; // igual, pero para cuando es el ÚNICO argumento
   const nbOptions = ['<option value="">— sin cuaderno —</option>'].concat(DATA.notebooks
     .filter(nb=>nb.Nombre!==MEJORAS_NOTEBOOK || note.Notebook===MEJORAS_NOTEBOOK)
     .map(nb=>`<option value="${escAttr(nb.Nombre)}" ${note.Notebook===nb.Nombre?'selected':''}>${escHtml(nb.Nombre)}</option>`)).join('');
-  return `
+  const head = `
+  ${backSide?`<button class="mini-btn" style="margin-bottom:8px" onclick="closeSplitPaneNote('${backSide}')">← volver a la lista</button>`:''}
   <div class="editor-top">
-    <input id="noteTitle" value="${escAttr(note.Titulo)}" placeholder="Título de la nota">
-    <button class="icon-btn ${editingCornell?'active':''}" onclick="toggleCornell()" title="Plantilla Cornell (tabla de 2 columnas)">📐</button>
+    <input id="${eid('noteTitle',slot)}" value="${escAttr(note.Titulo)}" placeholder="Título de la nota">
+    <button class="icon-btn ${cornellOn?'active':''}" onclick="toggleCornell(${sOnly})" title="Plantilla Cornell (tabla de 2 columnas)">📐</button>
     <!-- Escritorio: botones sueltos de siempre, sin menú ni pantalla completa. -->
-    <button class="icon-btn desktop-only" onclick="duplicateNoteUI()" title="Duplicar">📄</button>
-    <button class="icon-btn desktop-only" onclick="copyNoteUI()" title="Copiar texto">📋</button>
-    <button class="icon-btn desktop-only" onclick="exportNotePDF(editingNoteId)" title="Exportar PDF">🖨️</button>
-    <button class="icon-btn desktop-only" id="pinBtnDesktop" onclick="togglePin()" title="${note.Pinned?'Quitar fijado':'Fijar'}">${note.Pinned?'📍':'📌'}</button>
-    <button class="icon-btn desktop-only" onclick="deleteNoteUI(editingNoteId)" title="Eliminar">🗑️</button>
+    <button class="icon-btn desktop-only" onclick="duplicateNoteUI(${sOnly})" title="Duplicar">📄</button>
+    <button class="icon-btn desktop-only" onclick="copyNoteUI(${sOnly})" title="Copiar texto">📋</button>
+    <button class="icon-btn desktop-only" onclick="exportNotePDF(slotEditingId(${sOnly||'undefined'}))" title="Exportar PDF">🖨️</button>
+    <button class="icon-btn desktop-only" id="${eid('pinBtnDesktop',slot)}" onclick="togglePin(${sOnly})" title="${note.Pinned?'Quitar fijado':'Fijar'}">${note.Pinned?'📍':'📌'}</button>
+    <button class="icon-btn desktop-only" onclick="deleteNoteUI(slotEditingId(${sOnly||'undefined'})${s})" title="Eliminar">🗑️</button>
     <!-- Celular: se juntan en "⋮ más acciones" para no apretar el título,
          más un botón de pantalla completa (oculta la barra del navegador). -->
     <button class="icon-btn mobile-only" onclick="toggleEditorFullscreen(this)" title="Pantalla completa">⛶</button>
     <span class="mobile-only" style="position:relative">
       <button class="icon-btn" onclick="toggleEditorMoreMenu(this)" title="Más acciones">⋮</button>
       <div class="editor-more-menu hidden" style="position:absolute;top:100%;right:0;flex-direction:column;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);z-index:30;padding:4px;gap:2px;display:flex">
-        <button class="icon-btn" onclick="duplicateNoteUI()" style="justify-content:flex-start">📄 Duplicar</button>
-        <button class="icon-btn" onclick="copyNoteUI()" style="justify-content:flex-start">📋 Copiar texto</button>
-        <button class="icon-btn" onclick="exportNotePDF(editingNoteId)" style="justify-content:flex-start">🖨️ Exportar PDF</button>
-        <button class="icon-btn" id="pinBtnMobile" onclick="togglePin()" style="justify-content:flex-start">${note.Pinned?'📍 Fijado':'📌 Fijar'}</button>
-        <button class="icon-btn" onclick="deleteNoteUI(editingNoteId)" style="justify-content:flex-start">🗑️ Eliminar</button>
+        <button class="icon-btn" onclick="duplicateNoteUI(${sOnly})" style="justify-content:flex-start">📄 Duplicar</button>
+        <button class="icon-btn" onclick="copyNoteUI(${sOnly})" style="justify-content:flex-start">📋 Copiar texto</button>
+        <button class="icon-btn" onclick="exportNotePDF(slotEditingId(${sOnly||'undefined'}))" style="justify-content:flex-start">🖨️ Exportar PDF</button>
+        <button class="icon-btn" id="${eid('pinBtnMobile',slot)}" onclick="togglePin(${sOnly})" style="justify-content:flex-start">${note.Pinned?'📍 Fijado':'📌 Fijar'}</button>
+        <button class="icon-btn" onclick="deleteNoteUI(slotEditingId(${sOnly||'undefined'})${s})" style="justify-content:flex-start">🗑️ Eliminar</button>
       </div>
     </span>
     ${isModal?'<button class="icon-btn" onclick="minimizeNoteEditor()" title="Minimizar — sigue editándose, solo se esconde">🗕</button><button class="icon-btn" onclick="closeNoteEditor()" title="Cerrar">✕</button>':''}
   </div>
   <div class="editor-meta">
-    <select id="noteNotebook">${nbOptions}</select>
-    <div id="tagsInputWrap">
-      <input type="text" id="noteTags" value="${escAttr(note.Tags)}" placeholder="#etiquetas separadas por espacio">
+    <select id="${eid('noteNotebook',slot)}">${nbOptions}</select>
+    <div id="${eid('tagsInputWrap',slot)}">
+      <input type="text" id="${eid('noteTags',slot)}" value="${escAttr(note.Tags)}" placeholder="#etiquetas separadas por espacio">
     </div>
-    <input type="color" id="noteColor" value="${note.Color||'#8a5a3b'}" title="Color de la nota">
-    <input type="datetime-local" id="noteFecha" value="${toDatetimeLocal(new Date(note.Fecha))}" title="Fecha de la nota — con esta se ubica en Calendario, así que una tarea con fecha futura aparece ese día" style="width:auto">
-    <button class="icon-btn" onclick="pickFilesForNote()" title="Vincular archivo(s)">📎</button>
-    <button class="icon-btn" onclick="pickFolderForNote()" title="Vincular carpeta">📁</button>
-    <button class="icon-btn" id="fileChipToggleBtn" onclick="toggleFileChips(this)" title="Ocultar archivos vinculados" style="${getNoteLinks(note).length?'':'display:none'}">▾</button>
+    <input type="color" id="${eid('noteColor',slot)}" value="${note.Color||'#8a5a3b'}" title="Color de la nota">
+    <input type="datetime-local" id="${eid('noteFecha',slot)}" value="${toDatetimeLocal(new Date(note.Fecha))}" title="Fecha de la nota — con esta se ubica en Calendario, así que una tarea con fecha futura aparece ese día" style="width:auto">
+    <button class="icon-btn" onclick="pickFilesForNote(${sOnly})" title="Vincular archivo(s)">📎</button>
+    <button class="icon-btn" onclick="pickFolderForNote(${sOnly})" title="Vincular carpeta">📁</button>
+    <button class="icon-btn" id="${eid('fileChipToggleBtn',slot)}" onclick="toggleFileChips(this${s})" title="Ocultar archivos vinculados" style="${getNoteLinks(note).length?'':'display:none'}">▾</button>
   </div>
-  <div class="editor-meta" id="fileChipWrap" style="flex-wrap:wrap">${linksChipsHTML(getNoteLinks(note))}</div>
+  <div class="editor-meta" id="${eid('fileChipWrap',slot)}" style="flex-wrap:wrap">${linksChipsHTML(getNoteLinks(note), slot)}</div>
   <div class="editor-toolbar-fav">
-    ${toolbarFavButtonsHTML()}
+    ${toolbarFavButtonsHTML(slot)}
     <button class="icon-btn" onclick="toggleToolbarExpanded(this)" title="Más herramientas">▾</button>
     <button class="icon-btn" onclick="openToolbarFavPicker()" title="Elegir herramientas favoritas" style="font-size:12px">⭐</button>
   </div>
   <div class="editor-toolbar hidden">
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('bold')" title="Negrita"><b>B</b></button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('italic')" title="Cursiva"><i>I</i></button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('underline')" title="Subrayado"><u>S</u></button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('strikeThrough')" title="Tachado"><s>S</s></button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('removeFormat')" title="Quitar formato (deja el texto plano — útil tras pegar algo con letra/fondo raros)">✕</button>
-    <select id="fontSizeSelect" style="width:auto;padding:6px 4px" onchange="setFontSize(this.value)" title="Tamaño de letra">
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('bold',null${s})" title="Negrita"><b>B</b></button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('italic',null${s})" title="Cursiva"><i>I</i></button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('underline',null${s})" title="Subrayado"><u>S</u></button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('strikeThrough',null${s})" title="Tachado"><s>S</s></button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('removeFormat',null${s})" title="Quitar formato (deja el texto plano — útil tras pegar algo con letra/fondo raros)">✕</button>
+    <select id="${eid('fontSizeSelect',slot)}" style="width:auto;padding:6px 4px" onchange="setFontSize(this.value${s})" title="Tamaño de letra">
       <option value="">Tamaño</option>
       <option value="2">Chico</option>
       <option value="3">Normal</option>
@@ -3985,70 +4131,83 @@ function editorInnerHTML(note, isModal){
       <option value="7">Enorme</option>
     </select>
     <span class="sep"></span>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','H1')" title="Título">H1</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','H2')" title="Subtítulo">H2</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','BLOCKQUOTE')" title="Cita">❝</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('insertUnorderedList')" title="Viñeta">•</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertChecklistItem()" title="Casilla">☑</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','H1'${s})" title="Título">H1</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','H2'${s})" title="Subtítulo">H2</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('formatBlock','BLOCKQUOTE'${s})" title="Cita">❝</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runCmd('insertUnorderedList',null${s})" title="Viñeta">•</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertChecklistItem(${sOnly})" title="Casilla">☑</button>
     <span class="sep"></span>
     <span style="position:relative;display:inline-flex">
-      <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertRichTable()" title="Insertar tabla">▦</button>
-      <button class="icon-btn" onmousedown="event.preventDefault()" onclick="toggleTableMenu()" title="Filas y columnas de la tabla" style="padding:7px 3px">▾</button>
-      <div id="tableMenu" class="swatch-row hidden" style="position:absolute;top:100%;left:0;flex-direction:column;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);z-index:30;padding:4px;gap:2px">
-        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableAddRow)" style="justify-content:flex-start">⊞▤ + fila</button>
-        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableAddCol)" style="justify-content:flex-start">⊞▥ + columna</button>
-        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableDelRow)" style="justify-content:flex-start">⊟▤ − fila</button>
-        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableDelCol)" style="justify-content:flex-start">⊟▥ − columna</button>
+      <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertRichTable(${sOnly})" title="Insertar tabla">▦</button>
+      <button class="icon-btn" onmousedown="event.preventDefault()" onclick="toggleTableMenu(this)" title="Filas y columnas de la tabla" style="padding:7px 3px">▾</button>
+      <div id="${eid('tableMenu',slot)}" class="swatch-row hidden" style="position:absolute;top:100%;left:0;flex-direction:column;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);z-index:30;padding:4px;gap:2px">
+        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableAddRow${s})" style="justify-content:flex-start">⊞▤ + fila</button>
+        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableAddCol${s})" style="justify-content:flex-start">⊞▥ + columna</button>
+        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableDelRow${s})" style="justify-content:flex-start">⊟▤ − fila</button>
+        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(tableDelCol${s})" style="justify-content:flex-start">⊟▥ − columna</button>
         <span style="border-top:1px solid var(--border);margin:2px 0"></span>
-        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(insertGridTable)" title="Tabla donde el encabezado de cada fila y columna se vuelve etiqueta sola de cada celda" style="justify-content:flex-start">🏷️▦ Tabla de etiquetas</button>
+        <button class="icon-btn" onmousedown="event.preventDefault()" onclick="runTableAction(insertGridTable${s})" title="Tabla donde el encabezado de cada fila y columna se vuelve etiqueta sola de cada celda" style="justify-content:flex-start">🏷️▦ Tabla de etiquetas</button>
       </div>
     </span>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="triggerImage()" title="Imagen (también puedes pegar con Ctrl+V, o insertar OCR) — se puede agrandar/achicar jalando la esquina">🖼️</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openFieldTemplatePicker()" title="Insertar plantilla de campos (#campo + valor)">🏷️</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="sendSelectionToDic()" title="Mandar palabra/frase seleccionada al diccionario">📖</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="searchSelectionExternal('google')" title="Buscar en Google lo que tienes seleccionado (abre en otra pestaña)">🔎</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="searchSelectionExternal('youtube')" title="Buscar en YouTube lo que tienes seleccionado (abre en otra pestaña)">▶️</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertTimestamp()" title="Insertar fecha y hora (para notas de captura rápida)">🕐</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertHashAndSuggest()" title="Insertar # aquí y mostrar sugerencias de etiquetas ya usadas">#</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="triggerImage(${sOnly})" title="Imagen (también puedes pegar con Ctrl+V, o insertar OCR) — se puede agrandar/achicar jalando la esquina">🖼️</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openFieldTemplatePicker(${sOnly})" title="Insertar plantilla de campos (#campo + valor)">🏷️</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="sendSelectionToDic(${sOnly})" title="Mandar palabra/frase seleccionada al diccionario">📖</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="searchSelectionExternal('google'${s})" title="Buscar en Google lo que tienes seleccionado (abre en otra pestaña)">🔎</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="searchSelectionExternal('youtube'${s})" title="Buscar en YouTube lo que tienes seleccionado (abre en otra pestaña)">▶️</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertTimestamp(${sOnly})" title="Insertar fecha y hora (para notas de captura rápida)">🕐</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="insertHashAndSuggest(${sOnly})" title="Insertar # aquí y mostrar sugerencias de etiquetas ya usadas">#</button>
     <span class="sep"></span>
-    <button class="icon-btn" id="btnMark" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark')" title="Resaltar (toca de nuevo el mismo color para quitarlo)">🖍️</button>
-    <button class="icon-btn" id="btnColor" onmousedown="event.preventDefault()" onclick="toggleSwatches('color')" title="Color de texto">🎨</button>
+    <button class="icon-btn" id="${eid('btnMark',slot)}" onmousedown="event.preventDefault()" onclick="toggleSwatches('mark'${s})" title="Resaltar (toca de nuevo el mismo color para quitarlo)">🖍️</button>
+    <button class="icon-btn" id="${eid('btnColor',slot)}" onmousedown="event.preventDefault()" onclick="toggleSwatches('color'${s})" title="Color de texto">🎨</button>
     <span class="sep"></span>
     <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openAIDrawer()" title="Asistente IA">✨</button>
-    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openOrRestoreTranscribePanel()" title="Transcribir — panel a la derecha, sigue grabando aunque cierres esta nota (Chrome/Edge)">🎙️</button>
+    <button class="icon-btn" onmousedown="event.preventDefault()" onclick="openOrRestoreTranscribePanel(${sOnly})" title="Transcribir — panel a la derecha, sigue grabando aunque cierres esta nota (Chrome/Edge)">🎙️</button>
     <span class="sep"></span>
-    ${allFlags().map(([t,emoji,label,color])=>`<button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('${t}')" title="Insertar #${escAttr(t)} (${escAttr(label)}) aquí donde está el cursor" style="color:${color}">${emoji}</button>`).join('')}
-    <input type="file" id="imgFileInput" accept="image/*" class="hidden" onchange="handleImageFile(event)">
+    ${allFlags().map(([t,emoji,label,color])=>`<button class="icon-btn" onmousedown="event.preventDefault()" onclick="quickFlag('${t}'${s})" title="Insertar #${escAttr(t)} (${escAttr(label)}) aquí donde está el cursor" style="color:${color}">${emoji}</button>`).join('')}
+    <input type="file" id="${eid('imgFileInput',slot)}" accept="image/*" class="hidden" onchange="handleImageFile(event${s})">
   </div>
-  <div id="swatchBar" class="swatch-row hidden"></div>
-  <div id="routeHints" class="hidden"></div>
-  ${editingCornell ? '<div class="cornell-bar"><span class="desktop-only">📐 Modo Cornell — cada fila: columna izq. = pista/palabra clave, columna der. = desarrollo</span><span class="mobile-only">📐 Modo Cornell</span> <button class="mini-btn" style="width:auto" onclick="addCornellRowDirect()">+ agregar fila</button></div>' : ''}
-  <div class="editor-body" id="editorBody">
-    <div id="mainArea" class="rich-editor" contenteditable="true" data-placeholder="Escribe aquí…">${note.Contenido||''}</div>
+  <div id="${eid('swatchBar',slot)}" class="swatch-row hidden"></div>
+  <div id="${eid('routeHints',slot)}" class="hidden"></div>
+  ${cornellOn ? '<div class="cornell-bar"><span class="desktop-only">📐 Modo Cornell — cada fila: columna izq. = pista/palabra clave, columna der. = desarrollo</span><span class="mobile-only">📐 Modo Cornell</span> <button class="mini-btn" style="width:auto" onclick="addCornellRowDirect('+(sOnly||'undefined')+')">+ agregar fila</button></div>' : ''}`;
+  const body = `
+  <div class="editor-body" id="${eid('editorBody',slot)}">
+    <div id="${eid('mainArea',slot)}" class="rich-editor" contenteditable="true" data-placeholder="Escribe aquí…">${note.Contenido||''}</div>
   </div>
   <div class="editor-bottom">
-    <span><span id="saveStatus">Guardado ${fmtTime(new Date())}</span> <button class="icon-btn" style="padding:2px 6px" onmousedown="event.preventDefault()" onclick="doSaveNow()" title="Guardar ahora (por si no se guardó solo)">💾</button></span>
+    <span><span id="${eid('saveStatus',slot)}">Guardado ${fmtTime(new Date())}</span> <button class="icon-btn" style="padding:2px 6px" onmousedown="event.preventDefault()" onclick="doSaveNow(${sOnly})" title="Guardar ahora (por si no se guardó solo)">💾</button></span>
     <span>${fmtDate(note.Fecha)}${note.FechaEdicion?(' · editado '+fmtDate(note.FechaEdicion)):''}</span>
   </div>`;
+  // En Vista Dividida el panel entero (.split-left/.split-right) es el
+  // que hace scroll (no un contenedor interno con altura fija como en
+  // el modal) — sin esto, título/negrita/Cornell etc. se iban de la
+  // vista al escribir un texto largo. Pedido explícito: "que la nota
+  // abierta bloquee lo de arriba... para que si voy escribiendo no se
+  // pierda, como lo hace la vista desplegada". El modal (isModal=true)
+  // no lo necesita: ahí YA no se pierde nada porque #editorPanel tiene
+  // altura fija y es el <div class="rich-editor"> el que hace scroll
+  // por dentro, no el panel completo.
+  return backSide ? `<div class="split-editor-sticky-head">${head}</div>${body}` : head+body;
 }
-function togglePin(){
-  const note = editingNoteId?getNote(editingNoteId):null;
+function togglePin(slot){
+  const id = slotEditingId(slot);
+  const note = id?getNote(id):null;
   if(!note){ showToast('Guarda la nota primero'); return; }
   note.Pinned = note.Pinned?'':'1';
-  persistCurrentNote(note); showToast(note.Pinned?'📌 Fijada':'Ya no está fijada');
+  persistCurrentNote(note, undefined, slot); showToast(note.Pinned?'📌 Fijada':'Ya no está fijada');
   // Pedido explícito: que 📌 Fijar/📍 Fijado cambien al instante, sin
   // tener que cerrar y volver a abrir la nota para ver el nuevo estado.
-  const dBtn = document.getElementById('pinBtnDesktop');
+  const dBtn = document.getElementById(eid('pinBtnDesktop',slot));
   if(dBtn){ dBtn.textContent = note.Pinned?'📍':'📌'; dBtn.title = note.Pinned?'Quitar fijado':'Fijar'; }
-  const mBtn = document.getElementById('pinBtnMobile');
+  const mBtn = document.getElementById(eid('pinBtnMobile',slot));
   if(mBtn) mBtn.textContent = note.Pinned?'📍 Fijado':'📌 Fijar';
 }
-function toggleCornell(){
-  const note = collectNoteFromForm();
-  const mainEl = document.getElementById('mainArea');
+function toggleCornell(slot){
+  const note = collectNoteFromForm(slot);
+  const mainEl = document.getElementById(eid('mainArea',slot));
   const currentHTML = mainEl ? mainEl.innerHTML : (note.Contenido||'');
   const pairs = extractFieldPairs(note); // lee lo que ya haya, sea tabla o párrafos
-  if(editingCornell){
+  const wasCornell = slot==='secondary' ? editingCornell2 : editingCornell;
+  if(wasCornell){
     // apagar: cada fila se vuelve dos párrafos seguidos — cue (marcado con
     // la clase "cf-cue" para que se reconozca como inicio de fila aunque
     // no sea un "#campo") y su valor. Así ninguna fila se pierde ni se
@@ -4067,38 +4226,47 @@ function toggleCornell(){
     ).join('') + '</table>';
     note.Cornell='1';
   }
-  persistAndReopen(note);
+  persistAndReopen(note, undefined, slot);
 }
-function reopenEditorFor(note){
-  if(currentView==='split' && _splitOpenSide){ renderSplitPane(_splitOpenSide); bindEditorEvents(note); return; }
+/* slot indica DÓNDE reabrir: si le corresponde un lado de Vista
+   Dividida (sideForSlot), ahí — sin importar si además hay un modal
+   abierto en paralelo (ya no es excluyente). Si no, es el modal de
+   siempre (o no hace nada si ni eso — nunca debería pasar en la
+   práctica, pero mejor que tronar). */
+function reopenEditorFor(note, slot){
+  const side = sideForSlot(slot);
+  if(currentView==='split' && side){ renderSplitPane(side); bindEditorEvents(note, slot); return; }
+  if(slot==='secondary') return; // la secundaria solo existe dentro de Vista Dividida
   const panel = document.getElementById('editorPanel');
   if(panel){ panel.innerHTML = editorInnerHTML(note,true); bindEditorEvents(note); }
 }
-/* reopenEditorFor reemplaza el <div id="mainArea"> por uno nuevo YA — no
-   se espera a que el guardado de red termine, para que el cambio se vea
-   al toque. Pero eso significa que el mainArea VIEJO (si tenía el foco,
-   lo normal mientras se edita) pierde el foco al ser reemplazado —
-   dispara un 'blur' SINCRÓNICO ahí mismo, y su listener (puesto por el
-   bindEditorEvents de ANTES de este cambio) llama a doSaveNow(). Bug
-   real confirmado con captura de pila (reportado desde el modo Cornell,
-   pero el patrón "persistCurrentNote(note); reopenEditorFor(note);" sin
-   este candado es la causa, no algo específico de Cornell): en ese
-   instante exacto document.getElementById('mainArea') todavía
-   encontraba el DOM VIEJO (pre-cambio) — ese autoguardado atrapado por
-   el blur volvía a guardar el contenido VIEJO justo ENCIMA del que este
-   mismo cambio acababa de guardar un instante antes, en la misma ráfaga
+/* reopenEditorFor reemplaza el <div id="mainArea"> (o "mainArea2" para
+   la secundaria) por uno nuevo YA — no se espera a que el guardado de
+   red termine, para que el cambio se vea al toque. Pero eso significa
+   que el mainArea VIEJO (si tenía el foco, lo normal mientras se
+   edita) pierde el foco al ser reemplazado — dispara un 'blur'
+   SINCRÓNICO ahí mismo, y su listener (puesto por el bindEditorEvents
+   de ANTES de este cambio) llama a doSaveNow(). Bug real confirmado
+   con captura de pila (reportado desde el modo Cornell, pero el
+   patrón "persistCurrentNote(note); reopenEditorFor(note);" sin este
+   candado es la causa, no algo específico de Cornell): en ese instante
+   exacto document.getElementById('mainArea') todavía encontraba el
+   DOM VIEJO (pre-cambio) — ese autoguardado atrapado por el blur
+   volvía a guardar el contenido VIEJO justo ENCIMA del que este mismo
+   cambio acababa de guardar un instante antes, en la misma ráfaga
    síncrona — el cambio "no hacía nada" (o, con contenido roto de un
    pegado previo, se veía como que el contenido "desaparecía"). Usar
    siempre esta función (no persistCurrentNote+reopenEditorFor sueltos)
    para cualquier acción que reconstruye el editor tras guardar —
-   _saveInFlight (mismo candado que ya sirve para desincronizar
-   guardados encimados, ver doSaveNow) hace que ESE doSaveNow espere a
-   que termine este guardado — y reintente después, ya con el DOM nuevo
-   — en vez de competir con él. */
-function persistAndReopen(note, expectedFecha){
-  _saveInFlight = persistCurrentNote(note, expectedFecha);
-  _saveInFlight.finally(()=>{ _saveInFlight = null; });
-  reopenEditorFor(note);
+   _saveInFlight (mismo candado POR SLOT que ya sirve para
+   desincronizar guardados encimados, ver doSaveNow) hace que ESE
+   doSaveNow espere a que termine este guardado — y reintente después,
+   ya con el DOM nuevo — en vez de competir con él. */
+function persistAndReopen(note, expectedFecha, slot){
+  const key = slot==='secondary'?'secondary':'primary';
+  _saveInFlight[key] = persistCurrentNote(note, expectedFecha, slot);
+  _saveInFlight[key].finally(()=>{ _saveInFlight[key] = null; });
+  reopenEditorFor(note, slot);
 }
 /* Migra notas viejas guardadas como Markdown/texto plano a HTML la primera
    vez que se abren — la app ahora edita y guarda HTML directamente. */
@@ -4158,43 +4326,51 @@ function normalizeContentHTML(html){
    qué hace que la nota desaparezca de DATA.notas en primer lugar (ver
    isEditingActive()/closeStaleEditingSurfaces()), pero esto corta la
    cascada de duplicados sin importar la causa. */
-function collectNoteFromForm(){
+function collectNoteFromForm(slot){
   let base;
-  if(editingNoteId){
-    const existing = getNote(editingNoteId);
+  const curId = slotEditingId(slot);
+  if(curId){
+    const existing = getNote(curId);
     if(existing) base = Object.assign({}, existing);
     else {
-      console.warn('[Organizador] La nota que se estaba editando (ID '+editingNoteId+') ya no estaba en DATA.notas — se reconstruye con el mismo ID en vez de crear una nueva.');
-      base = Object.assign(newBlankNote(), { ID: editingNoteId });
+      console.warn('[Organizador] La nota que se estaba editando (ID '+curId+') ya no estaba en DATA.notas — se reconstruye con el mismo ID en vez de crear una nueva.');
+      base = Object.assign(newBlankNote(), { ID: curId });
     }
   } else {
     base = newBlankNote();
   }
-  const titleEl = document.getElementById('noteTitle');
+  const titleEl = document.getElementById(eid('noteTitle',slot));
   if(titleEl) base.Titulo = titleEl.value;
-  const nbEl = document.getElementById('noteNotebook');
+  const nbEl = document.getElementById(eid('noteNotebook',slot));
   if(nbEl) base.Notebook = nbEl.value;
-  const tagsEl = document.getElementById('noteTags');
+  const tagsEl = document.getElementById(eid('noteTags',slot));
   if(tagsEl) base.Tags = tagsEl.value;
-  const colorEl = document.getElementById('noteColor');
+  const colorEl = document.getElementById(eid('noteColor',slot));
   if(colorEl) base.Color = colorEl.value;
-  const fechaEl = document.getElementById('noteFecha');
+  const fechaEl = document.getElementById(eid('noteFecha',slot));
   if(fechaEl && fechaEl.value){ const d=new Date(fechaEl.value); if(!isNaN(d)) base.Fecha = d.toISOString(); }
-  const mainEl = document.getElementById('mainArea');
+  const mainEl = document.getElementById(eid('mainArea',slot));
   if(mainEl) base.Contenido = normalizeContentHTML(mainEl.innerHTML);
   return base;
 }
-let _saveDebounce=null;
-function scheduleSave(){
-  const st = document.getElementById('saveStatus'); if(st) st.textContent='Guardando…';
-  clearTimeout(_saveDebounce);
-  _saveDebounce = setTimeout(doSaveNow, 500);
+// Un timer de debounce y un candado de guardado POR slot (ver bloque de
+// arriba sobre Vista Dividida) — si compartieran uno solo, escribir en
+// los dos lados a la vez haría que cada tecleo en cualquiera reiniciara
+// el MISMO timer, y el guardado de un lado esperaría sin necesidad al
+// del otro (nota totalmente distinta) — falsa dependencia, no
+// corrompe nada pero se sentiría trabado sin razón.
+let _saveDebounce={primary:null,secondary:null};
+function scheduleSave(slot){
+  const st = document.getElementById(eid('saveStatus',slot)); if(st) st.textContent='Guardando…';
+  const key = slot==='secondary'?'secondary':'primary';
+  clearTimeout(_saveDebounce[key]);
+  _saveDebounce[key] = setTimeout(()=>doSaveNow(slot), 500);
 }
 /* Se pausa el autoguardado mientras el modal de conflicto está abierto
    — si no, un siguiente tick del debounce podría reintentar guardar
    con la MISMA base vieja y volver a chocar en bucle antes de que la
    persona alcance a elegir qué hacer. */
-let _noteConflictOpen = false;
+let _noteConflictOpen = {primary:false,secondary:false};
 /* Bug real reportado: "me sale el modal de conflicto aun cuando SOLO la
    estoy usando en la computadora" — pasaba sin ningún otro dispositivo
    de por medio. Causa: doSaveNow() no tenía ningún candado contra sí
@@ -4211,34 +4387,39 @@ let _noteConflictOpen = false;
    sin ningún otro dispositivo real involucrado. _saveInFlight serializa:
    si ya hay un guardado en camino, este llamado espera a que termine (y
    entonces reintenta, por si quedó algo más nuevo que guardar) en vez
-   de mandar un segundo request en paralelo. */
-let _saveInFlight = null;
-async function doSaveNow(){
-  clearTimeout(_saveDebounce);
-  if(!document.getElementById('mainArea')) return; // no hay editor abierto
-  if(_noteConflictOpen) return;
-  if(_saveInFlight){ await _saveInFlight.catch(()=>{}); return doSaveNow(); }
-  const note = collectNoteFromForm();
+   de mandar un segundo request en paralelo. Un candado POR slot —
+   compartir uno solo entre las dos notas de Vista Dividida haría que
+   guardar la del lado A bloqueara innecesariamente el guardado de la
+   del lado B, notas totalmente distintas sin relación entre sí. */
+let _saveInFlight = {primary:null,secondary:null};
+async function doSaveNow(slot){
+  const key = slot==='secondary'?'secondary':'primary';
+  clearTimeout(_saveDebounce[key]);
+  if(!document.getElementById(eid('mainArea',slot))) return; // no hay editor abierto en este slot
+  if(_noteConflictOpen[key]) return;
+  if(_saveInFlight[key]){ await _saveInFlight[key].catch(()=>{}); return doSaveNow(slot); }
+  const note = collectNoteFromForm(slot);
   // Lo que este dispositivo cree que hay en el servidor ahorita mismo:
   // la FechaEdicion que él mismo escribió la última vez (o la de
   // creación, si nunca se ha guardado). Si al llegar al servidor esa
   // fecha ya no coincide, alguien más la cambió mientras tanto.
   const expectedFecha = note.FechaEdicion;
   note.FechaEdicion = new Date().toISOString();
-  _saveInFlight = persistCurrentNote(note, expectedFecha);
+  _saveInFlight[key] = persistCurrentNote(note, expectedFecha, slot);
   let result;
-  try{ result = await _saveInFlight; } finally { _saveInFlight = null; }
+  try{ result = await _saveInFlight[key]; } finally { _saveInFlight[key] = null; }
   if(result && result.conflict) return; // el modal de conflicto ya se encargó de avisar
-  const st2 = document.getElementById('saveStatus'); if(st2) st2.textContent='Guardado '+fmtTime(new Date());
+  const st2 = document.getElementById(eid('saveStatus',slot)); if(st2) st2.textContent='Guardado '+fmtTime(new Date());
 }
 /* Guarda YA (sin esperar el debounce de 500ms) cuando la pestaña se oculta,
    se cierra, o el navegador la suspende — si no, hasta medio segundo de
    lo último escrito se podía perder si "el tiempo" coincidía justo con el
-   apagado de la pestaña/pérdida de foco. */
-document.addEventListener('visibilitychange', ()=>{ if(document.hidden) doSaveNow(); });
-window.addEventListener('pagehide', doSaveNow);
-window.addEventListener('beforeunload', doSaveNow);
-async function persistCurrentNote(note, expectedFecha){
+   apagado de la pestaña/pérdida de foco. Los dos slots, por si el
+   secundario también tiene algo sin guardar. */
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden){ doSaveNow(); doSaveNow('secondary'); } });
+window.addEventListener('pagehide', ()=>{ doSaveNow(); doSaveNow('secondary'); });
+window.addEventListener('beforeunload', ()=>{ doSaveNow(); doSaveNow('secondary'); });
+async function persistCurrentNote(note, expectedFecha, slot){
   autoRouteNotebook(note);
   const originalId = note.ID;
   const saved = await saveEntity('NOTAS', note, expectedFecha);
@@ -4248,9 +4429,9 @@ async function persistCurrentNote(note, expectedFecha){
   // editingNoteId de vuelta a ella (o abre un modal de conflicto) por
   // encima de la nota NUEVA que ya está en pantalla — causa real
   // confirmada de contenido guardado bajo el ID equivocado.
-  const stillEditingThisNote = editingNoteId===originalId;
-  if(saved && saved.conflict){ if(stillEditingThisNote) openNoteConflictModal(saved.attempted, saved.currentRow); return saved; }
-  if(stillEditingThisNote) editingNoteId = saved.ID;
+  const stillEditingThisNote = slotEditingId(slot)===originalId;
+  if(saved && saved.conflict){ if(stillEditingThisNote) openNoteConflictModal(saved.attempted, saved.currentRow, false, slot); return saved; }
+  if(stillEditingThisNote) setSlotEditingId(slot, saved.ID);
   ensureTagsRegistered(effectiveTags(saved).join(' '));
   renderSidebar();
   if(currentView!=='table'){ /* keep list roughly fresh without losing focus */ }
@@ -4280,12 +4461,12 @@ function toggleConflictPreview(side){
   if(!window._conflictExpanded) window._conflictExpanded = { local:false, server:false };
   window._conflictExpanded[side] = !window._conflictExpanded[side];
   const ctx = window._pendingNoteConflict; if(!ctx) return;
-  openNoteConflictModal(ctx.attempted, ctx.currentRow, true);
+  openNoteConflictModal(ctx.attempted, ctx.currentRow, true, ctx.slot);
 }
-function openNoteConflictModal(attempted, currentRow, preserveExpand){
-  _noteConflictOpen = true;
+function openNoteConflictModal(attempted, currentRow, preserveExpand, slot){
+  _noteConflictOpen[slot==='secondary'?'secondary':'primary'] = true;
   const isNewConflict = !preserveExpand || !window._pendingNoteConflict || window._pendingNoteConflict.attempted!==attempted || window._pendingNoteConflict.currentRow!==currentRow;
-  window._pendingNoteConflict = { attempted, currentRow };
+  window._pendingNoteConflict = { attempted, currentRow, slot };
   if(isNewConflict) window._conflictExpanded = { local:false, server:false };
   document.querySelectorAll('#noteConflictOverlay').forEach(o=>o.remove());
   const localFull = stripHtmlToText(attempted.Contenido||'').trim();
@@ -4354,7 +4535,7 @@ function openNoteConflictMergeModal(){
       </div>
       <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn" onclick="saveMergedNoteConflict()">Guardar como una sola nota</button>
-        <button class="btn secondary" onclick="document.getElementById('noteConflictMergeOverlay').remove();openNoteConflictModal(window._pendingNoteConflict.attempted, window._pendingNoteConflict.currentRow)">← Volver</button>
+        <button class="btn secondary" onclick="document.getElementById('noteConflictMergeOverlay').remove();openNoteConflictModal(window._pendingNoteConflict.attempted, window._pendingNoteConflict.currentRow, false, window._pendingNoteConflict.slot)">← Volver</button>
       </div>
     </div>
   </div>`;
@@ -4363,7 +4544,8 @@ function openNoteConflictMergeModal(){
 }
 async function saveMergedNoteConflict(){
   const ctx = window._pendingNoteConflict; if(!ctx) return;
-  const { attempted, currentRow } = ctx;
+  const { attempted, currentRow, slot } = ctx;
+  const key = slot==='secondary'?'secondary':'primary';
   const titleEl = document.getElementById('mergeTitleInput');
   const contentEl = document.getElementById('mergeContentArea');
   const merged = Object.assign({}, currentRow, {
@@ -4378,31 +4560,32 @@ async function saveMergedNoteConflict(){
   // aceptarse; si justo en este instante cambió OTRA vez, se vuelve a
   // preguntar en vez de arriesgarse a pisar una tercera versión.
   const saved = await saveEntity('NOTAS', merged, currentRow.FechaEdicion);
-  if(saved && saved.conflict){ openNoteConflictModal(saved.attempted, saved.currentRow); return; }
-  if(editingNoteId===attempted.ID || editingNoteId===currentRow.ID) editingNoteId = saved.ID;
-  if(document.getElementById('mainArea')){
+  if(saved && saved.conflict){ openNoteConflictModal(saved.attempted, saved.currentRow, false, slot); return; }
+  if(slotEditingId(slot)===attempted.ID || slotEditingId(slot)===currentRow.ID) setSlotEditingId(slot, saved.ID);
+  if(document.getElementById(eid('mainArea',slot))){
     const editorOverlay = document.getElementById('editorOverlay'); if(editorOverlay) editorOverlay.remove();
-    renderNoteModal(saved);
+    reopenEditorFor(saved, slot);
   }
-  _noteConflictOpen = false;
+  _noteConflictOpen[key] = false;
   renderAll();
   showToast('Nota combinada guardada');
 }
 async function resolveNoteConflict(action){
   const ctx = window._pendingNoteConflict; if(!ctx) return;
-  const { attempted, currentRow } = ctx;
+  const { attempted, currentRow, slot } = ctx;
+  const key = slot==='secondary'?'secondary':'primary';
   const overlay = document.getElementById('noteConflictOverlay'); if(overlay) overlay.remove();
   window._pendingNoteConflict = null;
   if(action==='server'){
     const idx = DATA.notas.findIndex(n=>n.ID===attempted.ID);
     if(idx>=0) DATA.notas[idx]=currentRow; else DATA.notas.push(currentRow);
     cacheData();
-    if(editingNoteId===attempted.ID && document.getElementById('mainArea')){
+    if(slotEditingId(slot)===attempted.ID && document.getElementById(eid('mainArea',slot))){
       const editorOverlay = document.getElementById('editorOverlay');
       if(editorOverlay) editorOverlay.remove();
-      renderNoteModal(currentRow);
+      reopenEditorFor(currentRow, slot);
     }
-    _noteConflictOpen = false;
+    _noteConflictOpen[key] = false;
     renderAll();
     showToast('Se cargó la versión guardada');
   } else if(action==='newnote'){
@@ -4422,16 +4605,16 @@ async function resolveNoteConflict(action){
     // intentar guardar sobre la original (ahora con la base correcta,
     // así que SÍ lo lograría) y terminaría pisando la versión guardada
     // igual — justo lo que "guardar aparte" prometía evitar.
-    if(editingNoteId===attempted.ID) editingNoteId = dup.ID;
-    _noteConflictOpen = false;
+    if(slotEditingId(slot)===attempted.ID) setSlotEditingId(slot, dup.ID);
+    _noteConflictOpen[key] = false;
     renderAll();
     showToast('Guardado como nota nueva: "'+dup.Titulo+'"');
   } else if(action==='force'){
     const forced = Object.assign({}, attempted, { FechaEdicion: new Date().toISOString() });
     const saved = await saveEntity('NOTAS', forced, currentRow.FechaEdicion);
-    if(saved && saved.conflict){ openNoteConflictModal(saved.attempted, saved.currentRow); return; } // volvió a cambiar justo ahora
-    if(editingNoteId===forced.ID) editingNoteId = saved.ID;
-    _noteConflictOpen = false;
+    if(saved && saved.conflict){ openNoteConflictModal(saved.attempted, saved.currentRow, false, slot); return; } // volvió a cambiar justo ahora
+    if(slotEditingId(slot)===forced.ID) setSlotEditingId(slot, saved.ID);
+    _noteConflictOpen[key] = false;
     renderAll();
     showToast('Sobrescrito');
   }
@@ -4480,56 +4663,64 @@ function attachPinchZoom(el){
   }, { passive:false });
   el.addEventListener('touchend', e=>{ if(e.touches.length<2) startDist = 0; });
 }
-function bindEditorEvents(note){
+function bindEditorEvents(note, slot){
   ['noteTitle','noteNotebook','noteTags','noteColor','noteFecha'].forEach(id=>{
-    const el = document.getElementById(id); if(!el) return;
-    el.addEventListener('input', scheduleSave);
-    el.addEventListener('change', scheduleSave);
-    el.addEventListener('blur', doSaveNow);
+    const el = document.getElementById(eid(id,slot)); if(!el) return;
+    el.addEventListener('input', ()=>scheduleSave(slot));
+    el.addEventListener('change', ()=>scheduleSave(slot));
+    el.addEventListener('blur', ()=>doSaveNow(slot));
   });
-  const mainEl = document.getElementById('mainArea');
+  const mainEl = document.getElementById(eid('mainArea',slot));
   if(mainEl){
     wrapRtTables(mainEl);
     badgeifyInlineTags(mainEl);
     attachPinchZoom(mainEl);
-    mainEl.addEventListener('input', ()=>{ scheduleSave(); scheduleRouteHints(); updateTagSuggestFromEditable(); });
-    mainEl.addEventListener('blur', ()=>{ badgeifyInlineTags(mainEl); doSaveNow(); scheduleHideGlobalTagSuggest(); });
+    mainEl.addEventListener('input', ()=>{ scheduleSave(slot); scheduleRouteHints(slot); updateTagSuggestFromEditable(); });
+    mainEl.addEventListener('blur', ()=>{ badgeifyInlineTags(mainEl); doSaveNow(slot); scheduleHideGlobalTagSuggest(); });
     mainEl.addEventListener('keydown', handleRichKeydown);
     mainEl.addEventListener('change', (e)=>{
       // los checkbox dentro del editor no reflejan su "checked" en el HTML
       // serializado a menos que se ponga el atributo a mano al cambiar
       if(e.target && e.target.type==='checkbox'){
         if(e.target.checked) e.target.setAttribute('checked',''); else e.target.removeAttribute('checked');
-        scheduleSave();
+        scheduleSave(slot);
       }
     });
     bindPasteImages(mainEl);
   }
-  const tagsEl = document.getElementById('noteTags');
+  const tagsEl = document.getElementById(eid('noteTags',slot));
   if(tagsEl){
     tagsEl.addEventListener('input', ()=>updateTagSuggestFromInput(tagsEl));
     tagsEl.addEventListener('keydown', e=>{ handleTagSuggestKeydown(e); });
     tagsEl.addEventListener('blur', ()=>scheduleHideGlobalTagSuggest());
-    tagsEl.addEventListener('input', scheduleRouteHints);
+    tagsEl.addEventListener('input', ()=>scheduleRouteHints(slot));
   }
-  const nbEl = document.getElementById('noteNotebook');
-  if(nbEl) nbEl.addEventListener('change', scheduleRouteHints);
-  renderRouteHints();
+  const nbEl = document.getElementById(eid('noteNotebook',slot));
+  if(nbEl) nbEl.addEventListener('change', ()=>scheduleRouteHints(slot));
+  renderRouteHints(slot);
 }
 /* Panel "rutas detectadas": mientras escribes, si una línea lleva una
    etiqueta que coincide con el auto-ruteo de algún cuaderno, se muestra
    aquí con ✅ — la nota se queda tal cual donde está, es solo un aviso de
    "esto ya tiene a dónde ir" para cuando anotas varias cosas sueltas
-   seguidas (ej. #cancion, #cita, #tesis) en una sola nota de captura rápida. */
-let _routeHintsDebounce=null;
-function scheduleRouteHints(){ clearTimeout(_routeHintsDebounce); _routeHintsDebounce=setTimeout(renderRouteHints,200); }
-function renderRouteHints(){
-  const wrap = document.getElementById('routeHints'); const mainEl = document.getElementById('mainArea');
+   seguidas (ej. #cancion, #cita, #tesis) en una sola nota de captura rápida.
+   Un timer por slot — igual que _saveDebounce — para que escribir en
+   los dos lados de Vista Dividida a la vez no haga que el hint de uno
+   se pise con el del otro. */
+let _routeHintsDebounce={primary:null,secondary:null};
+function scheduleRouteHints(slot){
+  const key = slot==='secondary'?'secondary':'primary';
+  clearTimeout(_routeHintsDebounce[key]);
+  _routeHintsDebounce[key]=setTimeout(()=>renderRouteHints(slot),200);
+}
+function renderRouteHints(slot){
+  const wrap = document.getElementById(eid('routeHints',slot)); const mainEl = document.getElementById(eid('mainArea',slot));
   if(!wrap || !mainEl) return;
   const autoNotebooks = DATA.notebooks.filter(nb=>nb.TagAuto);
   if(!autoNotebooks.length){ wrap.classList.add('hidden'); wrap.innerHTML=''; return; }
-  const tagsEl = document.getElementById('noteTags');
-  const inherited = Array.from(new Set([...parseTagsText(tagsEl?tagsEl.value:''), ...notebookInherited(document.getElementById('noteNotebook')?document.getElementById('noteNotebook').value:'')]));
+  const tagsEl = document.getElementById(eid('noteTags',slot));
+  const nbSelEl = document.getElementById(eid('noteNotebook',slot));
+  const inherited = Array.from(new Set([...parseTagsText(tagsEl?tagsEl.value:''), ...notebookInherited(nbSelEl?nbSelEl.value:'')]));
   const container = document.createElement('div'); container.innerHTML = mainEl.innerHTML;
   let blocks = Array.from(container.children); if(!blocks.length) blocks=[container];
   const hints = [];
@@ -4546,12 +4737,12 @@ function renderRouteHints(){
   wrap.innerHTML = '<span style="color:var(--text-dim)">📍 detectado:</span>' + hints.map(h=>
     `<span class="tag-badge">✅ "${escHtml(h.text)}" → ${escHtml(h.notebook)}</span>`).join('');
 }
-function insertTimestamp(){
-  focusMainEditor();
+function insertTimestamp(slot){
+  focusMainEditor(slot);
   const now = new Date();
   const txt = now.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'})+' '+now.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
   document.execCommand('insertHTML', false, '<span style="color:var(--text-dim);font-size:.85em">🕐 '+txt+'</span>&nbsp;');
-  scheduleSave();
+  scheduleSave(slot);
 }
 /* Botón "#" — inserta el carácter y dispara la sugerencia A MANO en vez
    de esperar a que el evento 'input' del tecleo la muestre sola. El
@@ -4559,8 +4750,8 @@ function insertTimestamp(){
    correctamente en el contenteditable; en algunos dispositivos/teclados
    eso no siempre pasa igual que en un <input> normal, así que este botón
    es una entrada alterna que no depende de eso. */
-function insertHashAndSuggest(){
-  focusMainEditor();
+function insertHashAndSuggest(slot){
+  focusMainEditor(slot);
   document.execCommand('insertHTML', false, '#');
   updateTagSuggestFromEditable();
 }
@@ -4760,15 +4951,15 @@ function handleTagSuggestKeydown(e){
 
 /* ============ Editor WYSIWYG: comandos de formato reales, tablas
    editables de verdad (agregar/quitar filas y columnas) y checklists ==== */
-function focusMainEditor(){
-  const el = document.getElementById('mainArea'); if(!el) return null;
+function focusMainEditor(slot){
+  const el = document.getElementById(eid('mainArea',slot)); if(!el) return null;
   el.focus();
   return el;
 }
-function runCmd(cmd, val){
-  focusMainEditor();
+function runCmd(cmd, val, slot){
+  focusMainEditor(slot);
   document.execCommand(cmd, false, val||null);
-  scheduleSave();
+  scheduleSave(slot);
 }
 /* Atajos estilo Markdown MIENTRAS escribes — el disparador (#, >, -, 1.)
    desaparece y se convierte al formato real de una vez; no es una vista de
@@ -4861,21 +5052,21 @@ function placeCaretAtStart(el){
   const range = document.createRange(); range.selectNodeContents(el); range.collapse(true);
   const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
 }
-function insertChecklistItem(){
-  focusMainEditor();
+function insertChecklistItem(slot){
+  focusMainEditor(slot);
   document.execCommand('insertHTML', false, '<div class="rt-check"><input type="checkbox"><span> </span></div>');
-  scheduleSave();
+  scheduleSave(slot);
 }
-function insertRichTable(){
+function insertRichTable(slot){
   const rowsStr = prompt('¿Cuántas filas?', '2'); if(rowsStr===null) return;
   const colsStr = prompt('¿Cuántas columnas?', '2'); if(colsStr===null) return;
   const rows = Math.max(1, parseInt(rowsStr,10)||2);
   const cols = Math.max(1, parseInt(colsStr,10)||2);
-  focusMainEditor();
+  focusMainEditor(slot);
   const trs = Array.from({length:rows}).map(()=>'<tr>'+Array.from({length:cols}).map(()=>'<td><br></td>').join('')+'</tr>').join('');
   document.execCommand('insertHTML', false, '<table class="rt-table">'+trs+'</table><p><br></p>');
-  wrapRtTables(document.getElementById('mainArea'));
-  scheduleSave();
+  wrapRtTables(document.getElementById(eid('mainArea',slot)));
+  scheduleSave(slot);
 }
 /* si una tabla queda anidada dentro de la celda de otra tabla (ej. Cornell)
    se envuelve en un contenedor con scroll propio para que no desfase el
@@ -4994,12 +5185,12 @@ function badgeifyInlineTags(container){
    celda de en medio se vuelve una tarjeta en la vista de tarjetas, con
    las etiquetas de su fila + columna + lo que escribas dentro con "#" +
    las del cuaderno (estas últimas ya se ven arriba del capítulo). */
-function insertGridTable(){
+function insertGridTable(slot){
   const rowsStr = prompt('¿Cuántas filas de datos (sin contar el encabezado)?', '2'); if(rowsStr===null) return;
   const colsStr = prompt('¿Cuántas columnas de datos (sin contar la columna de etiquetas)?', '2'); if(colsStr===null) return;
   const rows = Math.max(1, parseInt(rowsStr,10)||2);
   const cols = Math.max(1, parseInt(colsStr,10)||2);
-  focusMainEditor();
+  focusMainEditor(slot);
   let html = '<table class="rt-table grid-table"><tr><td class="grid-corner"><br></td>';
   for(let c=0;c<cols;c++) html += '<td class="grid-col-header"><br></td>';
   html += '</tr>';
@@ -5010,8 +5201,12 @@ function insertGridTable(){
   }
   html += '</table><p><br></p>';
   document.execCommand('insertHTML', false, html);
-  scheduleSave();
+  scheduleSave(slot);
 }
+/* currentTableFromSelection/currentCellFromSelection leen
+   window.getSelection() (global del navegador, no un id de DOM) — ya
+   reflejan solas dentro de qué editor está el cursor ahora mismo, sin
+   necesitar saber de qué slot se trata. */
 function currentTableFromSelection(){
   const sel = window.getSelection(); if(!sel.rangeCount) return null;
   let node = sel.anchorNode; if(node && node.nodeType===3) node = node.parentNode;
@@ -5022,7 +5217,7 @@ function currentCellFromSelection(){
   let node = sel.anchorNode; if(node && node.nodeType===3) node = node.parentNode;
   return node && node.closest ? node.closest('td,th') : null;
 }
-function tableAddRow(){
+function tableAddRow(slot){
   const t = currentTableFromSelection(); if(!t){ showToast('Pon el cursor dentro de una tabla'); return; }
   const cols = t.rows[0] ? t.rows[0].cells.length : 1;
   const row = t.insertRow(-1);
@@ -5031,42 +5226,42 @@ function tableAddRow(){
     if(t.classList.contains('cornell-table') && i===0) c.className='cornell-cue-cell';
     if(t.classList.contains('grid-table') && i===0) c.className='grid-row-header';
   }
-  scheduleSave();
+  scheduleSave(slot);
 }
 /* Botón siempre visible de la barra "Modo Cornell" — no depende de tener
    el cursor dentro de la tabla (a diferencia de tableAddRow), así siempre
    se ve y siempre funciona. */
-function addCornellRowDirect(){
-  const mainEl = document.getElementById('mainArea'); if(!mainEl) return;
+function addCornellRowDirect(slot){
+  const mainEl = document.getElementById(eid('mainArea',slot)); if(!mainEl) return;
   const table = mainEl.querySelector('table.cornell-table'); if(!table) return;
   const cols = table.rows[0] ? table.rows[0].cells.length : 2;
   const row = table.insertRow(-1);
   for(let i=0;i<cols;i++){ const c=row.insertCell(-1); c.innerHTML='<br>'; if(i===0) c.className='cornell-cue-cell'; }
   placeCaretAtStart(row.cells[0]);
-  scheduleSave(); scheduleRouteHints();
+  scheduleSave(slot); scheduleRouteHints(slot);
 }
-function tableAddCol(){
+function tableAddCol(slot){
   const t = currentTableFromSelection(); if(!t){ showToast('Pon el cursor dentro de una tabla'); return; }
   Array.from(t.rows).forEach((row,ri)=>{
     const c=row.insertCell(-1); c.innerHTML='<br>';
     if(t.classList.contains('grid-table') && ri===0) c.className='grid-col-header';
   });
-  scheduleSave();
+  scheduleSave(slot);
 }
-function tableDelRow(){
+function tableDelRow(slot){
   const t = currentTableFromSelection(); if(!t){ showToast('Pon el cursor dentro de una tabla'); return; }
   if(t.rows.length<=1) return;
   const cell = currentCellFromSelection(); const tr = cell && cell.closest('tr');
   if(tr) tr.remove();
-  scheduleSave();
+  scheduleSave(slot);
 }
-function tableDelCol(){
+function tableDelCol(slot){
   const t = currentTableFromSelection(); if(!t){ showToast('Pon el cursor dentro de una tabla'); return; }
   const cell = currentCellFromSelection(); if(!cell) return;
   const idx = Array.from(cell.parentNode.children).indexOf(cell);
   if(t.rows[0].cells.length<=1) return;
   Array.from(t.rows).forEach(row=>{ if(row.cells[idx]) row.deleteCell(idx); });
-  scheduleSave();
+  scheduleSave(slot);
 }
 function rgbToHex(rgb){
   const m = rgb && rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
@@ -5077,10 +5272,10 @@ function currentHiliteHex(){
   try{ return rgbToHex(document.queryCommandValue('hiliteColor')) || rgbToHex(document.queryCommandValue('backColor')); }
   catch(e){ return null; }
 }
-function toggleTableMenu(){ document.getElementById('tableMenu').classList.toggle('hidden'); }
-function runTableAction(fn){ fn(); document.getElementById('tableMenu').classList.add('hidden'); }
-function toggleSwatches(kind){
-  const bar = document.getElementById('swatchBar');
+function toggleTableMenu(btn){ const menu = btn.nextElementSibling; if(menu) menu.classList.toggle('hidden'); }
+function runTableAction(fn, slot){ fn(slot); const menu = document.getElementById(eid('tableMenu',slot)); if(menu) menu.classList.add('hidden'); }
+function toggleSwatches(kind, slot){
+  const bar = document.getElementById(eid('swatchBar',slot));
   if(bar.dataset.kind===kind && !bar.classList.contains('hidden')){ bar.classList.add('hidden'); return; }
   bar.dataset.kind = kind;
   bar.innerHTML = '';
@@ -5092,7 +5287,7 @@ function toggleSwatches(kind){
     sw.className='swatch'; sw.style.background=color;
     sw.addEventListener('mousedown', e=>e.preventDefault());
     sw.addEventListener('click', ()=>{
-      focusMainEditor();
+      focusMainEditor(slot);
       if(kind==='mark'){
         // tocar el mismo color que ya está puesto lo quita, en vez de
         // volver a aplicarlo encima
@@ -5101,20 +5296,20 @@ function toggleSwatches(kind){
       } else {
         document.execCommand('foreColor', false, color);
       }
-      scheduleSave();
+      scheduleSave(slot);
       bar.classList.add('hidden');
     });
     bar.appendChild(sw);
   });
   bar.classList.remove('hidden');
 }
-function setFontSize(val){
+function setFontSize(val, slot){
   if(!val) return;
-  focusMainEditor();
+  focusMainEditor(slot);
   document.execCommand('fontSize', false, val);
-  scheduleSave();
+  scheduleSave(slot);
 }
-async function sendSelectionToDic(){
+async function sendSelectionToDic(slot){
   const sel = window.getSelection();
   const text = sel && sel.toString().trim();
   if(!text){ showToast('Selecciona una palabra o frase primero'); return; }
@@ -5137,7 +5332,7 @@ async function sendSelectionToDic(){
    como el usuario aceptó de entrada que iba a pasar; no hay forma de
    buscar en esos sitios sin salir. Mismo patrón de leer la selección
    que sendSelectionToDic. */
-function searchSelectionExternal(engine){
+function searchSelectionExternal(engine, slot){
   const sel = window.getSelection();
   let text = sel && sel.toString().trim();
   // Pedido explícito: si no hay nada seleccionado, no hace falta
@@ -5146,7 +5341,7 @@ function searchSelectionExternal(engine){
   // como término de búsqueda no tiene mucho sentido más allá de eso,
   // y evita una URL exageradamente larga).
   if(!text){
-    const mainEl = document.getElementById('mainArea');
+    const mainEl = document.getElementById(eid('mainArea',slot));
     text = mainEl ? stripHtmlToText(mainEl.innerHTML).trim().slice(0,300) : '';
   }
   if(!text){ showToast('No hay texto que buscar'); return; }
@@ -5231,13 +5426,13 @@ function noteSnippetText(n){
 }
 
 /* ============ Acciones de nota ============ */
-function duplicateNoteUI(){
-  const note = collectNoteFromForm();
+function duplicateNoteUI(slot){
+  const note = collectNoteFromForm(slot);
   const copy = Object.assign({}, note, { ID:'', Titulo:(note.Titulo||'Nota')+' (copia)', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString() });
-  saveEntity('NOTAS', copy).then(saved=>{ editingNoteId=saved.ID; reopenEditorFor(saved); renderSidebar(); showToast('Nota duplicada'); });
+  saveEntity('NOTAS', copy).then(saved=>{ setSlotEditingId(slot, saved.ID); reopenEditorFor(saved, slot); renderSidebar(); showToast('Nota duplicada'); });
 }
-function copyNoteUI(){
-  const note = collectNoteFromForm();
+function copyNoteUI(slot){
+  const note = collectNoteFromForm(slot);
   const text = (note.Titulo||'')+'\n\n'+(note.Contenido||'');
   navigator.clipboard && navigator.clipboard.writeText(text).then(()=>showToast('Copiado al portapapeles')).catch(()=>showToast('No se pudo copiar'));
 }
@@ -5245,12 +5440,17 @@ function copyNoteUI(){
    "Papelera" y activeNotes() la esconde de todas partes; sigue existiendo
    hasta que se restaure o se borre definitivamente desde 🗑️ Papelera. Se
    purgan solas después de 30 días (autoPurgeOldTrash, en boot()). */
-function deleteNoteUI(id){
-  if(!id){ closeNoteEditor(); return; }
+function deleteNoteUI(id, slot){
+  const side = sideForSlot(slot);
+  if(!id){ if(currentView==='split' && side) closeSplitPaneNote(side); else closeNoteEditor(); return; }
   if(!confirm('¿Mover esta nota a la papelera? Se puede recuperar desde ahí.')) return;
   const note = getNote(id); if(!note) return;
   note.Papelera = new Date().toISOString();
-  saveEntity('NOTAS', note).then(()=>{ closeNoteEditor(); editingNoteId=null; renderAll(); showToast('🗑️ Movida a la papelera'); });
+  saveEntity('NOTAS', note).then(()=>{
+    if(currentView==='split' && side){ setSlotEditingId(slot, null); if(slot==='secondary') _splitSecondarySide=null; else _splitPrimarySide=null; }
+    else { const ov = document.getElementById('editorOverlay'); if(ov) ov.remove(); const minChip = document.getElementById('editorMinChip'); if(minChip) minChip.remove(); editingNoteId=null; }
+    renderAll(); showToast('🗑️ Movida a la papelera');
+  });
 }
 function trashedNotes(){ return DATA.notas.filter(n=>n.Papelera).sort((a,b)=>String(b.Papelera).localeCompare(String(a.Papelera))); }
 function renderSettingsTrash(){
@@ -6402,10 +6602,11 @@ function getNoteLinks(note){
   try{ const parsed = JSON.parse(note.Archivo); if(Array.isArray(parsed)) return parsed; }catch(e){}
   return [{ name: note.Archivo, kind: 'file' }]; // dato viejo de una sola liga en texto plano
 }
-function linksChipsHTML(links){
+function linksChipsHTML(links, slot){
+  const sArg = slot==='secondary' ? ",'secondary'" : '';
   return links.map((l,i)=>`<span class="file-chip">${l.kind==='folder'?'📁':'📎'} ${escHtml(l.name)}
-    <a href="#" onclick="event.preventDefault();openNoteLink(${i})">${l.kind==='folder'?'explorar':'abrir'}</a>
-    <a href="#" onclick="event.preventDefault();removeNoteLink(${i})">✕</a></span>`).join('');
+    <a href="#" onclick="event.preventDefault();openNoteLink(${i}${sArg})">${l.kind==='folder'?'explorar':'abrir'}</a>
+    <a href="#" onclick="event.preventDefault();removeNoteLink(${i}${sArg})">✕</a></span>`).join('');
 }
 /* Una nota con varios archivos/carpetas vinculados podía volverse una
    fila larga y siempre visible entre los datos de la nota y la barra
@@ -6413,61 +6614,64 @@ function linksChipsHTML(links){
    ocultarla no deja un hueco vacío (fileChipWrap simplemente
    desaparece con .hidden, la barra de herramientas queda pegada
    justo debajo de la fila de datos). */
-function toggleFileChips(btn){
-  const wrap = document.getElementById('fileChipWrap'); if(!wrap) return;
+function toggleFileChips(btn, slot){
+  const wrap = document.getElementById(eid('fileChipWrap',slot)); if(!wrap) return;
   const hidden = wrap.classList.toggle('hidden');
   btn.textContent = hidden ? '▸' : '▾';
   btn.title = hidden ? 'Mostrar archivos vinculados' : 'Ocultar archivos vinculados';
 }
-async function ensureEditingNoteSaved(){
-  if(editingNoteId) return editingNoteId;
-  const note = collectNoteFromForm();
+async function ensureEditingNoteSaved(slot){
+  const curId = slotEditingId(slot);
+  if(curId) return curId;
+  const note = collectNoteFromForm(slot);
   const saved = await saveEntity('NOTAS', note);
-  editingNoteId = saved.ID;
-  return editingNoteId;
+  setSlotEditingId(slot, saved.ID);
+  return saved.ID;
 }
-async function saveNoteLinks(links){
-  const note = Object.assign({}, getNote(editingNoteId), { Archivo: JSON.stringify(links) });
+async function saveNoteLinks(links, slot){
+  const id = slotEditingId(slot);
+  const note = Object.assign({}, getNote(id), { Archivo: JSON.stringify(links) });
   await saveEntity('NOTAS', note);
-  const wrap = document.getElementById('fileChipWrap'); if(wrap) wrap.innerHTML = linksChipsHTML(links);
-  const toggleBtn = document.getElementById('fileChipToggleBtn');
+  const wrap = document.getElementById(eid('fileChipWrap',slot)); if(wrap) wrap.innerHTML = linksChipsHTML(links, slot);
+  const toggleBtn = document.getElementById(eid('fileChipToggleBtn',slot));
   if(toggleBtn) toggleBtn.style.display = links.length ? '' : 'none';
 }
-async function pickFilesForNote(){
-  await ensureEditingNoteSaved();
+async function pickFilesForNote(slot){
+  const id = await ensureEditingNoteSaved(slot);
   if(!window.showOpenFilePicker){
     const path = prompt('Tu navegador no permite abrir archivos directamente. Escribe el nombre/ruta del archivo (de tu carpeta de OneDrive) para dejarlo como referencia:');
     if(!path) return;
-    const links = getNoteLinks(getNote(editingNoteId)); links.push({name:path, kind:'file'});
-    await saveNoteLinks(links); return;
+    const links = getNoteLinks(getNote(id)); links.push({name:path, kind:'file'});
+    await saveNoteLinks(links, slot); return;
   }
   try{
     const handles = await window.showOpenFilePicker({ multiple:true });
-    const links = getNoteLinks(getNote(editingNoteId));
-    for(const h of handles){ await idbSet('link-'+editingNoteId+'-'+links.length, h); links.push({name:h.name, kind:'file'}); }
-    await saveNoteLinks(links); showToast(handles.length>1 ? 'Archivos vinculados' : 'Archivo vinculado');
+    const links = getNoteLinks(getNote(id));
+    for(const h of handles){ await idbSet('link-'+id+'-'+links.length, h); links.push({name:h.name, kind:'file'}); }
+    await saveNoteLinks(links, slot); showToast(handles.length>1 ? 'Archivos vinculados' : 'Archivo vinculado');
   }catch(e){ /* usuario canceló */ }
 }
-async function pickFolderForNote(){
-  await ensureEditingNoteSaved();
+async function pickFolderForNote(slot){
+  const id = await ensureEditingNoteSaved(slot);
   if(!window.showDirectoryPicker){ showToast('Tu navegador no permite vincular carpetas completas (usa Chrome/Edge de escritorio)'); return; }
   try{
     const handle = await window.showDirectoryPicker();
-    const links = getNoteLinks(getNote(editingNoteId));
-    await idbSet('link-'+editingNoteId+'-'+links.length, handle);
+    const links = getNoteLinks(getNote(id));
+    await idbSet('link-'+id+'-'+links.length, handle);
     links.push({name:handle.name, kind:'folder'});
-    await saveNoteLinks(links); showToast('Carpeta vinculada: '+handle.name);
+    await saveNoteLinks(links, slot); showToast('Carpeta vinculada: '+handle.name);
   }catch(e){ /* usuario canceló */ }
 }
-async function removeNoteLink(idx){
-  const links = getNoteLinks(getNote(editingNoteId));
+async function removeNoteLink(idx, slot){
+  const id = slotEditingId(slot);
+  const links = getNoteLinks(getNote(id));
   links.splice(idx,1);
-  await idbDel('link-'+editingNoteId+'-'+idx);
-  await saveNoteLinks(links);
+  await idbDel('link-'+id+'-'+idx);
+  await saveNoteLinks(links, slot);
 }
-async function openNoteLink(idx){
+async function openNoteLink(idx, slot){
   try{
-    const handle = await idbGet('link-'+editingNoteId+'-'+idx);
+    const handle = await idbGet('link-'+slotEditingId(slot)+'-'+idx);
     if(!handle){ showToast('Se vinculó desde otro dispositivo/navegador — vincúlalo de nuevo aquí'); return; }
     if(handle.kind==='directory'){ openExplorer(handle, handle.name); return; }
     if((await handle.queryPermission({mode:'read'}))!=='granted'){
@@ -6650,14 +6854,18 @@ async function openExplorerEntry(i){
 }
 
 /* ============ Imágenes: insertar embebidas (picker o pegar) + OCR automático ============ */
-function triggerImage(){ document.getElementById('imgFileInput').click(); }
-function handleImageFile(e){
+function triggerImage(slot){ document.getElementById(eid('imgFileInput',slot)).click(); }
+function handleImageFile(e, slot){
   const file = e.target.files[0]; if(!file) return;
-  insertImage(file);
+  insertImage(file, slot);
   e.target.value = '';
 }
 function bindPasteImages(ta){
   if(!ta) return;
+  // A qué slot pertenece ESTE mainArea (por su propio id, "mainArea2" =
+  // secundaria) — así insertImage/pasteTableRows insertan en el lado
+  // donde de verdad se pegó, no en la primaria por default.
+  const slot = ta.id===eid('mainArea','secondary') ? 'secondary' : undefined;
   ta.addEventListener('paste', (e)=>{
     const items = e.clipboardData && e.clipboardData.items;
     if(items){
@@ -6665,7 +6873,7 @@ function bindPasteImages(ta){
         if(item.type && item.type.indexOf('image/')===0){
           e.preventDefault();
           const file = item.getAsFile();
-          if(file) insertImage(file);
+          if(file) insertImage(file, slot);
           return;
         }
       }
@@ -6676,7 +6884,7 @@ function bindPasteImages(ta){
       const text = e.clipboardData && e.clipboardData.getData('text/plain');
       rows = parsePastedPlainTextRows(text);
     }
-    if(rows && rows.length){ e.preventDefault(); pasteTableRows(rows); }
+    if(rows && rows.length){ e.preventDefault(); pasteTableRows(rows, slot); }
   });
 }
 function parsePastedTableRows(html){
@@ -6732,7 +6940,7 @@ function parsePastedPlainTextRows(text){
    una tabla ancha antes rompía todo el layout de la nota (crecía la tabla
    entera a 8+ columnas). En esos dos casos se inserta como tabla anidada
    y contenida (con scroll propio, ver wrapRtTables) dentro de la celda. */
-function pasteTableRows(rows){
+function pasteTableRows(rows, slot){
   const existing = currentTableFromSelection();
   const startCell = currentCellFromSelection();
   const existingIsFixedLayout = existing && (existing.classList.contains('cornell-table') || existing.classList.contains('grid-table'));
@@ -6755,15 +6963,15 @@ function pasteTableRows(rows){
     });
   } else {
     const trs = rows.map(r=>'<tr>'+r.map(v=>'<td>'+escHtml(v)+'</td>').join('')+'</tr>').join('');
-    focusMainEditor();
+    focusMainEditor(slot);
     document.execCommand('insertHTML', false, '<table class="rt-table">'+trs+'</table><p><br></p>');
-    wrapRtTables(document.getElementById('mainArea'));
+    wrapRtTables(document.getElementById(eid('mainArea',slot)));
   }
-  scheduleSave();
+  scheduleSave(slot);
 }
-async function insertImage(file){
+async function insertImage(file, slot){
   if(!navigator.onLine){ showToast('Insertar imágenes necesita conexión (se suben a tu Drive)'); return; }
-  const ta = focusMainEditor(); if(!ta) return;
+  const ta = focusMainEditor(slot); if(!ta) return;
   const base64 = await new Promise((res,rej)=>{
     const reader = new FileReader();
     reader.onload = ()=>res(reader.result.split(',')[1]); reader.onerror = rej;
@@ -6772,14 +6980,19 @@ async function insertImage(file){
   showToast('Subiendo imagen…');
   const up = await apiPost('uploadImage', { imageBase64: base64, mimeType: file.type, fileName: file.name || 'imagen' });
   if(!(up && up.ok)){ showToast('No se pudo subir la imagen'+(up&&up.error?': '+up.error:'')); return; }
+  // Volver a enfocar antes de CADA inserción (no solo la primera) — hay
+  // un viaje de red de por medio (subir la imagen, luego el OCR); si el
+  // foco se movió mientras tanto (a la otra mitad de Vista Dividida, a
+  // otro campo…), insertHTML sin esto insertaría en el lugar equivocado.
+  focusMainEditor(slot);
   document.execCommand('insertHTML', false, '<img src="'+up.url+'" alt="imagen"><p><br></p>');
-  scheduleSave();
+  scheduleSave(slot);
   showToast('Leyendo texto de la imagen…');
   const ocr = await apiPost('ocrImage', { imageBase64: base64, mimeType: file.type });
   if(ocr && ocr.ok && ocr.text && !/sin texto detectado/i.test(ocr.text)){
-    focusMainEditor();
+    focusMainEditor(slot);
     document.execCommand('insertHTML', false, '<blockquote>📝 '+escHtml(ocr.text).replace(/\n/g,'<br>')+'</blockquote><p><br></p>');
-    scheduleSave();
+    scheduleSave(slot);
     showToast('Texto de la imagen agregado');
   } else {
     showToast('Imagen insertada');
@@ -8206,8 +8419,9 @@ function saveFieldTemplate(btn, existingId){
     btn.closest('.modal-overlay').remove(); renderFieldTablesBody(); renderReminderBanner();
   });
 }
-function openFieldTemplatePicker(){
-  const editorOpen = !!document.getElementById('mainArea');
+function openFieldTemplatePicker(slot){
+  const editorOpen = !!document.getElementById(eid('mainArea',slot));
+  const sArg = slot ? `,'${slot}'` : '';
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal" style="width:min(460px,100%)">
     <div class="modal-head"><b>🏷️ Plantillas de campos</b><span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
@@ -8218,20 +8432,20 @@ function openFieldTemplatePicker(){
         <span style="flex:1;font-size:13px"><b>${escHtml(pt.Nombre)}</b> ${pt.Recordatorio?`<span class="tag-badge" title="${escAttr(RECORDATORIO_LABELS[pt.Recordatorio]||'')}">⏰</span>`:''}<br><span style="color:var(--text-dim);font-size:12px">${JSON.parse(pt.CamposJSON||'[]').map(c=>'#'+c).join(' ')}</span><br><span style="color:var(--text-dim);font-size:11px">${lastFilledLabel(lastFilledFieldTemplate(pt.ID))}</span></span>
         <button class="btn" style="padding:4px 10px;font-size:12px;flex:none" onclick="this.closest('.modal-overlay').remove();openQuickFieldFill('${pt.ID}')" title="Formulario rápido — llena cada campo y guarda, sin tocar tablas">⚡ Llenar</button>
         <button class="icon-btn" onclick="this.closest('.modal-overlay').remove();openFieldStatsModal('${pt.ID}')" title="Ver estadísticas (gráfica en el tiempo)">📊</button>
-        ${editorOpen ? `<button class="icon-btn" onclick="insertFieldTemplate('${pt.ID}');this.closest('.modal-overlay').remove()" title="Insertar como texto en la nota abierta">📄</button>
-        <button class="icon-btn" onclick="insertFieldTemplateAsCornell('${pt.ID}');this.closest('.modal-overlay').remove()" title="Insertar como tabla Cornell en la nota abierta">📐</button>` : ''}
+        ${editorOpen ? `<button class="icon-btn" onclick="insertFieldTemplate('${pt.ID}'${sArg});this.closest('.modal-overlay').remove()" title="Insertar como texto en la nota abierta">📄</button>
+        <button class="icon-btn" onclick="insertFieldTemplateAsCornell('${pt.ID}'${sArg});this.closest('.modal-overlay').remove()" title="Insertar como tabla Cornell en la nota abierta">📐</button>` : ''}
       </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin plantillas de campos todavía.</p>'}
     </div>
   </div>`;
   document.body.appendChild(overlay);
 }
-function insertFieldTemplate(id){
+function insertFieldTemplate(id, slot){
   const pt = DATA.plantillas_prop.find(x=>x.ID===id); if(!pt) return;
   let campos=[]; try{ campos = JSON.parse(pt.CamposJSON||'[]'); }catch(e){}
   const html = campos.map(c=>'<p><b>#'+escHtml(c)+'</b></p><p><br></p>').join('');
-  focusMainEditor();
+  focusMainEditor(slot);
   document.execCommand('insertHTML', false, html);
-  scheduleSave();
+  scheduleSave(slot);
 }
 /* La misma plantilla de campos también sirve para armar la columna
    izquierda (cue) de una tabla Cornell de un jalón — si la nota ya está
@@ -8239,11 +8453,11 @@ function insertFieldTemplate(id){
    tabla que ya hay; si no, se enciende el modo Cornell con esas filas ya
    listas (mismo camino que toggleCornell(), para que note.Cornell quede
    marcado y todo lo demás la reconozca como Cornell). */
-function insertFieldTemplateAsCornell(id){
+function insertFieldTemplateAsCornell(id, slot){
   const pt = DATA.plantillas_prop.find(x=>x.ID===id); if(!pt) return;
   let campos=[]; try{ campos = JSON.parse(pt.CamposJSON||'[]'); }catch(e){}
   if(!campos.length) return;
-  const mainEl = document.getElementById('mainArea'); if(!mainEl) return;
+  const mainEl = document.getElementById(eid('mainArea',slot)); if(!mainEl) return;
   const existing = mainEl.querySelector('table.cornell-table');
   if(existing){
     campos.forEach(c=>{
@@ -8251,13 +8465,13 @@ function insertFieldTemplateAsCornell(id){
       const cue = row.insertCell(-1); cue.className='cornell-cue-cell'; cue.innerHTML = '#'+escHtml(c);
       row.insertCell(-1).innerHTML = '<br>';
     });
-    scheduleSave();
+    scheduleSave(slot);
   } else {
-    const note = collectNoteFromForm();
+    const note = collectNoteFromForm(slot);
     const trs = campos.map(c=>'<tr><td class="cornell-cue-cell">#'+escHtml(c)+'</td><td><br></td></tr>').join('');
     note.Contenido = '<table class="rt-table cornell-table">'+trs+'</table>';
     note.Cornell = '1';
-    persistAndReopen(note);
+    persistAndReopen(note, undefined, slot);
   }
 }
 function prettyFieldLabel(c){ const s = String(c||'').replace(/_/g,' '); return s.charAt(0).toUpperCase()+s.slice(1); }

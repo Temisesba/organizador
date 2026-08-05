@@ -527,8 +527,16 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .cal-agenda-row{display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)}
 .cal-agenda-row:last-child{border-bottom:none}
 .cal-agenda-row .cal-agenda-text{flex:1;min-width:0}
-/* línea roja de "ahora" en Calendario → Día, como cualquier calendario */
-.cal-now-line{display:flex;align-items:center;gap:8px;margin:2px 0 12px}
+/* línea roja de "ahora" en Calendario → Día, como cualquier calendario.
+   Pedido de seguimiento (con captura): que quede pegada al bloque de
+   ANTES ("seguidito de 4pm"), no a mitad de camino hacia el siguiente
+   — si no, con solo 8 min pasadas de las 4pm ya parecía "casi las
+   5pm". El bloque justo antes de la línea pierde su margen inferior
+   propio (:has, se pega la línea encima) y la línea se queda con
+   margen inferior normal, así el espacio VISIBLE de sobra queda
+   siempre hacia el bloque de DESPUÉS, no hacia el de antes. */
+.cal-agenda-block:has(+ .cal-now-line){margin-bottom:2px}
+.cal-now-line{display:flex;align-items:center;gap:8px;margin:0 0 12px}
 .cal-now-line .cal-now-label{font-size:11px;font-weight:700;color:var(--danger);flex:none}
 .cal-now-line .cal-now-track{flex:1;height:2px;background:var(--danger);position:relative;border-radius:2px}
 .cal-now-line .cal-now-track::before{content:'';position:absolute;left:-4px;top:50%;transform:translateY(-50%);width:8px;height:8px;border-radius:50%;background:var(--danger)}
@@ -676,7 +684,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Hermosillo';
+const BUILD_VERSION = 'Nogales';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1043,9 +1051,14 @@ function calAgendaTaskRowHTML(n){
    las sin hora del día actual como ya era. */
 function calNoHoraTaskRowHTML(n, vencida){
   const done = isTaskDone(n);
+  // pedido explícito: mostrar también su etiqueta (#familia, #trabajo…)
+  // aquí — antes solo se veía el título, sin saber de un vistazo a qué
+  // categoría pertenecía cada pendiente.
+  const chapterTag = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente') || '';
+  const tagHTML = chapterTag ? `<span class="tag-badge" style="border-color:${tagColor(chapterTag)};margin-left:4px" onclick="event.stopPropagation();toggleTagFilter('${escAttr(chapterTag)}')" title="Filtrar por #${escAttr(chapterTag)}">#${escHtml(chapterTag)}</span>` : '';
   return `<div class="settings-row" style="cursor:pointer${vencida?';border-left:3px solid var(--danger)':''}" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
     <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}');renderCalDayDynamic()" title="Marcar como cumplida">
-    <span style="flex:1${done?';text-decoration:line-through;opacity:.6':''}">${vencida?'⏰':'⚑'} ${escHtml(n.Titulo||'(sin título)')}${vencida&&!done?` <span style="color:var(--danger);font-size:11px">(venció ${escHtml(fmtDate(n.Fecha))})</span>`:''}</span>
+    <span style="flex:1${done?';text-decoration:line-through;opacity:.6':''}">${vencida?'⏰':'⚑'} ${escHtml(n.Titulo||'(sin título)')}${tagHTML}${vencida&&!done?` <span style="color:var(--danger);font-size:11px">(venció ${escHtml(fmtDate(n.Fecha))})</span>`:''}</span>
   </div>`;
 }
 function renderCalNoHoraTasks(){
@@ -1223,12 +1236,12 @@ function renderCalDayView(){
       <div class="cal-day-agenda-col">
         <div id="calAgenda"></div>
         <div style="margin-top:16px">
-          <b style="font-size:12px;color:var(--text-dim)">⚑ Pendientes</b>
-          <div id="calTasksNoHora" style="margin-top:6px"></div>
-        </div>
-        <div style="margin-top:16px">
           <b style="font-size:12px;color:var(--text-dim)">✅ Hábitos de hoy</b>
           <div id="calHabitosList" style="margin-top:6px"></div>
+        </div>
+        <div style="margin-top:16px">
+          <b style="font-size:12px;color:var(--text-dim)">⚑ Pendientes</b>
+          <div id="calTasksNoHora" style="margin-top:6px"></div>
         </div>
       </div>
       <div class="cal-day-notes-col">

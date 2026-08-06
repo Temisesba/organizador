@@ -690,7 +690,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Chihuahua';
+const BUILD_VERSION = 'Zacatecas';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3160,6 +3160,7 @@ function fmtDate(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) r
    para no llenar de texto cada fecha suelta de la app. */
 function fmtDateWithWeekday(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return fmtDate(iso); return d.toLocaleDateString('es-MX',{weekday:'long'})+' '+fmtDate(iso); }
 function fmtTime(d){ return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }
+function fmtDateTime(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return fmtDate(iso); return fmtDate(iso)+' '+fmtTime(d); }
 
 function sortArrow(col){ return sortState.col===col ? (sortState.dir==='asc'?' ▲':' ▼') : ''; }
 function tableHTML(notes){
@@ -4193,7 +4194,7 @@ function togglePin(slot){
   const note = id?getNote(id):null;
   if(!note){ showToast('Guarda la nota primero'); return; }
   note.Pinned = note.Pinned?'':'1';
-  persistCurrentNote(note, undefined, slot); showToast(note.Pinned?'📌 Fijada':'Ya no está fijada');
+  queuePersist(note, undefined, slot); showToast(note.Pinned?'📌 Fijada':'Ya no está fijada');
   // Pedido explícito: que 📌 Fijar/📍 Fijado cambien al instante, sin
   // tener que cerrar y volver a abrir la nota para ver el nuevo estado.
   const dBtn = document.getElementById(eid('pinBtnDesktop',slot));
@@ -4257,16 +4258,41 @@ function reopenEditorFor(note, slot){
    síncrona — el cambio "no hacía nada" (o, con contenido roto de un
    pegado previo, se veía como que el contenido "desaparecía"). Usar
    siempre esta función (no persistCurrentNote+reopenEditorFor sueltos)
-   para cualquier acción que reconstruye el editor tras guardar —
-   _saveInFlight (mismo candado POR SLOT que ya sirve para
-   desincronizar guardados encimados, ver doSaveNow) hace que ESE
-   doSaveNow espere a que termine este guardado — y reintente después,
-   ya con el DOM nuevo — en vez de competir con él. */
+   para cualquier acción que reconstruye el editor tras guardar — usa
+   queuePersist (ver ahí) para el candado POR SLOT. */
 function persistAndReopen(note, expectedFecha, slot){
-  const key = slot==='secondary'?'secondary':'primary';
-  _saveInFlight[key] = persistCurrentNote(note, expectedFecha, slot);
-  _saveInFlight[key].finally(()=>{ _saveInFlight[key] = null; });
+  queuePersist(note, expectedFecha, slot);
   reopenEditorFor(note, slot);
+}
+/* Bug real reportado: "sigue pasando" el modal de conflicto falso,
+   sobre todo "cuando alterno entre cornell y no cornell". Causa:
+   toggleCornell/togglePin/etc. mandan su guardado llamando a
+   persistCurrentNote directo, y antes SOLO escribían su propia promesa
+   en _saveInFlight[key] sin fijarse si YA había una ahí — si el
+   autoguardado normal de lo que acababas de escribir (doSaveNow) seguía
+   en vuelo justo cuando tocabas 📐, quedaban DOS requests para la MISMA
+   nota viajando a la vez, y nada garantiza en qué orden le llegan al
+   backend. Si el de acá (que NO revisa conflicto, manda
+   expectedFechaEdicion=undefined) le ganaba la carrera y llegaba
+   PRIMERO, el autoguardado normal (que SÍ revisa, con un
+   expectedFechaEdicion capturado ANTES de que este otro cambiara nada)
+   llegaba después y chocaba contra el valor que este ya había escrito
+   — un conflicto contra SÍ MISMO, sin ningún otro dispositivo de por
+   medio. queuePersist encola: si ya hay algo en camino para este slot,
+   espera a que termine ANTES de mandar la red de este — nunca dos
+   requests de la misma nota viajando a la vez. No bloquea la UI: quien
+   llama (persistAndReopen) sigue reconstruyendo el editor al toque, sin
+   esperar a que la red de nadie termine. */
+function queuePersist(note, expectedFecha, slot){
+  const key = slot==='secondary'?'secondary':'primary';
+  const prior = _saveInFlight[key];
+  const run = (async ()=>{
+    if(prior) await prior.catch(()=>{});
+    return persistCurrentNote(note, expectedFecha, slot);
+  })();
+  _saveInFlight[key] = run;
+  run.finally(()=>{ if(_saveInFlight[key]===run) _saveInFlight[key] = null; });
+  return run;
 }
 /* Migra notas viejas guardadas como Markdown/texto plano a HTML la primera
    vez que se abren — la app ahora edita y guarda HTML directamente. */
@@ -4486,7 +4512,7 @@ function openNoteConflictModal(attempted, currentRow, preserveExpand, slot){
     </div>`;
   };
   const localBox = conflictBoxHTML('local', attempted.Titulo, 'Tu versión (sin guardar)', attempted.Contenido, localFull, 'force', 'Usar esta versión (sobrescribe la guardada)');
-  const serverBox = conflictBoxHTML('server', currentRow.Titulo, 'Versión guardada ('+escHtml(fmtDate(currentRow.FechaEdicion))+')', currentRow.Contenido, serverFull, 'server', 'Usar esta versión (descarta la tuya)');
+  const serverBox = conflictBoxHTML('server', currentRow.Titulo, 'Versión guardada ('+escHtml(fmtDateTime(currentRow.FechaEdicion))+')', currentRow.Contenido, serverFull, 'server', 'Usar esta versión (descarta la tuya)');
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print'; overlay.id='noteConflictOverlay';
   overlay.innerHTML = `<div class="modal" style="width:min(560px,100%)">
     <div class="modal-head"><b>⚠️ Esta nota cambió en otro dispositivo</b></div>
@@ -4530,7 +4556,7 @@ function openNoteConflictMergeModal(){
       <div id="mergeContentArea" class="rich-editor" contenteditable="true" style="min-height:240px;max-height:50vh;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:10px">
         <p><b>— Tu versión (sin guardar) —</b></p>
         ${attempted.Contenido||'<p><br></p>'}
-        <p><b>— Versión guardada (${escHtml(fmtDate(currentRow.FechaEdicion))}) —</b></p>
+        <p><b>— Versión guardada (${escHtml(fmtDateTime(currentRow.FechaEdicion))}) —</b></p>
         ${currentRow.Contenido||'<p><br></p>'}
       </div>
       <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">

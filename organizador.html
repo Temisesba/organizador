@@ -690,7 +690,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Ensenada';
+const BUILD_VERSION = 'Chihuahua';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -4168,7 +4168,7 @@ function editorInnerHTML(note, isModal, slot, backSide){
   </div>
   <div id="${eid('swatchBar',slot)}" class="swatch-row hidden"></div>
   <div id="${eid('routeHints',slot)}" class="hidden"></div>
-  ${cornellOn ? '<div class="cornell-bar"><span class="desktop-only">📐 Modo Cornell — cada fila: columna izq. = pista/palabra clave, columna der. = desarrollo</span><span class="mobile-only">📐 Modo Cornell</span> <button class="mini-btn" style="width:auto" onclick="addCornellRowDirect('+(sOnly||'undefined')+')">+ agregar fila</button></div>' : ''}`;
+  ${cornellOn ? '<div class="cornell-bar"><span class="desktop-only">📐 Modo Cornell — cada fila: columna izq. = pista/palabra clave, columna der. = desarrollo</span><span class="mobile-only">📐 Modo Cornell</span> <button class="mini-btn" style="width:auto" onmousedown="event.preventDefault()" onclick="addCornellRowDirect('+(sOnly||'undefined')+')">+ agregar fila</button></div>' : ''}`;
   const body = `
   <div class="editor-body" id="${eid('editorBody',slot)}">
     <div id="${eid('mainArea',slot)}" class="rich-editor" contenteditable="true" data-placeholder="Escribe aquí…">${note.Contenido||''}</div>
@@ -5235,7 +5235,15 @@ function addCornellRowDirect(slot){
   const mainEl = document.getElementById(eid('mainArea',slot)); if(!mainEl) return;
   const table = mainEl.querySelector('table.cornell-table'); if(!table) return;
   const cols = table.rows[0] ? table.rows[0].cells.length : 2;
-  const row = table.insertRow(-1);
+  // Si el cursor está dentro de una fila de ESTA tabla, la fila nueva se
+  // inserta justo DESPUÉS de esa (puede quedar en medio de otras dos) —
+  // pedido explícito: "que se agregue dnd esta el cursor, no siempre
+  // hasta el final". Si el cursor no está en la tabla (o se perdió la
+  // selección), cae al comportamiento de siempre: al final.
+  const curCell = currentCellFromSelection();
+  const curRow = curCell ? curCell.closest('tr') : null;
+  const insertAt = (curRow && curRow.closest('table')===table) ? curRow.rowIndex+1 : -1;
+  const row = table.insertRow(insertAt);
   for(let i=0;i<cols;i++){ const c=row.insertCell(-1); c.innerHTML='<br>'; if(i===0) c.className='cornell-cue-cell'; }
   placeCaretAtStart(row.cells[0]);
   scheduleSave(slot); scheduleRouteHints(slot);

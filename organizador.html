@@ -502,7 +502,13 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:4px}
 .cal-grid-week .cal-cell{min-height:90px;justify-content:flex-start;align-items:stretch}
 .cal-grid-week .cal-cell .cal-wd,.cal-grid-week .cal-cell .cal-daynum{align-self:center}
-.cal-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 2px;border-radius:8px;cursor:pointer;min-height:40px;background:var(--bg-elev)}
+/* min-width:0 es necesario en celdas de grid con texto largo adentro —
+   sin esto, un título de nota/evento largo (con white-space:nowrap en
+   .cal-week-item) empuja su columna más ancha que el 1fr que le tocaba,
+   y las 7 columnas de la semana ya no caben parejas en la pantalla del
+   celular. Pedido explícito: "se pueden hacer muy anchas las columnas
+   en el celular". */
+.cal-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 2px;border-radius:8px;cursor:pointer;min-height:40px;min-width:0;background:var(--bg-elev)}
 .cal-cell:hover{background:var(--bg-soft)}
 .cal-cell.dim{opacity:.35}
 .cal-cell.today{outline:2px solid var(--accent)}
@@ -512,9 +518,15 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 /* chips de resumen por día en Calendario → Semana (notas) */
 .cal-cell-summary{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%}
 .cal-mini-chip{font-size:9.5px;line-height:1.4;background:var(--bg-soft);border-radius:6px;padding:0 4px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
-/* títulos de eventos/tareas listados por día en Calendario → Semana */
+/* títulos de eventos/tareas listados por día en Calendario → Semana —
+   antes forzados a una sola línea (white-space:nowrap), lo que además
+   de cortar el texto muy pronto era la causa de que las columnas se
+   ensancharan en el celular (ver min-width:0 en .cal-cell arriba).
+   Pedido explícito: "que se pueda ver en dos líneas o 3". line-clamp
+   envuelve el texto normal pero corta con "…" pasado ese número de
+   líneas, en vez de una sola línea rígida. */
 .cal-week-items{display:flex;flex-direction:column;gap:1px;width:100%;margin-top:2px}
-.cal-week-item{font-size:9.5px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;padding:0 2px;border-radius:4px}
+.cal-week-item{font-size:9.5px;line-height:1.35;white-space:normal;word-break:break-word;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;text-align:left;padding:0 2px;border-radius:4px}
 .cal-week-item:hover{background:var(--bg-soft)}
 
 /* Calendario → Día como tablero: agenda (izq, ~65-70%) + notas del día
@@ -529,6 +541,14 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
   .cal-day-notes-col{border-left:none;padding-left:0;border-top:1px solid var(--border);padding-top:14px}
 }
 .cal-agenda-block{margin-bottom:12px}
+/* Registro de tiempo alineado a su hora dentro de la agenda de Día,
+   pero "a un lado" (no mezclado con eventos/tareas/hábitos de ese
+   mismo bloque) — pedido explícito del usuario. */
+.cal-agenda-block-inner{display:flex;gap:10px;align-items:flex-start}
+.cal-agenda-block-main{flex:1;min-width:0}
+.cal-agenda-timelog-col{flex:0 0 auto;max-width:42%;display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+.cal-agenda-timelog-chip{font-size:10.5px;line-height:1.3;background:var(--bg-soft);border-radius:6px;padding:3px 6px;cursor:pointer;text-align:right;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cal-agenda-timelog-chip:hover{background:var(--accent-soft,var(--border))}
 .cal-agenda-hour{font-size:12px;font-weight:700;color:var(--text-dim);margin-bottom:4px}
 .cal-agenda-row{display:flex;align-items:flex-start;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)}
 .cal-agenda-row:last-child{border-bottom:none}
@@ -690,7 +710,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Zacatecas';
+const BUILD_VERSION = 'Aguascalientes';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1092,6 +1112,9 @@ function renderCalAgenda(){
   const horario = horarioItemsForDate(_calViewDate);
   const tasks = tasksForDate(_calViewDate).filter(taskHasHour);
   const habitsConHora = DATA.habitos.filter(h=>h.Activo!=='0' && habitHorasList(h).length);
+  // Solo rangos ya descritos (con nota) — el tramo "pendiente" (en
+  // curso, sin texto todavía) no tiene nada que mostrar en la agenda.
+  const timelogs = timeLogRangesForDate(_calViewDate).filter(r=>r.note);
 
   // Clave de agrupación = minutos desde medianoche (número), NUNCA el
   // texto ya formateado — eventos/tareas usan fmtHM (12h "11:00 a.m."),
@@ -1100,13 +1123,17 @@ function renderCalAgenda(){
   // quedaba separado de "11:00 a.m." del evento) y además no ordenaba
   // cronológicamente bien (comparación de texto, no de hora real).
   const buckets = {};
-  const ensure = mins => buckets[mins] || (buckets[mins] = {events:[],horario:[],tasks:[],habits:[]});
+  const ensure = mins => buckets[mins] || (buckets[mins] = {events:[],horario:[],tasks:[],habits:[],timelog:[]});
   const minsOf = d => d.getHours()*60+d.getMinutes();
   const minsOfHHMM = hhmm => { const [h,m] = String(hhmm).split(':').map(Number); return h*60+(m||0); };
   timedEvents.forEach(ev=>ensure(minsOf(new Date(ev.start.dateTime))).events.push(ev));
   horario.forEach(h=>ensure(minsOfHHMM(h.Hora)).horario.push(h));
   tasks.forEach(n=>ensure(minsOf(new Date(n.Fecha))).tasks.push(n));
   habitsConHora.forEach(h=>habitHorasList(h).forEach(hora=>ensure(minsOfHHMM(hora)).habits.push(h)));
+  // Se agrupa por su hora de INICIO (cuándo de verdad empezó esa
+  // actividad), no la de cierre (cuándo la escribiste) — así queda "a
+  // la hora que corresponde" aunque la hayas anotado retroactivo.
+  timelogs.forEach(r=>ensure(minsOf(r.start)).timelog.push(r));
 
   const allDayHTML = allDayEvents.length ? `<div class="cal-agenda-block">
     <div class="cal-agenda-hour">Todo el día</div>
@@ -1129,11 +1156,17 @@ function renderCalAgenda(){
       .concat(b.horario.map(h=>calAgendaHorarioRowHTML(h, dateStr)))
       .concat(b.tasks.map(calAgendaTaskRowHTML))
       .concat(b.habits.map(h=>calAgendaHabitRowHTML(h, dateStr)));
+    const timelogHTML = b.timelog.map(calAgendaTimelogChipHTML).join('');
     let prefix = '';
     if(nowMins!==null && !nowLineInserted && nowMins < mins){ prefix = nowLineHTML; nowLineInserted = true; }
     return prefix + `<div class="cal-agenda-block">
-      <div class="cal-agenda-hour">${escHtml(fmtHM(labelD))}</div>
-      ${rows.join('')}
+      <div class="cal-agenda-block-inner">
+        <div class="cal-agenda-block-main">
+          <div class="cal-agenda-hour">${escHtml(fmtHM(labelD))}</div>
+          ${rows.join('')}
+        </div>
+        ${timelogHTML?`<div class="cal-agenda-timelog-col">${timelogHTML}</div>`:''}
+      </div>
     </div>`;
   }).join('');
   const trailingNowLine = (nowMins!==null && !nowLineInserted && blockKeys.length) ? nowLineHTML : '';
@@ -1165,6 +1198,11 @@ function calAgendaHorarioRowHTML(h, dateStr){
     <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHorarioOnCalDay('${h.ID}')">
     <span class="cal-agenda-text">🔁 ${escHtml(h.Actividad)}</span>
   </div>`;
+}
+function calAgendaTimelogChipHTML(r){
+  const label = r.note.Titulo || stripHtmlToText(r.note.Contenido||'').slice(0,40) || '(sin descripción)';
+  const rango = fmtHM(r.start)+'–'+fmtHM(r.end);
+  return `<div class="cal-agenda-timelog-chip" title="${escAttr(rango+' — '+label)}" onclick="openNoteFromCalendar('${escAttr(r.note.ID)}')">⏱ ${escHtml(label)}</div>`;
 }
 function renderCalDayDynamic(){
   renderCalAgenda();
@@ -1235,6 +1273,7 @@ function renderCalDayView(){
     <div style="margin:10px 0;display:flex;gap:6px;flex-wrap:wrap">
       <button class="mini-btn" style="width:auto" onclick="openNewEventForm()">+ Nuevo evento</button>
       <button class="mini-btn" style="width:auto" onclick="openQuickTaskModal()">+ Tarea</button>
+      <button class="mini-btn" style="width:auto" onclick="openTimeLogModal(_calViewDate)">⏱ Registro de tiempo y sueño</button>
       <button class="mini-btn" style="width:auto" onclick="openHorarioSettings()">✏️ Mi horario</button>
     </div>
     ${googleAccessToken?'':'<p class="hint" style="color:var(--text-dim);font-size:12px">Conecta tu calendario para ver tus eventos aquí.</p>'}
@@ -3744,6 +3783,19 @@ let _speechRecognition = null;
 let _transcribing = false;
 let _transcribeFinalText = ''; // vive fuera de startTranscription() para poder vaciarla desde cutTranscriptSegment() sin tener que parar/reiniciar el reconocimiento
 let _transcribeTargetNoteId = null; // la nota donde se guarda — sigue siendo esa aunque la cierres y abras/navegues a otras
+/* "🔴 Grabar audio" — pedido explícito: además de transcribir a texto,
+   poder guardar el audio real del micrófono aparte (útil cuando la
+   transcripción automática se equivoca, o para oír el tono/quién dijo
+   qué). Va SUELTO del reconocimiento de voz (_speechRecognition) —
+   puedes transcribir sin grabar, grabar sin transcribir, o ambos a la
+   vez, cada uno con su propio botón. Se sube a Drive (mismo mecanismo
+   que insertImage — cualquier mimeType, no solo imágenes) y se agrega
+   a la nota como enlace, no incrustado — más simple y confiable que
+   intentar reproducir audio de Drive embebido dentro de la nota. */
+let _mediaRecorder = null;
+let _recordedChunks = [];
+let _recording = false;
+let _recordStartMs = 0;
 /* El panel vive suelto en document.body (posición fija, no dentro de
    #editorOverlay) precisamente para que cerrar la nota NO se lo lleve
    consigo — puedes cerrar la nota donde empezaste a dictar, abrir o
@@ -3783,6 +3835,9 @@ function openOrRestoreTranscribePanel(slot){
         <button class="btn" id="transcribeToggleBtn" style="flex:1" onclick="toggleTranscription()">🎙️ Empezar a escuchar</button>
         <button class="btn secondary" onclick="cutTranscriptSegment()" title="Guarda lo transcrito hasta aquí en la nota y sigue escuchando desde cero — para ir usando el texto por partes, en vez de esperar hasta cerrar el panel">✂️ Cortar</button>
       </div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn secondary" id="transcribeRecordBtn" style="flex:1" onclick="toggleRecording()" title="Graba el audio de tu micrófono aparte (no solo el texto) y lo agrega a la nota como un enlace para escucharlo después">🔴 Grabar audio</button>
+      </div>
     </div>`;
   document.body.appendChild(panel);
   bringToFront(panel);
@@ -3804,6 +3859,7 @@ async function closeTranscribePanel(){
   _closingTranscribePanel = true;
   try{
     stopTranscription();
+    await stopRecording();
     await saveTranscriptionIntoCurrentNote();
     const panel = document.getElementById('transcribePanel'); if(panel) panel.remove();
     const chip = document.getElementById('transcribeMinChip'); if(chip) chip.remove();
@@ -3837,15 +3893,108 @@ function restoreTranscribePanel(){
   document.body.classList.add('has-transcribe-panel');
   const chip = document.getElementById('transcribeMinChip'); if(chip) chip.remove();
 }
-/* Guarda hacia _transcribeTargetNoteId, sin importar si esa nota sigue
-   abierta ahorita mismo. Si SÍ sigue abierta (la misma nota, no otra),
-   se agrega directo al DOM en vivo y se hace doSaveNow (mismo mecanismo
-   de siempre — evita la carrera de scheduleSave contra el mainArea que
-   desaparece, ver bug_pattern_flush_on_blur_race). Si ya se cerró (o el
-   usuario abrió otra nota mientras tanto), se guarda directo contra el
-   registro de esa nota por su ID, sin tocar el editor que esté abierto
-   ahora — así cerrar la nota de origen, o navegar a cualquier otra, no
-   interrumpe ni desvía el dictado. */
+function toggleRecording(){
+  if(_recording) stopRecording(); else startRecording();
+}
+async function startRecording(){
+  if(_recording) return;
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder){ showToast('Tu navegador no permite grabar audio'); return; }
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+    _recordedChunks = [];
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+    _mediaRecorder = mimeType ? new MediaRecorder(stream, {mimeType}) : new MediaRecorder(stream);
+    _mediaRecorder._stream = stream; // para parar las pistas del micrófono al terminar
+    _mediaRecorder.ondataavailable = e=>{ if(e.data && e.data.size>0) _recordedChunks.push(e.data); };
+    _mediaRecorder.start();
+    _recording = true;
+    _recordStartMs = Date.now();
+    updateRecordBtn();
+    showToast('🔴 Grabando…');
+  }catch(e){ showToast('No se pudo acceder al micrófono'); }
+}
+/* Regresa una promesa que resuelve cuando el audio YA se subió y quedó
+   agregado a la nota — así closeTranscribePanel() puede esperarla
+   antes de cerrar, igual que ya hace con la transcripción (si no, el
+   panel podía desaparecer con la subida todavía a medias). */
+function stopRecording(){
+  if(!_recording || !_mediaRecorder) return Promise.resolve();
+  _recording = false;
+  updateRecordBtn();
+  const durationMs = Date.now() - _recordStartMs;
+  const mr = _mediaRecorder;
+  return new Promise(resolve=>{
+    mr.onstop = async ()=>{
+      if(mr._stream) mr._stream.getTracks().forEach(t=>t.stop());
+      await uploadRecordedAudio(durationMs);
+      resolve();
+    };
+    mr.stop();
+  });
+}
+function updateRecordBtn(){
+  const btn = document.getElementById('transcribeRecordBtn'); if(!btn) return;
+  btn.classList.toggle('active', _recording);
+  btn.textContent = _recording ? '⏹️ Detener grabación' : '🔴 Grabar audio';
+}
+/* Se sube igual que una imagen (uploadImage en el backend acepta
+   cualquier mimeType/nombre — no hace falta una acción aparte) pero se
+   agrega a la nota como ENLACE a Drive, no incrustado: intentar
+   reproducir audio de Drive embebido dentro del contenido de la nota
+   es mucho menos confiable entre navegadores que solo abrir el enlace
+   y dejar que Drive lo reproduzca en su propio visor. */
+async function uploadRecordedAudio(durationMs){
+  if(!_recordedChunks.length) return;
+  const noteId = _transcribeTargetNoteId;
+  const blob = new Blob(_recordedChunks, { type: (_mediaRecorder && _mediaRecorder.mimeType) || 'audio/webm' });
+  _recordedChunks = [];
+  if(!noteId){ showToast('No se pudo guardar el audio: no hay nota destino'); return; }
+  if(!navigator.onLine){ showToast('No hay conexión — no se pudo subir el audio grabado'); return; }
+  showToast('Subiendo audio…');
+  const base64 = await new Promise((res,rej)=>{
+    const r = new FileReader();
+    r.onload = ()=>res(r.result.split(',')[1]); r.onerror = rej;
+    r.readAsDataURL(blob);
+  });
+  const ext = blob.type.includes('ogg') ? 'ogg' : 'webm';
+  const fileName = 'audio-'+new Date().getTime()+'.'+ext;
+  const up = await apiPost('uploadImage', { imageBase64: base64, mimeType: blob.type, fileName });
+  if(!(up && up.ok)){ showToast('No se pudo subir el audio'+(up&&up.error?': '+up.error:'')); return; }
+  const viewUrl = 'https://drive.google.com/file/d/'+up.fileId+'/view';
+  const html = '<p>🔴 <a href="'+escAttr(viewUrl)+'" target="_blank" rel="noopener">Audio grabado ('+fmtDuration(durationMs)+')</a></p>';
+  const ok = await appendHtmlToNoteById(noteId, html);
+  if(!ok){ showToast('No se pudo guardar el enlace del audio: la nota destino ya no existe'); return; }
+  showToast('🔴 Audio agregado a la nota');
+}
+/* Agrega HTML al FINAL de una nota por su ID, sin importar si sigue
+   abierta ahorita mismo — usado tanto por la transcripción como por el
+   audio grabado (ambos pueden seguir corriendo aunque cierres la nota
+   de origen o navegues a otra). Si la nota destino está abierta
+   (primaria O secundaria), se agrega directo a SU DOM y se guarda con
+   SU slot — si no, el siguiente autoguardado de ese editor lee su DOM
+   (sin este agregado) y lo pisa, perdiéndolo (ver
+   bug_pattern_flush_on_blur_race). Si no está abierta, se guarda
+   directo contra el registro por ID, sin tocar el editor que esté
+   abierto ahora — así cerrar la nota de origen, o navegar a cualquier
+   otra, no interrumpe ni desvía nada. Regresa false si la nota ya no
+   existe (para que el llamador avise).  */
+async function appendHtmlToNoteById(noteId, html){
+  const slot = editingNoteId2===noteId ? 'secondary' : (editingNoteId===noteId ? undefined : null);
+  const mainEl = slot!==null ? document.getElementById(eid('mainArea',slot)) : null;
+  if(mainEl){
+    mainEl.insertAdjacentHTML('beforeend', html);
+    await doSaveNow(slot);
+    return true;
+  }
+  const note = getNote(noteId);
+  if(!note) return false;
+  note.Contenido = (note.Contenido||'') + html;
+  note.FechaEdicion = new Date().toISOString();
+  await saveEntity('NOTAS', note);
+  return true;
+}
+/* Guarda hacia _transcribeTargetNoteId — ver appendHtmlToNoteById para
+   el mecanismo de "nota abierta o no". */
 async function saveTranscriptionIntoCurrentNote(){
   const area = document.getElementById('transcribeCaptureArea'); if(!area) return;
   const text = stripHtmlToText(area.innerHTML).trim();
@@ -3855,27 +4004,10 @@ async function saveTranscriptionIntoCurrentNote(){
   // hizo nada y no había ninguna pista de por qué; ahora al menos avisan.
   const noteId = _transcribeTargetNoteId;
   if(!noteId){ showToast('No se pudo guardar: no hay una nota destino para esta transcripción'); return; }
-  // Si la nota destino está abierta (primaria O secundaria), hay que
-  // agregarse al DOM de ESE editor y guardar con SU slot — si no, el
-  // siguiente doSaveNow de ese editor lee su DOM (sin este texto) y lo
-  // guarda encima, borrando la transcripción recién agregada.
-  const slot = editingNoteId2===noteId ? 'secondary' : (editingNoteId===noteId ? undefined : null);
-  const mainEl = slot!==null ? document.getElementById(eid('mainArea',slot)) : null;
-  if(mainEl){
-    const cueP = document.createElement('p'); cueP.innerHTML = '<b>#transcripcion</b>';
-    mainEl.appendChild(cueP);
-    text.split(/\n+/).forEach(line=>{ if(!line.trim()) return; const p=document.createElement('p'); p.textContent=line; mainEl.appendChild(p); });
-    await doSaveNow(slot);
-  } else {
-    const note = getNote(noteId);
-    if(!note){ showToast('No se pudo guardar: la nota destino ya no existe'); return; }
-    let html = note.Contenido || '';
-    html += '<p><b>#transcripcion</b></p>';
-    text.split(/\n+/).forEach(line=>{ if(line.trim()) html += '<p>'+escHtml(line)+'</p>'; });
-    note.Contenido = html;
-    note.FechaEdicion = new Date().toISOString();
-    await saveEntity('NOTAS', note);
-  }
+  let html = '<p><b>#transcripcion</b></p>';
+  text.split(/\n+/).forEach(line=>{ if(line.trim()) html += '<p>'+escHtml(line)+'</p>'; });
+  const ok = await appendHtmlToNoteById(noteId, html);
+  if(!ok){ showToast('No se pudo guardar: la nota destino ya no existe'); return; }
   showToast('🎙️ Transcripción agregada a la nota');
 }
 /* "Cortar": guarda lo transcrito hasta ahora (mismo mecanismo que al
@@ -6075,14 +6207,37 @@ function renderHabitRowsList(){
    cada una se guarda como su propia notita dentro del cuaderno especial
    "Datos generales", ordenadas por fecha — el modal se queda abierto para
    seguir metiendo una tras otra sin tener que reabrirlo cada vez. */
+/* Botones predeterminados (Canción, Película…) para no tener que
+   escribir el "#etiqueta" a mano cada vez — pedido explícito, editable
+   desde Configuración → Dato general (ver renderSettingsDatoPresets).
+   Guardado en localStorage (como los favoritos de la barra de
+   herramientas o del explorador): es una preferencia de ESTE
+   dispositivo, no un dato que tenga sentido sincronizar entre todos. */
+const DATO_PRESETS_DEFAULT = ['Canción','Película','Serie','Libro'];
+function getDatoPresets(){
+  try{ const v = JSON.parse(localStorage.getItem('org_dato_presets')); return Array.isArray(v) ? v : DATO_PRESETS_DEFAULT.slice(); }
+  catch(e){ return DATO_PRESETS_DEFAULT.slice(); }
+}
+function setDatoPresets(list){ localStorage.setItem('org_dato_presets', JSON.stringify(list)); }
+function applyDatoPreset(label){
+  const inp = document.getElementById('quickDatoInput'); if(!inp) return;
+  inp.value = '#'+label+', ';
+  inp.focus();
+  inp.setSelectionRange(inp.value.length, inp.value.length);
+}
 function openQuickDatoModal(){
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  const presets = getDatoPresets();
+  const presetsHTML = presets.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+      ${presets.map(p=>`<button class="mini-btn" style="width:auto" onclick="applyDatoPreset('${escAttr(p)}')">${escHtml(p)}</button>`).join('')}
+    </div>` : '';
   overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
     <div class="modal-head"><b>⚡ Dato general</b><button class="icon-btn" onclick="hideGlobalTagSuggest();this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
       <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">
-        "#etiqueta, lo que quieras" — se guarda solo en tu listado de Datos generales, ordenado por fecha. Ábrela después para agregarle más.
+        "#etiqueta, lo que quieras" — se guarda solo en tu listado de Datos generales, ordenado por fecha. Ábrela después para agregarle más. Los botones de abajo llenan la etiqueta por ti (editables en Configuración → Dato general).
       </p>
+      ${presetsHTML}
       <input type="text" id="quickDatoInput" value="#" placeholder="#cancion, ayer la vi">
       <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center">
         <button class="btn" id="quickDatoSaveBtn" onclick="saveQuickDato()">Guardar</button>
@@ -9179,6 +9334,7 @@ function openSettings(){
       <button onclick="settingsTab(this,'plantillas')">Plantillas</button>
       <button onclick="settingsTab(this,'appearance')">Apariencia</button>
       <button onclick="settingsTab(this,'trash')">Papelera</button>
+      <button onclick="settingsTab(this,'datopresets')">Dato general</button>
       <button onclick="settingsTab(this,'mejoras')">Mejoras</button>
       <button onclick="settingsTab(this,'connection')">Conexión</button>
     </div>
@@ -9201,6 +9357,7 @@ function settingsRenderTab(tab){
   if(tab==='connection') renderSettingsConnection();
   if(tab==='trash') renderSettingsTrash();
   if(tab==='mejoras') renderSettingsMejoras();
+  if(tab==='datopresets') renderSettingsDatoPresets();
 }
 function settingsTab(btn, tab){
   btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
@@ -9752,6 +9909,28 @@ Colación 2`);
    te ocurran, aunque no me las digas de una vez — se guardan como notas
    normales en un cuaderno reservado, así que también son buscables,
    editables y exportables como cualquier otra nota. */
+/* Editable desde Configuración, NO desde una plantilla de campos —
+   pedido explícito: "deja que yo decida esto en Configuración". Un
+   <textarea> (no un <input> de una sola línea) para que Enter meta un
+   salto de línea normal — mismo motivo/arreglo que ya se hizo para
+   Mejoras (ver renderSettingsMejoras): con un solo renglón, escribir
+   varios presets seguidos se salía por un lado y no había forma de
+   separarlos con Enter. */
+function renderSettingsDatoPresets(){
+  const body = document.getElementById('settingsBody'); if(!body) return;
+  const presets = getDatoPresets();
+  body.innerHTML = `<p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">
+      Botones rápidos que aparecen en "⚡ Dato general" — uno por línea, sin # (se agrega solo). Ej. Canción, Película, Serie, Libro.
+    </p>
+    <textarea id="datoPresetsInput" rows="8" style="width:100%;resize:vertical;min-height:140px">${escHtml(presets.join('\n'))}</textarea>
+    <div style="margin-top:8px"><button class="btn" onclick="saveDatoPresetsFromSettings()">Guardar</button></div>`;
+}
+function saveDatoPresetsFromSettings(){
+  const inp = document.getElementById('datoPresetsInput'); if(!inp) return;
+  const list = inp.value.split('\n').map(s=>s.trim()).filter(Boolean);
+  setDatoPresets(list);
+  showToast('Guardado');
+}
 async function renderSettingsMejoras(){
   const body = document.getElementById('settingsBody');
   body.innerHTML = `<p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">

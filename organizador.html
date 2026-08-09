@@ -509,6 +509,18 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
    celular. Pedido explícito: "se pueden hacer muy anchas las columnas
    en el celular". */
 .cal-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 2px;border-radius:8px;cursor:pointer;min-height:40px;min-width:0;background:var(--bg-elev)}
+/* Con min-width:0 las columnas ya no se salen de la pantalla, pero de
+   por sí quedaban angostas en celular (el modal del calendario resta su
+   propio padding dos veces — el del overlay y el de .modal-body — antes
+   de repartir el resto entre 7 columnas). Pedido explícito tras ver el
+   resultado: "esta demasiado flaco mejor mas ancho". En vez de tocar el
+   padding general de CUALQUIER modal (afectaría a todos los demás), se
+   le devuelve ese espacio SOLO a la cuadrícula de Semana/Mes con
+   márgenes negativos que cancelan el padding lateral de .modal-body. */
+@media (max-width:640px){
+  .cal-grid-head,.cal-grid{ margin-left:-14px; margin-right:-14px; gap:2px }
+  .cal-cell{ padding:6px 1px }
+}
 .cal-cell:hover{background:var(--bg-soft)}
 .cal-cell.dim{opacity:.35}
 .cal-cell.today{outline:2px solid var(--accent)}
@@ -710,7 +722,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Aguascalientes';
+const BUILD_VERSION = 'Colima';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -6238,7 +6250,7 @@ function openQuickDatoModal(){
         "#etiqueta, lo que quieras" — se guarda solo en tu listado de Datos generales, ordenado por fecha. Ábrela después para agregarle más. Los botones de abajo llenan la etiqueta por ti (editables en Configuración → Dato general).
       </p>
       ${presetsHTML}
-      <input type="text" id="quickDatoInput" value="#" placeholder="#cancion, ayer la vi">
+      <textarea id="quickDatoInput" rows="2" style="resize:vertical;min-height:40px" placeholder="#cancion, ayer la vi (Enter para salto de línea, Ctrl+Enter para guardar)">#</textarea>
       <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center">
         <button class="btn" id="quickDatoSaveBtn" onclick="saveQuickDato()">Guardar</button>
         <button class="mini-btn" style="width:auto" onclick="openNoteEditor(null);this.closest('.modal-overlay').remove()">Ver como nota completa →</button>
@@ -6251,7 +6263,12 @@ function openQuickDatoModal(){
   inp.focus();
   inp.setSelectionRange(1,1); // cursor justo después del # que ya viene puesto
   inp.addEventListener('input', ()=>updateTagSuggestFromInput(inp));
-  inp.addEventListener('keydown', e=>{ if(handleTagSuggestKeydown(e)) return; if(e.key==='Enter'){ e.preventDefault(); saveQuickDato(); } });
+  // Antes Enter guardaba de una — en celular eso significa que NUNCA se
+  // puede escribir un salto de línea real dentro del dato (el teclado
+  // solo tiene Enter). Ahora Enter mete un salto de línea normal (como
+  // cualquier <textarea>) y Ctrl+Enter guarda — mismo criterio que ya
+  // se usa en Configuración → Mejoras.
+  inp.addEventListener('keydown', e=>{ if(handleTagSuggestKeydown(e)) return; if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); saveQuickDato(); } });
   inp.addEventListener('blur', ()=>scheduleHideGlobalTagSuggest());
   renderQuickDatoList();
 }
@@ -6285,7 +6302,11 @@ async function saveQuickDato(){
   // ya cubre el caso de doble-clic; esto cubre Enter+clic entremezclados.
   if(btn && btn.disabled) return;
   await withSavingFeedback(btn, async ()=>{
-    const m = raw.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)\s*[,:]?\s*(.*)$/);
+    // [\s\S]* en vez de .* — el texto puede traer saltos de línea reales
+    // ahora que el campo es un <textarea> (antes Enter guardaba de una,
+    // así que nunca llegaba un "\n" hasta aquí); "." por sí solo no
+    // cruza un salto de línea.
+    const m = raw.match(/^#([a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+)\s*[,:]?\s*([\s\S]*)$/);
     const tag = m ? m[1] : '';
     const texto = m ? m[2] : raw;
     // si la etiqueta coincide con el auto-ruteo de algún cuaderno (ej.
@@ -6294,7 +6315,10 @@ async function saveQuickDato(){
     // Inbox normal (autoRouteNotebook), aplicado aquí también.
     const autoNb = tag ? DATA.notebooks.find(nb2 => nb2.TagAuto && String(nb2.TagAuto).replace(/^#/,'')===tag) : null;
     const nb = autoNb || await ensureDatosGeneralesNotebook();
-    const titulo = tag ? ('#'+tag) : raw.slice(0,40);
+    // .replace(/\s+/g,' ') — si no hay "#etiqueta" (así que el título
+    // sale del texto crudo) y el texto trae saltos de línea reales, que
+    // no se cuele un "\n" literal dentro del título de una línea.
+    const titulo = tag ? ('#'+tag) : raw.replace(/\s+/g,' ').trim().slice(0,40);
     // mismo título+texto que algo guardado hace unos segundos en el mismo
     // cuaderno = casi seguro es un reintento del mismo dato, no uno nuevo.
     const dupe = DATA.notas.find(n2 => !n2.Papelera && n2.Notebook===nb.Nombre && n2.Titulo===titulo && stripHtmlToText(n2.Contenido||'')===texto.trim() && (Date.now()-new Date(n2.Fecha).getTime())<8000);
@@ -6308,7 +6332,7 @@ async function saveQuickDato(){
     const note = {
       ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(),
       Titulo: titulo,
-      Contenido: '<p>'+escHtml(texto)+'</p>',
+      Contenido: '<p>'+escHtml(texto).replace(/\n/g,'<br>')+'</p>',
       Tags: tag||'', Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:''
     };
     // saveEntity ya deja DATA al día de inmediato (síncrono) antes de su

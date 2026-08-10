@@ -24,7 +24,7 @@ function crearMiSheet() {
 // (Project Settings → Script Properties), NO aquí — este archivo se sube
 // a un repo de GitHub público y no debe llevar llaves reales.
 const GEMINI_KEY = PropertiesService.getScriptProperties().getProperty('GEMINI_KEY');
-const GEMINI_API = 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=' + GEMINI_KEY;
+const GEMINI_API = 'https://generativelanguage.googleapis.com/v1/models/gemini-3.6-flash:generateContent?key=' + GEMINI_KEY;
 const CLAUDE_KEY = PropertiesService.getScriptProperties().getProperty('CLAUDE_KEY');
 const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';

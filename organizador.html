@@ -414,6 +414,11 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 /* Reordenar Mi Horario arrastrando (mantener presionado ~2s arma el
    arrastre, mismo patrón que Itinerario) — ver initHorarioDragRow. */
 .hor-dragging{opacity:.9;box-shadow:var(--shadow);background:var(--bg-elev);border-radius:8px;touch-action:none}
+/* Franja que se va llenando abajo del renglón mientras lo mantienes
+   presionado (2s) — sin esto no había NINGÚN aviso visual de que el
+   arrastre se estaba armando, así que parecía que no pasaba nada.
+   Mismo mecanismo que .drag-arm-fill en Itinerario. */
+.hor-drag-arm-fill{position:absolute;left:0;bottom:0;height:4px;width:0;background:var(--accent);opacity:.8;transition:width 2s linear;border-radius:0 0 8px 8px;pointer-events:none;z-index:2}
 .hor-drag-placeholder{border:2px dashed var(--accent);border-radius:8px;margin:2px 0;background:var(--bg-soft)}
 .hor-drop-confirm{position:fixed;display:flex;gap:4px;background:var(--bg-elev);border:1px solid var(--border);border-radius:20px;box-shadow:var(--shadow);padding:3px;z-index:4000}
 .hor-drop-confirm .icon-btn{padding:5px 9px}
@@ -741,7 +746,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Puebla';
+const BUILD_VERSION = 'Merida';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1092,17 +1097,39 @@ function renderHorarioList(){
    con ella (ver syncHorarioHabitLink — misma idea, mantenerlas
    iguales). */
 let _horDragTimer = null;
+const HOR_DRAG_HOLD_MS = 2000;
 function initHorarioDragRow(rowEl, id){
   rowEl.addEventListener('pointerdown', e=>{
     if(e.target.closest('.icon-btn')) return; // no interferir con ✎/🗑️
     if(_horDragTimer) return;
+    // Bug real reportado: sin esto no se veía NADA mientras mantenías
+    // presionado — parecía que la función no estaba, aunque el
+    // temporizador sí corría por dentro. Copiado del mismo mecanismo de
+    // Itinerario (.drag-arm-fill): una franja que se va llenando abajo
+    // del renglón durante los 2s, avisando "sigue presionando".
+    const fill = document.createElement('div');
+    fill.className = 'hor-drag-arm-fill';
+    rowEl.style.position = rowEl.style.position || 'relative';
+    rowEl.appendChild(fill);
+    requestAnimationFrame(()=>{ fill.style.width = '100%'; });
+    // -webkit-touch-callout/-user-select: en celular, mantener
+    // presionado sobre texto normalmente dispara el menú nativo de
+    // "copiar/seleccionar" del sistema — eso le gana la jugada a
+    // nuestro propio temporizador y cancela el gesto antes de armarse.
+    rowEl.style.webkitTouchCallout = 'none';
+    rowEl.style.webkitUserSelect = 'none';
+    rowEl.style.userSelect = 'none';
     const startY = e.clientY, startX = e.clientX;
-    _horDragTimer = setTimeout(()=>{ _horDragTimer=null; armHorarioDrag(rowEl, id, e); }, 2000);
+    _horDragTimer = setTimeout(()=>{ _horDragTimer=null; fill.remove(); armHorarioDrag(rowEl, id, e); }, HOR_DRAG_HOLD_MS);
     const cancelIfMoved = ev=>{
-      if(Math.abs(ev.clientY-startY)>10 || Math.abs(ev.clientX-startX)>10) cleanup();
+      if(Math.abs(ev.clientY-startY)>12 || Math.abs(ev.clientX-startX)>12) cleanup();
     };
     const cleanup = ()=>{
       clearTimeout(_horDragTimer); _horDragTimer=null;
+      fill.remove();
+      rowEl.style.webkitTouchCallout = '';
+      rowEl.style.webkitUserSelect = '';
+      rowEl.style.userSelect = '';
       document.removeEventListener('pointermove', cancelIfMoved);
       document.removeEventListener('pointerup', cleanup);
     };
@@ -1139,6 +1166,7 @@ function armHorarioDrag(rowEl, id, startEvent){
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', onUp);
     rowEl.style.position=''; rowEl.style.left=''; rowEl.style.top=''; rowEl.style.width=''; rowEl.style.zIndex='';
+    rowEl.style.webkitTouchCallout = ''; rowEl.style.webkitUserSelect = ''; rowEl.style.userSelect = '';
     rowEl.classList.remove('hor-dragging');
     if(!state.moved){ placeholder.remove(); return; }
     const list = document.getElementById('horarioList');

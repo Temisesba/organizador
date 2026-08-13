@@ -15,6 +15,7 @@
   --danger:#b3432b; --success:#3d7a4f;
   --radius:10px; --shadow:0 2px 10px rgba(40,30,10,.08);
   --mark-y:#fbe28a; --mark-g:#bfe3b0; --mark-p:#f0bcd8; --mark-b:#b9d8f2;
+  --link-color:#2a6df5;
   --font: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   --transition: .15s ease;
 }
@@ -25,6 +26,7 @@
   --danger:#e37c62; --success:#7fc794;
   --shadow:0 2px 14px rgba(0,0,0,.4);
   --mark-y:#7a6626; --mark-g:#2f5c3a; --mark-p:#6b3652; --mark-b:#2b4f6b;
+  --link-color:#7aaaff;
 }
 :root[data-theme="eink"]{
   --bg:#ffffff; --bg-elev:#ffffff; --bg-soft:#f0f0f0;
@@ -34,6 +36,7 @@
   --radius:2px; --shadow:none;
   --mark-y:#ffe066; --mark-g:#8fd98f; --mark-p:#e896c4; --mark-b:#7fb8e8;
   --transition: 0s;
+  --link-color:#000000;
 }
 :root[data-theme="eink"] *{ animation:none!important; transition:none!important; box-shadow:none!important; }
 *{box-sizing:border-box}
@@ -42,6 +45,16 @@ body{margin:0;font-family:var(--font);background:var(--bg);color:var(--text);fon
 button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
 button{cursor:pointer}
 a{color:var(--accent)}
+/* Pedido explícito: "que cuando hay ligas se pongan en azulito" — el
+   #a{color:var(--accent)} de arriba es a propósito para botones/enlaces
+   de navegación de la app (usan el color de marca en vez de un azul
+   genérico), pero dentro del CONTENIDO de una nota (pegado de otra
+   página, el enlace del audio grabado, etc.) eso lo hacía ver como
+   texto normal, sin la señal visual de "esto es un link" a la que
+   cualquiera está acostumbrado. Solo se toca .rich-editor (donde vive
+   el HTML real de una nota — editor, vista previa de conflicto,
+   modal de combinar), no los enlaces de la interfaz misma. */
+.rich-editor a{color:var(--link-color);text-decoration:underline}
 ::selection{background:var(--mark-y)}
 .hidden{display:none!important}
 .icon-btn{background:none;border:1px solid transparent;border-radius:8px;padding:7px 9px;display:inline-flex;align-items:center;gap:5px;color:var(--text)}
@@ -722,7 +735,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Colima';
+const BUILD_VERSION = 'Tepic';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -896,6 +909,7 @@ function openHorarioSettings(){
           <input type="time" id="horarioFormHora" style="flex:none;width:110px">
           <input type="text" id="horarioFormActividad" style="flex:1" placeholder="ej. Levantarme">
         </div>
+        <input type="text" id="horarioFormObs" style="margin-bottom:6px" placeholder="Nota para esta actividad (opcional)">
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px" id="horarioFormDiasChips"></div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
           <button class="mini-btn" style="width:auto" onclick="setHorarioFormDaysPreset('LV')">Lun-Vie</button>
@@ -946,12 +960,13 @@ async function saveHorarioForm(){
   // (útil normalmente, pero aquí ese "antes" era "💾 Guardar cambios" si
   // se estaba editando, así que llamarlo adentro dejaba el botón mal
   // etiquetado después de guardar).
+  const obs = (document.getElementById('horarioFormObs').value||'').trim();
   await withSavingFeedback(btn, async ()=>{
     // saveEntity ya deja DATA al día de inmediato (síncrono) antes de su
     // propio await interno al backend — esperar ESE viaje de ida y
     // vuelta antes de refrescar la pantalla es lo que hacía sentir el
     // guardado lento (mismo reporte que con Tareas, misma causa).
-    saveEntity('HORARIO', { ID:id, Hora:hora, Actividad:actividad, Dias:Array.from(window._horarioFormDays).join(',') });
+    saveEntity('HORARIO', { ID:id, Hora:hora, Actividad:actividad, Dias:Array.from(window._horarioFormDays).join(','), Observaciones:obs });
   });
   cancelHorarioEdit();
   renderHorarioList();
@@ -977,6 +992,7 @@ function editHorarioItem(id){
   window._horarioEditingId = id;
   document.getElementById('horarioFormHora').value = normalizeTimeValue(h.Hora);
   document.getElementById('horarioFormActividad').value = h.Actividad||'';
+  document.getElementById('horarioFormObs').value = h.Observaciones||'';
   window._horarioFormDays = new Set(String(h.Dias||'').split(',').filter(Boolean));
   renderHorarioFormDiasChips();
   const btn = document.getElementById('horarioFormSaveBtn'); if(btn) btn.textContent = '💾 Guardar cambios';
@@ -987,6 +1003,7 @@ function cancelHorarioEdit(){
   window._horarioEditingId = null;
   const horaInp = document.getElementById('horarioFormHora'); if(horaInp) horaInp.value = '';
   const actInp = document.getElementById('horarioFormActividad'); if(actInp) actInp.value = '';
+  const obsInp = document.getElementById('horarioFormObs'); if(obsInp) obsInp.value = '';
   window._horarioFormDays = new Set();
   renderHorarioFormDiasChips();
   const btn = document.getElementById('horarioFormSaveBtn'); if(btn) btn.textContent = '+ agregar';
@@ -996,7 +1013,7 @@ function renderHorarioList(){
   const el = document.getElementById('horarioList'); if(!el) return;
   const rows = (DATA.horario||[]).slice().sort((a,b)=>String(a.Hora||'').localeCompare(String(b.Hora||'')));
   el.innerHTML = rows.length ? rows.map(h=>`<div class="settings-row">
-      <span style="flex:1"><b>${escHtml(h.Hora)}</b> ${escHtml(h.Actividad)} <span style="color:var(--text-dim);font-size:11px">${escHtml(String(h.Dias||'').split(',').join(' '))}</span></span>
+      <span style="flex:1"><b>${escHtml(h.Hora)}</b> ${escHtml(h.Actividad)} <span style="color:var(--text-dim);font-size:11px">${escHtml(String(h.Dias||'').split(',').join(' '))}</span>${h.Observaciones?`<br><span style="color:var(--text-dim);font-size:11.5px">📝 ${escHtml(h.Observaciones)}</span>`:''}</span>
       <button class="icon-btn" onclick="editHorarioItem('${h.ID}')" title="Editar">✎</button>
       <button class="icon-btn" onclick="deleteHorarioItem('${h.ID}')">🗑️</button>
     </div>`).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada todavía — agrega tu primera actividad abajo.</p>';
@@ -1208,7 +1225,7 @@ function calAgendaHorarioRowHTML(h, dateStr){
   const done = !!DATA.horario_log.find(l=>l.HorarioID===h.ID && new Date(l.Fecha).toDateString()===dateStr);
   return `<div class="cal-agenda-row" style="cursor:pointer" onclick="toggleHorarioOnCalDay('${h.ID}')">
     <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHorarioOnCalDay('${h.ID}')">
-    <span class="cal-agenda-text">🔁 ${escHtml(h.Actividad)}</span>
+    <span class="cal-agenda-text">🔁 ${escHtml(h.Actividad)}${h.Observaciones?`<br><span style="color:var(--text-dim);font-size:11.5px">📝 ${escHtml(h.Observaciones)}</span>`:''}</span>
   </div>`;
 }
 function calAgendaTimelogChipHTML(r){
@@ -4604,7 +4621,15 @@ async function persistCurrentNote(note, expectedFecha, slot){
   if(stillEditingThisNote) setSlotEditingId(slot, saved.ID);
   ensureTagsRegistered(effectiveTags(saved).join(' '));
   renderSidebar();
-  if(currentView!=='table'){ /* keep list roughly fresh without losing focus */ }
+  // Pedido explícito: "no se modifica arriba en las notificaciones si
+  // modifico la nota sigue igual" — el aviso de "X pendiente" (arriba
+  // de toda la app, fuera del editor) depende de campos que se editan
+  // aquí (Fecha de una tarea, último llenado de una plantilla…), pero
+  // antes solo se refrescaba la barra lateral tras guardar, nunca este
+  // aviso. renderReminderBanner() vive fuera del editor (nunca se
+  // destruye/recrea junto con él), así que refrescarlo en cada
+  // autoguardado no le quita el foco a lo que estés escribiendo.
+  renderReminderBanner();
   return saved;
 }
 /* Aviso de edición concurrente (bug real reportado: "escribí en la
@@ -5624,11 +5649,17 @@ function deleteNoteUI(id, slot){
   if(!confirm('¿Mover esta nota a la papelera? Se puede recuperar desde ahí.')) return;
   const note = getNote(id); if(!note) return;
   note.Papelera = new Date().toISOString();
-  saveEntity('NOTAS', note).then(()=>{
-    if(currentView==='split' && side){ setSlotEditingId(slot, null); if(slot==='secondary') _splitSecondarySide=null; else _splitPrimarySide=null; }
-    else { const ov = document.getElementById('editorOverlay'); if(ov) ov.remove(); const minChip = document.getElementById('editorMinChip'); if(minChip) minChip.remove(); editingNoteId=null; }
-    renderAll(); showToast('🗑️ Movida a la papelera');
-  });
+  // saveEntity ya deja DATA al día de inmediato (síncrono) antes de su
+  // propio await interno al backend — esperar ESE viaje de ida y vuelta
+  // antes de refrescar la pantalla (con .then()) es justo lo que hacía
+  // sentir que "no se elimina al instante" (mismo patrón ya arreglado
+  // antes en Tareas/Horario/Cuadernos/Dato general, se había quedado
+  // pendiente aquí). El request al backend sigue en camino solo, sin
+  // que la pantalla tenga que esperarlo.
+  saveEntity('NOTAS', note);
+  if(currentView==='split' && side){ setSlotEditingId(slot, null); if(slot==='secondary') _splitSecondarySide=null; else _splitPrimarySide=null; }
+  else { const ov = document.getElementById('editorOverlay'); if(ov) ov.remove(); const minChip = document.getElementById('editorMinChip'); if(minChip) minChip.remove(); editingNoteId=null; }
+  renderAll(); showToast('🗑️ Movida a la papelera');
 }
 function trashedNotes(){ return DATA.notas.filter(n=>n.Papelera).sort((a,b)=>String(b.Papelera).localeCompare(String(a.Papelera))); }
 function renderSettingsTrash(){
@@ -6773,7 +6804,8 @@ function deleteTimeLogEntryUI(id){
   if(!confirm('¿Borrar este registro de tiempo? (se manda a la papelera)')) return;
   const note = getNote(id); if(!note) return;
   note.Papelera = new Date().toISOString();
-  saveEntity('NOTAS', note).then(()=>{ renderTimeLogView(); renderSidebar(); });
+  saveEntity('NOTAS', note);
+  renderTimeLogView(); renderSidebar();
 }
 
 /* ============ Exportar a PDF (impresión del navegador) ============ */
@@ -7963,7 +7995,8 @@ function deleteTemplateUI(id){
   if(!confirm('¿Mover esta plantilla a la papelera? Se puede recuperar desde ahí, junto con su historial.')) return;
   const p = DATA.plantillas.find(x=>x.ID===id); if(!p) return;
   p.Papelera = new Date().toISOString();
-  saveEntity('PLANTILLAS', p).then(()=>{ renderChecklistBody(); renderSidebar(); renderSettingsPlantillas(); showToast('🗑️ Movida a la papelera'); });
+  saveEntity('PLANTILLAS', p);
+  renderChecklistBody(); renderSidebar(); renderSettingsPlantillas(); showToast('🗑️ Movida a la papelera');
 }
 function restoreTemplateUI(id){
   const p = DATA.plantillas.find(x=>x.ID===id); if(!p) return;
@@ -9998,9 +10031,16 @@ async function addMejora(){
 function renderMejorasList(){
   const wrap = document.getElementById('mejorasList'); if(!wrap) return;
   const items = activeNotes().filter(n=>n.Notebook==='Mejoras Organizador').sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha)));
-  wrap.innerHTML = items.map(n=>`<div class="settings-row">
-      <span style="flex:1;font-size:13px;cursor:pointer" onclick="openNoteEditor('${n.ID}')">${escHtml(noteSnippetText(n).slice(0,90))}</span>
-      <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
+  // Pedido explícito: "en mejoras se vea el texto completo, como veras
+  // se corta" — antes se recortaba a 90 caracteres a la mitad de la
+  // palabra (sin "…" ni nada), así que ideas largas quedaban
+  // incomprensibles en la lista. min-width:0 es necesario para que el
+  // span de veras envuelva el texto en vez de desbordar la fila (ver el
+  // mismo problema/arreglo en .cal-cell, bug de flex/grid con
+  // min-width:auto por defecto).
+  wrap.innerHTML = items.map(n=>`<div class="settings-row" style="align-items:flex-start">
+      <span style="flex:1;min-width:0;font-size:13px;cursor:pointer;white-space:pre-wrap" onclick="openNoteEditor('${n.ID}')">${escHtml(noteSnippetText(n))}</span>
+      <span style="color:var(--text-dim);font-size:11px;flex:none">${fmtDate(n.Fecha)}</span>
       <button class="icon-btn" onclick="deleteMejoraUI('${n.ID}')">🗑️</button>
     </div>`).join('') || '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada todavía — el primero que agregues aparece aquí.</p>';
 }
@@ -10031,7 +10071,70 @@ function boot(){
   initEditorResizerOnce();
   initImageResizerOnce();
   initResizableTablesObserver();
+  initBackButtonNav();
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+}
+/* Pedido explícito: "boton de atras del cel no me saq de la app que
+   sea atras real" — antes el botón/gesto atrás de Android no tenía
+   NINGUNA entrada de historial que consumir dentro de la app, así que
+   cerraba directo la nota/modal que estuvieras viendo saliéndose de la
+   app entera (o del navegador). En vez de tocar los ~40 sitios que
+   abren un modal (uno por uno, altísimo riesgo de olvidar alguno), se
+   detecta automáticamente con un MutationObserver sobre
+   document.body: cada vez que aparece una "capa" (.modal-overlay o
+   #editorOverlay — SIEMPRE se cuelgan directo de <body>, nunca
+   anidados) se mete una entrada nueva al historial; atrás la consume y
+   cierra ESA capa en vez de salir de la app. Deliberadamente NO incluye
+   los paneles de Transcribir/Asistente IA (se cierran async, esperando
+   a guardar antes de quitarse del DOM — mezclar timing async con el
+   candado _backNavPopping de abajo es un caso más raro de acertar bien
+   y son paneles que ya se cierran fácil a mano). */
+const BACK_NAV_LAYER_SELECTOR = '.modal-overlay, #editorOverlay';
+// Bug real encontrado al probar esto: reaccionar a cada agregado/quitado
+// POR SEPARADO se rompía justo en el caso más común — abrir una nota
+// NUEVA mientras OTRA ya estaba abierta reemplaza #editorOverlay viejo
+// por uno nuevo en la MISMA operación síncrona (quitar el viejo, poner
+// el nuevo). Eso disparaba un history.back() (por el "quitado") seguido
+// AL TOQUE de un history.pushState() (por el "agregado") — la
+// especificación no garantiza cómo interactúan un back() todavía
+// pendiente con un pushState() inmediatamente después, y en la
+// práctica terminaba saliéndose del historial de la app por completo
+// (el mismo bug que se estaba arreglando, ahora causado por el propio
+// arreglo). Solución: en vez de reaccionar mutación por mutación, se
+// cuenta el CAMBIO NETO de capas dentro de cada tanda de mutaciones
+// (el observer ya las entrega agrupadas) — reemplazar una nota por
+// otra da neto 0 (no toca el historial en absoluto, sigue en la misma
+// "profundidad"), que es además lo semánticamente correcto.
+let _backNavClosingViaPopstate = false; // true mientras EL POPSTATE HANDLER está cerrando una capa — su historial ya se consumió con ESE popstate, no hay que restarlo de nuevo
+let _backNavCorrecting = false; // true mientras mandamos un history.go(-N) para EMPAREJAR historial tras cierres manuales — el/los popstate que resulten de ESO no deben cerrar nada más
+function topBackNavLayer(){
+  const layers = Array.from(document.querySelectorAll(BACK_NAV_LAYER_SELECTOR)).filter(el=>getComputedStyle(el).display!=='none');
+  return layers.length ? layers[layers.length-1] : null;
+}
+function initBackButtonNav(){
+  if(!window.history || !window.history.pushState) return;
+  history.replaceState({ orgBase:true }, '');
+  const observer = new MutationObserver(mutations=>{
+    let added = 0, removed = 0;
+    mutations.forEach(m=>{
+      m.addedNodes.forEach(node=>{ if(node.nodeType===1 && node.matches && node.matches(BACK_NAV_LAYER_SELECTOR)) added++; });
+      m.removedNodes.forEach(node=>{ if(node.nodeType===1 && node.matches && node.matches(BACK_NAV_LAYER_SELECTOR)) removed++; });
+    });
+    if(!added && !removed) return;
+    if(_backNavClosingViaPopstate){ _backNavClosingViaPopstate = false; removed = Math.max(0, removed-1); }
+    const net = added - removed;
+    if(net > 0){ for(let i=0;i<net;i++) history.pushState({ orgLayer:true }, ''); }
+    else if(net < 0 && history.state && history.state.orgLayer){ _backNavCorrecting = true; history.go(net); }
+  });
+  observer.observe(document.body, { childList:true });
+  window.addEventListener('popstate', ()=>{
+    if(_backNavCorrecting){ _backNavCorrecting = false; return; } // solo emparejando historial tras cierres manuales — nada que cerrar de más
+    const top = topBackNavLayer();
+    if(!top) return; // nada nuestro abierto -> deja que el atrás real de la app/navegador siga su curso
+    _backNavClosingViaPopstate = true;
+    if(top.id==='editorOverlay') closeNoteEditor();
+    else top.remove();
+  });
 }
 /* Columnas de tabla que se pueden hacer más anchas jalando el borde
    derecho de su encabezado — pedido general para "todas las tablas"

@@ -54,7 +54,7 @@ const TABLE_DEFS = {
   HABITOS:       ['ID', 'Nombre', 'Emoji', 'Color', 'Activo', 'Hora', 'Recordatorio', 'Meta', 'HorasJSON', 'Dosis', 'FechaInicio', 'FechaFin', 'Observaciones'],
   HABITO_LOG:    ['ID', 'HabitoID', 'Fecha'],
   COMANDOS:      ['ID', 'Nombre', 'Tipo', 'Valor'],
-  HORARIO:       ['ID', 'Hora', 'Actividad', 'Dias'],
+  HORARIO:       ['ID', 'Hora', 'Actividad', 'Dias', 'Observaciones'],
   HORARIO_LOG:   ['ID', 'HorarioID', 'Fecha']
 };
 

@@ -741,7 +741,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Manzanillo';
+const BUILD_VERSION = 'Puebla';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -917,7 +917,7 @@ function openHorarioSettings(){
         </div>
         <input type="text" id="horarioFormObs" style="margin-bottom:6px" placeholder="Nota para esta actividad (opcional)">
         <label style="font-size:12.5px;display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer" title="Le sigues la racha como a cualquier hábito — un solo check en Calendario → Día cuenta para las dos cosas">
-          <input type="checkbox" id="horarioFormEsHabito"> 🔥 Es hábito (le sigo la racha)
+          <input type="checkbox" id="horarioFormEsHabito"> 🎯 Es hábito (le sigo la racha)
         </label>
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px" id="horarioFormDiasChips"></div>
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
@@ -1008,7 +1008,7 @@ function syncHorarioHabitLink(row, esHabito){
     // que el resto de la app: el guardado sigue su camino en la red
     // aparte, sin que la pantalla tenga que esperarlo.
     const newId = uid();
-    saveEntity('HABITOS', { ID:newId, Nombre:row.Actividad, Emoji:'🔥', Color:randomColor(), Activo:'1', Hora:row.Hora, HorasJSON:JSON.stringify([row.Hora]), Recordatorio:'', Meta:1 });
+    saveEntity('HABITOS', { ID:newId, Nombre:row.Actividad, Emoji:'🎯', Color:randomColor(), Activo:'1', Hora:row.Hora, HorasJSON:JSON.stringify([row.Hora]), Recordatorio:'', Meta:1 });
     row.HabitoID = newId;
     saveEntity('HORARIO', row);
   } else if(row.HabitoID){
@@ -1069,7 +1069,7 @@ function renderHorarioList(){
   el.innerHTML = rows.length ? rows.map(h=>{
     const habito = h.HabitoID ? DATA.habitos.find(x=>x.ID===h.HabitoID) : null;
     const esHabitoActivo = !!(habito && habito.Activo!=='0');
-    const habitoBadge = esHabitoActivo ? `<span class="tag-badge" style="border-color:#c9781f;color:#c9781f" title="Es hábito — cuenta racha">🔥 hábito</span>` : '';
+    const habitoBadge = esHabitoActivo ? `<span class="tag-badge" style="border-color:#c9781f;color:#c9781f" title="Es hábito — cuenta racha">🎯 hábito</span>` : '';
     return `<div class="settings-row" data-hor-id="${h.ID}" style="touch-action:pan-y">
       <span style="flex:1"><b>${escHtml(normalizeTimeValue(h.Hora)||h.Hora)}</b> ${escHtml(h.Actividad)} ${habitoBadge} <span style="color:var(--text-dim);font-size:11px">${escHtml(String(h.Dias||'').split(',').join(' '))}</span>${h.Observaciones?`<br><span style="color:var(--text-dim);font-size:11.5px">📝 ${escHtml(h.Observaciones)}</span>`:''}</span>
       <button class="icon-btn" onclick="editHorarioItem('${h.ID}')" title="Editar">✎</button>

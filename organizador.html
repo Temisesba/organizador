@@ -746,7 +746,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Merida';
+const BUILD_VERSION = 'Oaxaca';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -901,10 +901,27 @@ const DIAS_SEMANA = ['L','M','X','J','V','S','D'];
 function diaCodeForDate(dateObj){
   return ['D','L','M','X','J','V','S'][dateObj.getDay()]; // getDay(): 0=Dom..6=Sáb
 }
+/* Cambiar la hora de una actividad arrastrando DENTRO de Calendario →
+   Día es "solo para ese día" (pedido explícito, confirmado con
+   AskUserQuestion) — no toca HORARIO.Hora (eso seguiría aplicando
+   todos los días que correspondan). Se guarda aparte, una excepción
+   por (actividad, fecha). */
+function horarioOverrideForDate(horarioId, dateObj){
+  const dateStr = dateObj.toDateString();
+  return (DATA.horario_override||[]).find(o=>o.HorarioID===horarioId && new Date(o.Fecha).toDateString()===dateStr);
+}
 function horarioItemsForDate(dateObj){
   const code = diaCodeForDate(dateObj);
   return (DATA.horario||[]).filter(h=>String(h.Dias||'').split(',').includes(code))
-    .sort((a,b)=>String(a.Hora||'').localeCompare(String(b.Hora||'')));
+    .map(h=>{
+      const ov = horarioOverrideForDate(h.ID, dateObj);
+      // _horaBase conserva la hora "de siempre" — hace falta para saber
+      // que HAY una excepción hoy (ver calAgendaHorarioRowHTML) y para
+      // poder mostrar/editar la actividad normal desde otros lugares
+      // sin que la excepción de HOY se filtre por accidente.
+      return ov ? Object.assign({}, h, { Hora:normalizeTimeValue(ov.Hora), _horaBase:h.Hora, _overrideId:ov.ID }) : h;
+    })
+    .sort((a,b)=>normalizeTimeValue(a.Hora).localeCompare(normalizeTimeValue(b.Hora)));
 }
 window._horarioFormDays = new Set();
 function openHorarioSettings(){
@@ -1083,30 +1100,22 @@ function renderHorarioList(){
   }).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada todavía — agrega tu primera actividad abajo.</p>';
   el.querySelectorAll('.settings-row[data-hor-id]').forEach(rowEl=>initHorarioDragRow(rowEl, rowEl.dataset.horId));
 }
-/* Reordenar Mi Horario arrastrando — pedido explícito, mismo patrón
-   que ya usa Itinerario: mantener presionado ~2s arma el arrastre (así
-   un toque normal para editar/ver/tocar los ✎🗑️ no dispara nada por
-   accidente), soltar muestra un pill ✓/✗ para confirmar antes de
-   guardar nada — nada se mueve de verdad hasta que tocas ✓. Como esta
-   lista SIEMPRE se ordena por hora (ver renderHorarioList — es tu
-   horario, no una lista libre), "mover de lugar" un renglón en la
-   práctica es cambiarle la hora para que caiga en la posición donde lo
-   soltaste — se calcula un punto medio entre los renglones vecinos en
-   su nueva posición (o ±30min si queda primero/último). Si la
-   actividad además es un hábito vinculado, su hora se actualiza junto
-   con ella (ver syncHorarioHabitLink — misma idea, mantenerlas
-   iguales). */
+/* Motor genérico de "arrastrar para reordenar" — mismo patrón que ya
+   usa Itinerario: mantener presionado ~2s arma el arrastre (con una
+   franja que se va llenando abajo del renglón como aviso — sin eso no
+   se ve NADA pasar en 2s, bug real reportado), soltar antes de eso o
+   moverse mucho antes cancela sin mover nada, y al soltar ya armado
+   aparece un pill ✓/✗ para confirmar — nada se guarda hasta tocar ✓.
+   Reusado por Mi Horario (mueve la hora recurrente) y por Calendario →
+   Día (mueve la hora SOLO ese día — ver initCalHorarioDragRow) — cada
+   uno le pasa su propio contenedor/selector de "vecinos" y qué hacer
+   al soltar (onDrop). */
 let _horDragTimer = null;
 const HOR_DRAG_HOLD_MS = 2000;
-function initHorarioDragRow(rowEl, id){
+function initPressDragRow(rowEl, opts){
   rowEl.addEventListener('pointerdown', e=>{
-    if(e.target.closest('.icon-btn')) return; // no interferir con ✎/🗑️
+    if(e.target.closest('.icon-btn')) return; // no interferir con ✎/🗑️ ni checkboxes con su propio icon-btn
     if(_horDragTimer) return;
-    // Bug real reportado: sin esto no se veía NADA mientras mantenías
-    // presionado — parecía que la función no estaba, aunque el
-    // temporizador sí corría por dentro. Copiado del mismo mecanismo de
-    // Itinerario (.drag-arm-fill): una franja que se va llenando abajo
-    // del renglón durante los 2s, avisando "sigue presionando".
     const fill = document.createElement('div');
     fill.className = 'hor-drag-arm-fill';
     rowEl.style.position = rowEl.style.position || 'relative';
@@ -1120,7 +1129,7 @@ function initHorarioDragRow(rowEl, id){
     rowEl.style.webkitUserSelect = 'none';
     rowEl.style.userSelect = 'none';
     const startY = e.clientY, startX = e.clientX;
-    _horDragTimer = setTimeout(()=>{ _horDragTimer=null; fill.remove(); armHorarioDrag(rowEl, id, e); }, HOR_DRAG_HOLD_MS);
+    _horDragTimer = setTimeout(()=>{ _horDragTimer=null; fill.remove(); armPressDrag(rowEl, e, opts); }, opts.holdMs||HOR_DRAG_HOLD_MS);
     const cancelIfMoved = ev=>{
       if(Math.abs(ev.clientY-startY)>12 || Math.abs(ev.clientX-startX)>12) cleanup();
     };
@@ -1137,7 +1146,7 @@ function initHorarioDragRow(rowEl, id){
     document.addEventListener('pointerup', cleanup);
   });
 }
-function armHorarioDrag(rowEl, id, startEvent){
+function armPressDrag(rowEl, startEvent, opts){
   if(navigator.vibrate) navigator.vibrate(30); // aviso táctil de que ya se armó, si el dispositivo lo soporta
   const rect = rowEl.getBoundingClientRect();
   rowEl.classList.add('hor-dragging');
@@ -1147,20 +1156,24 @@ function armHorarioDrag(rowEl, id, startEvent){
   const startY = startEvent.clientY;
   const origTop = rect.top;
   const state = { moved:false };
+  const getContainer = ()=> typeof opts.containerEl==='function' ? opts.containerEl() : opts.containerEl;
   const onMove = ev=>{
     const dy = ev.clientY - startY;
     rowEl.style.top = (origTop+dy)+'px';
     state.moved = true;
-    const list = document.getElementById('horarioList'); if(!list) return;
-    const others = Array.from(list.querySelectorAll('.settings-row[data-hor-id]')).filter(r=>r!==rowEl);
+    const container = getContainer(); if(!container) return;
+    const others = Array.from(container.querySelectorAll(opts.itemSelector)).filter(r=>r!==rowEl);
     const rowRect = rowEl.getBoundingClientRect();
     const rowMidY = rowRect.top + rowRect.height/2;
     let inserted = false;
     for(const other of others){
       const r = other.getBoundingClientRect();
-      if(rowMidY < r.top + r.height/2){ list.insertBefore(placeholder, other); inserted = true; break; }
+      if(rowMidY < r.top + r.height/2){ other.parentNode.insertBefore(placeholder, other); inserted = true; break; }
     }
-    if(!inserted) list.appendChild(placeholder);
+    if(!inserted){
+      const last = others[others.length-1];
+      if(last) last.parentNode.insertBefore(placeholder, last.nextSibling); else container.appendChild(placeholder);
+    }
   };
   const onUp = ()=>{
     document.removeEventListener('pointermove', onMove);
@@ -1169,14 +1182,30 @@ function armHorarioDrag(rowEl, id, startEvent){
     rowEl.style.webkitTouchCallout = ''; rowEl.style.webkitUserSelect = ''; rowEl.style.userSelect = '';
     rowEl.classList.remove('hor-dragging');
     if(!state.moved){ placeholder.remove(); return; }
-    const list = document.getElementById('horarioList');
-    const allRows = list ? Array.from(list.children) : [];
-    const dropIndex = allRows.indexOf(placeholder);
+    const container = getContainer();
+    const siblings = container ? Array.from(container.querySelectorAll(opts.itemSelector+', .hor-drag-placeholder')) : [];
+    const dropIndex = siblings.indexOf(placeholder);
     placeholder.remove();
-    finishHorarioDrag(id, dropIndex);
+    opts.onDrop(dropIndex);
   };
   document.addEventListener('pointermove', onMove);
   document.addEventListener('pointerup', onUp);
+}
+/* Reordenar Mi Horario arrastrando: como esta lista SIEMPRE se ordena
+   por hora (ver renderHorarioList — es tu horario, no una lista
+   libre), "mover de lugar" un renglón en la práctica es cambiarle la
+   hora para que caiga en la posición donde lo soltaste — punto medio
+   entre los renglones vecinos en su nueva posición (o ±30min si queda
+   primero/último). Cambia la hora RECURRENTE (todos los días que
+   correspondan) — si además es un hábito vinculado, su hora se
+   actualiza junto con ella. Para "solo ese día", ver
+   initCalHorarioDragRow más abajo. */
+function initHorarioDragRow(rowEl, id){
+  initPressDragRow(rowEl, {
+    containerEl: ()=>document.getElementById('horarioList'),
+    itemSelector: '.settings-row[data-hor-id]',
+    onDrop: dropIndex=>finishHorarioDrag(id, dropIndex)
+  });
 }
 function finishHorarioDrag(id, dropIndex){
   const sorted = (DATA.horario||[]).filter(h=>h.ID!==id).slice().sort((a,b)=>normalizeTimeValue(a.Hora).localeCompare(normalizeTimeValue(b.Hora)));
@@ -1202,6 +1231,41 @@ function finishHorarioDrag(id, dropIndex){
     if(document.getElementById('calBody')) renderCalendarView();
     showToast('Movido a las '+newHora);
   }, ()=>{ renderHorarioList(); });
+}
+/* Reordenar arrastrando DENTRO de Calendario → Día — pedido explícito
+   de seguimiento, confirmado con AskUserQuestion: (1) solo actividades
+   de Mi Horario/Hábitos (🔁🎯), no tareas/eventos; (2) el cambio aplica
+   SOLO ese día, no toca Mi Horario. Se guarda como una excepción en
+   HORARIO_OVERRIDE (HorarioID+Fecha+Hora) — ver horarioItemsForDate,
+   que ya la aplica al armar la agenda de cualquier día. */
+function initCalHorarioDragRow(rowEl, horarioId){
+  initPressDragRow(rowEl, {
+    containerEl: ()=>document.getElementById('calAgenda'),
+    itemSelector: '[data-cal-hor-id]',
+    onDrop: dropIndex=>finishCalHorarioDrag(horarioId, dropIndex)
+  });
+}
+function finishCalHorarioDrag(horarioId, dropIndex){
+  const items = horarioItemsForDate(_calViewDate).filter(h=>h.ID!==horarioId);
+  const before = items[dropIndex-1];
+  const after = items[dropIndex];
+  const toMin = t=>{ const [hh,mm]=normalizeTimeValue(t).split(':').map(Number); return hh*60+mm; };
+  const toHHMM = mins=>{ mins=Math.max(0,Math.min(23*60+59,Math.round(mins/5)*5)); return String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0'); };
+  let newMin;
+  if(before && after) newMin = Math.round((toMin(before.Hora)+toMin(after.Hora))/2);
+  else if(!before && after) newMin = Math.max(0, toMin(after.Hora)-30);
+  else if(before && !after) newMin = Math.min(23*60+59, toMin(before.Hora)+30);
+  else { renderCalAgenda(); return; } // única actividad ese día: no hay a dónde moverla
+  const newHora = toHHMM(newMin);
+  renderCalAgenda(); // vuelve a acomodar visualmente YA (sigue con la hora vieja hasta confirmar)
+  const rowEl = document.querySelector('[data-cal-hor-id="'+horarioId+'"]');
+  showHorarioDropConfirm(rowEl, ()=>{
+    const existing = horarioOverrideForDate(horarioId, _calViewDate);
+    const row = existing ? Object.assign({}, existing, { Hora:newHora }) : { ID:uid(), HorarioID:horarioId, Fecha:_calViewDate.toISOString(), Hora:newHora };
+    saveEntity('HORARIO_OVERRIDE', row);
+    renderCalDayDynamic();
+    showToast('Movido a las '+newHora+' — solo hoy');
+  }, ()=>{ renderCalAgenda(); });
 }
 function showHorarioDropConfirm(rowEl, onOk, onCancel){
   if(!rowEl){ onCancel(); return; }
@@ -1261,19 +1325,25 @@ function decrementHabitOnCalDay(habitoId){
 /* Fila de un hábito dentro de Calendario → Día — reusada tanto por la
    agenda (hábitos CON hora asignada) como por "✅ Hábitos de hoy"
    (hábitos SIN hora), mismo look en los dos lugares. */
-function calAgendaHabitRowHTML(h, dateStr){
+/* dragHorarioId (opcional): solo lo mandan los llamados desde la
+   agenda de Calendario → Día para un hábito vinculado a una actividad
+   de Mi Horario — habilita ahí mismo arrastrar para moverlo (SOLO ese
+   día, ver initCalHorarioDragRow). "Hábitos de hoy"/"sin hora" llaman
+   esta misma función sin ese 3er argumento — nada cambia para ellos. */
+function calAgendaHabitRowHTML(h, dateStr, dragHorarioId){
   const goal = habitGoal(h);
+  const dragAttr = dragHorarioId ? ` data-cal-hor-id="${escAttr(dragHorarioId)}"` : '';
   const nameSpan = `<span class="cal-agenda-text">${h.Emoji||'✅'} ${escHtml(h.Nombre)}</span>`;
   if(goal>1){
     const count = habitCountOnDate(h.ID, dateStr);
     const done = count>=goal;
-    return `<div class="cal-agenda-row">${nameSpan}<span style="font-size:12px;font-weight:600;${done?'color:var(--success)':'color:var(--text-dim)'}">${count}/${goal}</span>
+    return `<div class="cal-agenda-row"${dragAttr}>${nameSpan}<span style="font-size:12px;font-weight:600;${done?'color:var(--success)':'color:var(--text-dim)'}">${count}/${goal}</span>
       <button class="icon-btn" onclick="decrementHabitOnCalDay('${h.ID}')" ${count<=0?'disabled':''} title="Quitar uno">−</button>
       <button class="icon-btn" onclick="incrementHabitOnCalDay('${h.ID}')" title="Sumar uno">+</button>
     </div>`;
   }
   const done = !!DATA.habito_log.find(l=>l.HabitoID===h.ID && new Date(l.Fecha).toDateString()===dateStr);
-  return `<div class="cal-agenda-row" style="cursor:pointer" onclick="toggleHabitOnCalDay('${h.ID}')">
+  return `<div class="cal-agenda-row"${dragAttr} style="cursor:pointer" onclick="toggleHabitOnCalDay('${h.ID}')">
     <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHabitOnCalDay('${h.ID}')">
     ${nameSpan}
   </div>`;
@@ -1368,18 +1438,20 @@ function renderCalAgenda(){
   // quedaba separado de "11:00 a.m." del evento) y además no ordenaba
   // cronológicamente bien (comparación de texto, no de hora real).
   const buckets = {};
-  const ensure = mins => buckets[mins] || (buckets[mins] = {events:[],horario:[],tasks:[],habits:[],timelog:[]});
+  const ensure = mins => buckets[mins] || (buckets[mins] = {events:[],horario:[],tasks:[],habits:[],linkedHabits:[],timelog:[]});
   const minsOf = d => d.getHours()*60+d.getMinutes();
   const minsOfHHMM = hhmm => { const [h,m] = String(hhmm).split(':').map(Number); return h*60+(m||0); };
   timedEvents.forEach(ev=>ensure(minsOf(new Date(ev.start.dateTime))).events.push(ev));
   // Si esta actividad ES un hábito (vinculado y activo), se agrega como
   // hábito (checkbox + racha, un solo renglón) — respeta los Días de la
   // actividad de Horario (horarioItemsForDate ya filtró por hoy), pero
-  // se ve/actúa como cualquier otro hábito.
+  // se ve/actúa como cualquier otro hábito. horarioItem se conserva
+  // aparte (linkedHabits, no habits) para poder arrastrarlo por su
+  // propio ID de Horario, no el del hábito.
   horario.forEach(h=>{
     const habito = h.HabitoID ? DATA.habitos.find(x=>x.ID===h.HabitoID) : null;
     const bucket = ensure(minsOfHHMM(h.Hora));
-    if(habito && habito.Activo!=='0') bucket.habits.push(habito);
+    if(habito && habito.Activo!=='0') bucket.linkedHabits.push({ habito, horarioItem:h });
     else bucket.horario.push(h);
   });
   tasks.forEach(n=>ensure(minsOf(new Date(n.Fecha))).tasks.push(n));
@@ -1409,7 +1481,13 @@ function renderCalAgenda(){
     const rows = b.events.map(calAgendaEventRowHTML)
       .concat(b.horario.map(h=>calAgendaHorarioRowHTML(h, dateStr)))
       .concat(b.tasks.map(calAgendaTaskRowHTML))
-      .concat(b.habits.map(h=>calAgendaHabitRowHTML(h, dateStr)));
+      .concat(b.habits.map(h=>calAgendaHabitRowHTML(h, dateStr)))
+      .concat(b.linkedHabits.map(lh=>{
+        const rowHtml = calAgendaHabitRowHTML(lh.habito, dateStr, lh.horarioItem.ID);
+        if(!lh.horarioItem._overrideId) return rowHtml;
+        const badge = `<span class="tag-badge" style="font-size:10px;border-color:var(--accent);color:var(--accent)" title="Cambiado solo para hoy — normalmente es a las ${escAttr(normalizeTimeValue(lh.horarioItem._horaBase))}">↻ hoy</span>`;
+        return rowHtml.replace('</div>', badge+'</div>');
+      }));
     const timelogHTML = b.timelog.map(calAgendaTimelogChipHTML).join('');
     let prefix = '';
     if(nowMins!==null && !nowLineInserted && nowMins < mins){ prefix = nowLineHTML; nowLineInserted = true; }
@@ -1425,6 +1503,7 @@ function renderCalAgenda(){
   }).join('');
   const trailingNowLine = (nowMins!==null && !nowLineInserted && blockKeys.length) ? nowLineHTML : '';
   el.innerHTML = (allDayHTML+blocksHTML+trailingNowLine) || '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada agendado con hora este día.</p>';
+  el.querySelectorAll('[data-cal-hor-id]').forEach(rowEl=>initCalHorarioDragRow(rowEl, rowEl.dataset.calHorId));
 }
 /* La línea de "ahora" solo se actualiza cuando algo más ya iba a
    repintar la agenda — sin esto se quedaría pegada a la hora en que
@@ -1448,9 +1527,13 @@ function calAgendaEventRowHTML(ev){
 }
 function calAgendaHorarioRowHTML(h, dateStr){
   const done = !!DATA.horario_log.find(l=>l.HorarioID===h.ID && new Date(l.Fecha).toDateString()===dateStr);
-  return `<div class="cal-agenda-row" style="cursor:pointer" onclick="toggleHorarioOnCalDay('${h.ID}')">
+  // h._overrideId (ver horarioItemsForDate) — esta hora es una
+  // excepción de HOY, no la de siempre; se avisa con una etiqueta
+  // chiquita para no confundirla con el horario recurrente normal.
+  const overrideBadge = h._overrideId ? `<span class="tag-badge" style="font-size:10px;border-color:var(--accent);color:var(--accent)" title="Cambiado solo para hoy — normalmente es a las ${escAttr(normalizeTimeValue(h._horaBase))}">↻ hoy</span>` : '';
+  return `<div class="cal-agenda-row" data-cal-hor-id="${escAttr(h.ID)}" style="cursor:pointer" onclick="toggleHorarioOnCalDay('${h.ID}')">
     <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleHorarioOnCalDay('${h.ID}')">
-    <span class="cal-agenda-text">🔁 ${escHtml(h.Actividad)}${h.Observaciones?`<br><span style="color:var(--text-dim);font-size:11.5px">📝 ${escHtml(h.Observaciones)}</span>`:''}</span>
+    <span class="cal-agenda-text">🔁 ${escHtml(h.Actividad)} ${overrideBadge}${h.Observaciones?`<br><span style="color:var(--text-dim);font-size:11.5px">📝 ${escHtml(h.Observaciones)}</span>`:''}</span>
   </div>`;
 }
 function calAgendaTimelogChipHTML(r){
@@ -1861,7 +1944,7 @@ function deleteGoogleEventUI(eventId){
 }
 let GAS_URL = localStorage.getItem('org_gas_url') || '';
 let SHEET_ID = localStorage.getItem('org_sheet_id') || '';
-let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[], personas:[], habitos:[], habito_log:[], comandos:[], horario:[], horario_log:[] };
+let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[], personas:[], habitos:[], habito_log:[], comandos:[], horario:[], horario_log:[], horario_override:[] };
 // Banderas rápidas de fábrica (no se pueden borrar) — las que agrega el
 // usuario desde Configuración se guardan como filas normales en el Sheet
 // (tabla FLAGS), igual que cualquier otra etiqueta o nota, para que
@@ -2250,12 +2333,12 @@ function normalizeData(d){
     diccionario: d.diccionario||[], feedback: d.feedback||[],
     bloque_tablas: d.bloque_tablas||[], plantillas_prop: d.plantillas_prop||[],
     flags: d.flags||[], busquedas: d.busquedas||[], personas: d.personas||[],
-    habitos: d.habitos||[], habito_log: d.habito_log||[], comandos: d.comandos||[], horario: d.horario||[], horario_log: d.horario_log||[]
+    habitos: d.habitos||[], habito_log: d.habito_log||[], comandos: d.comandos||[], horario: d.horario||[], horario_log: d.horario_log||[], horario_override: d.horario_override||[]
   };
 }
 
 /* ============ CRUD genérico local + remoto ============ */
-const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas', HABITOS:'habitos', HABITO_LOG:'habito_log', COMANDOS:'comandos', HORARIO:'horario', HORARIO_LOG:'horario_log' };
+const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas', HABITOS:'habitos', HABITO_LOG:'habito_log', COMANDOS:'comandos', HORARIO:'horario', HORARIO_LOG:'horario_log', HORARIO_OVERRIDE:'horario_override' };
 function cacheData(){ try{ localStorage.setItem('org_data_cache', JSON.stringify(DATA)); }catch(e){} }
 /* expectedFechaEdicion (opcional, 3er parámetro): ver la nota extensa
    junto a saveRow() en el backend. Si el guardado vuelve con conflicto

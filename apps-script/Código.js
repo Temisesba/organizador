@@ -55,7 +55,8 @@ const TABLE_DEFS = {
   HABITO_LOG:    ['ID', 'HabitoID', 'Fecha'],
   COMANDOS:      ['ID', 'Nombre', 'Tipo', 'Valor'],
   HORARIO:       ['ID', 'Hora', 'Actividad', 'Dias', 'Observaciones', 'HabitoID', 'Orden'],
-  HORARIO_LOG:   ['ID', 'HorarioID', 'Fecha']
+  HORARIO_LOG:   ['ID', 'HorarioID', 'Fecha'],
+  HORARIO_OVERRIDE: ['ID', 'HorarioID', 'Fecha', 'Hora']
 };
 
 // ── Router GET (solo lectura ligera, ej. ping de conexión) ────
@@ -129,7 +130,7 @@ function getSS(sheetId) {
 // cambió en otro dispositivo" con un solo dispositivo de por medio,
 // bug real reportado varias veces seguidas antes de encontrar esta
 // causa de fondo.
-const TEXT_FORMAT_COLUMNS = { HABITOS: ['Hora', 'HorasJSON'], HORARIO: ['Hora'], NOTAS: ['FechaEdicion'] };
+const TEXT_FORMAT_COLUMNS = { HABITOS: ['Hora', 'HorasJSON'], HORARIO: ['Hora'], HORARIO_OVERRIDE: ['Hora'], NOTAS: ['FechaEdicion'] };
 function getTable(ss, tableName) {
   const headers = TABLE_DEFS[tableName];
   if (!headers) throw new Error('Tabla desconocida: ' + tableName);

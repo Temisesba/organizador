@@ -420,6 +420,11 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
    Mismo mecanismo que .drag-arm-fill en Itinerario. */
 .hor-drag-arm-fill{position:absolute;left:0;bottom:0;height:4px;width:0;background:var(--accent);opacity:.8;transition:width 2s linear;border-radius:0 0 8px 8px;pointer-events:none;z-index:2}
 .hor-drag-placeholder{border:2px dashed var(--accent);border-radius:8px;margin:2px 0;background:var(--bg-soft)}
+/* Hora que sigue al renglón mientras lo arrastras — la hora nueva sale
+   de sumar/restar pasos de 30min a la de antes, no de dónde estén los
+   demás renglones (ver armPressDrag), así que sin este aviso no habría
+   forma de saber a qué hora vas cayendo antes de soltar. */
+.hor-drag-time-label{position:fixed;background:var(--accent);color:var(--accent-text);font-size:12px;font-weight:700;padding:3px 8px;border-radius:12px;box-shadow:var(--shadow);z-index:3001;pointer-events:none}
 .hor-drop-confirm{position:fixed;display:flex;gap:4px;background:var(--bg-elev);border:1px solid var(--border);border-radius:20px;box-shadow:var(--shadow);padding:3px;z-index:4000}
 .hor-drop-confirm .icon-btn{padding:5px 9px}
 .settings-row input[type=text]{flex:1}
@@ -746,7 +751,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Oaxaca';
+const BUILD_VERSION = 'Toluca';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1100,18 +1105,30 @@ function renderHorarioList(){
   }).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Nada todavía — agrega tu primera actividad abajo.</p>';
   el.querySelectorAll('.settings-row[data-hor-id]').forEach(rowEl=>initHorarioDragRow(rowEl, rowEl.dataset.horId));
 }
-/* Motor genérico de "arrastrar para reordenar" — mismo patrón que ya
-   usa Itinerario: mantener presionado ~2s arma el arrastre (con una
+/* Motor genérico de "arrastrar para mover de hora" — mismo patrón que
+   ya usa Itinerario: mantener presionado ~2s arma el arrastre (con una
    franja que se va llenando abajo del renglón como aviso — sin eso no
    se ve NADA pasar en 2s, bug real reportado), soltar antes de eso o
    moverse mucho antes cancela sin mover nada, y al soltar ya armado
    aparece un pill ✓/✗ para confirmar — nada se guarda hasta tocar ✓.
    Reusado por Mi Horario (mueve la hora recurrente) y por Calendario →
-   Día (mueve la hora SOLO ese día — ver initCalHorarioDragRow) — cada
-   uno le pasa su propio contenedor/selector de "vecinos" y qué hacer
-   al soltar (onDrop). */
+   Día (mueve la hora SOLO ese día — ver initCalHorarioDragRow).
+
+   Primera versión: la nueva hora salía de calcular el punto medio
+   entre los DOS renglones vecinos más cercanos a donde soltaste — dos
+   problemas reales reportados por el camino: (1) en huecos grandes sin
+   nada cerca (ej. de 10am a 8pm) solo había UN punto medio posible, no
+   se podía elegir nada más fino; (2) no dejaba "soltar" exactamente en
+   la hora de otro renglón ya existente, se sentía trabado. Ahora la
+   hora nueva sale de sumarle a la hora ORIGINAL del renglón cuántos
+   pasos de 30 minutos arrastraste (arriba/abajo) — nada que ver con
+   dónde estén los demás renglones, se puede soltar en cualquier franja
+   de media hora del día, haya algo ahí o no. Una etiqueta con la hora
+   sigue al renglón mientras arrastras, para ver a dónde vas cayendo
+   antes de soltar. */
 let _horDragTimer = null;
 const HOR_DRAG_HOLD_MS = 2000;
+const HOR_DRAG_PX_PER_STEP = 34; // px de arrastre = 30 minutos de cambio
 function initPressDragRow(rowEl, opts){
   rowEl.addEventListener('pointerdown', e=>{
     if(e.target.closest('.icon-btn')) return; // no interferir con ✎/🗑️ ni checkboxes con su propio icon-btn
@@ -1153,27 +1170,26 @@ function armPressDrag(rowEl, startEvent, opts){
   rowEl.style.position='fixed'; rowEl.style.left=rect.left+'px'; rowEl.style.top=rect.top+'px'; rowEl.style.width=rect.width+'px'; rowEl.style.zIndex=3000;
   const placeholder = document.createElement('div'); placeholder.className='hor-drag-placeholder'; placeholder.style.height=rect.height+'px';
   rowEl.parentNode.insertBefore(placeholder, rowEl.nextSibling);
+  const label = document.createElement('div'); label.className='hor-drag-time-label';
+  document.body.appendChild(label);
   const startY = startEvent.clientY;
   const origTop = rect.top;
-  const state = { moved:false };
-  const getContainer = ()=> typeof opts.containerEl==='function' ? opts.containerEl() : opts.containerEl;
+  const origMin = opts.getOrigMinutes();
+  const updateLabel = mins=>{
+    label.textContent = String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0');
+    const r2 = rowEl.getBoundingClientRect();
+    label.style.left = Math.min(window.innerWidth-70, r2.right+8) + 'px';
+    label.style.top = (r2.top + r2.height/2 - 11) + 'px';
+  };
+  updateLabel(origMin);
+  const state = { moved:false, newMin:origMin };
   const onMove = ev=>{
     const dy = ev.clientY - startY;
     rowEl.style.top = (origTop+dy)+'px';
     state.moved = true;
-    const container = getContainer(); if(!container) return;
-    const others = Array.from(container.querySelectorAll(opts.itemSelector)).filter(r=>r!==rowEl);
-    const rowRect = rowEl.getBoundingClientRect();
-    const rowMidY = rowRect.top + rowRect.height/2;
-    let inserted = false;
-    for(const other of others){
-      const r = other.getBoundingClientRect();
-      if(rowMidY < r.top + r.height/2){ other.parentNode.insertBefore(placeholder, other); inserted = true; break; }
-    }
-    if(!inserted){
-      const last = others[others.length-1];
-      if(last) last.parentNode.insertBefore(placeholder, last.nextSibling); else container.appendChild(placeholder);
-    }
+    const steps = Math.round(dy / HOR_DRAG_PX_PER_STEP);
+    state.newMin = Math.max(0, Math.min(23*60+30, origMin + steps*30));
+    updateLabel(state.newMin);
   };
   const onUp = ()=>{
     document.removeEventListener('pointermove', onMove);
@@ -1181,44 +1197,33 @@ function armPressDrag(rowEl, startEvent, opts){
     rowEl.style.position=''; rowEl.style.left=''; rowEl.style.top=''; rowEl.style.width=''; rowEl.style.zIndex='';
     rowEl.style.webkitTouchCallout = ''; rowEl.style.webkitUserSelect = ''; rowEl.style.userSelect = '';
     rowEl.classList.remove('hor-dragging');
-    if(!state.moved){ placeholder.remove(); return; }
-    const container = getContainer();
-    const siblings = container ? Array.from(container.querySelectorAll(opts.itemSelector+', .hor-drag-placeholder')) : [];
-    const dropIndex = siblings.indexOf(placeholder);
     placeholder.remove();
-    opts.onDrop(dropIndex);
+    label.remove();
+    if(!state.moved || state.newMin===origMin) return;
+    opts.onDrop(state.newMin);
   };
   document.addEventListener('pointermove', onMove);
   document.addEventListener('pointerup', onUp);
 }
-/* Reordenar Mi Horario arrastrando: como esta lista SIEMPRE se ordena
-   por hora (ver renderHorarioList — es tu horario, no una lista
-   libre), "mover de lugar" un renglón en la práctica es cambiarle la
-   hora para que caiga en la posición donde lo soltaste — punto medio
-   entre los renglones vecinos en su nueva posición (o ±30min si queda
-   primero/último). Cambia la hora RECURRENTE (todos los días que
-   correspondan) — si además es un hábito vinculado, su hora se
-   actualiza junto con ella. Para "solo ese día", ver
+/* Reordenar Mi Horario arrastrando: cambia la hora RECURRENTE (todos
+   los días que correspondan) sumándole/restándole pasos de 30 minutos
+   a la hora que ya tenía — si además es un hábito vinculado, su hora
+   se actualiza junto con ella. Para "solo ese día", ver
    initCalHorarioDragRow más abajo. */
 function initHorarioDragRow(rowEl, id){
   initPressDragRow(rowEl, {
-    containerEl: ()=>document.getElementById('horarioList'),
-    itemSelector: '.settings-row[data-hor-id]',
-    onDrop: dropIndex=>finishHorarioDrag(id, dropIndex)
+    getOrigMinutes: ()=>{
+      const item = DATA.horario.find(h=>h.ID===id);
+      const norm = normalizeTimeValue(item?item.Hora:'');
+      if(!norm) return 0;
+      const [hh,mm] = norm.split(':').map(Number);
+      return hh*60+mm;
+    },
+    onDrop: newMin=>finishHorarioDrag(id, newMin)
   });
 }
-function finishHorarioDrag(id, dropIndex){
-  const sorted = (DATA.horario||[]).filter(h=>h.ID!==id).slice().sort((a,b)=>normalizeTimeValue(a.Hora).localeCompare(normalizeTimeValue(b.Hora)));
-  const before = sorted[dropIndex-1];
-  const after = sorted[dropIndex];
-  const toMin = t=>{ const [hh,mm]=normalizeTimeValue(t).split(':').map(Number); return hh*60+mm; };
-  const toHHMM = mins=>{ mins=Math.max(0,Math.min(23*60+59,Math.round(mins/5)*5)); return String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0'); };
-  let newMin;
-  if(before && after) newMin = Math.round((toMin(before.Hora)+toMin(after.Hora))/2);
-  else if(!before && after) newMin = Math.max(0, toMin(after.Hora)-30);
-  else if(before && !after) newMin = Math.min(23*60+59, toMin(before.Hora)+30);
-  else { renderHorarioList(); return; } // único elemento en la lista: no hay a dónde moverlo
-  const newHora = toHHMM(newMin);
+function finishHorarioDrag(id, newMin){
+  const newHora = String(Math.floor(newMin/60)).padStart(2,'0')+':'+String(newMin%60).padStart(2,'0');
   renderHorarioList(); // vuelve a acomodar visualmente YA (sigue con la hora vieja hasta confirmar)
   const rowEl = document.querySelector('.settings-row[data-hor-id="'+id+'"]');
   showHorarioDropConfirm(rowEl, ()=>{
@@ -1240,23 +1245,18 @@ function finishHorarioDrag(id, dropIndex){
    que ya la aplica al armar la agenda de cualquier día. */
 function initCalHorarioDragRow(rowEl, horarioId){
   initPressDragRow(rowEl, {
-    containerEl: ()=>document.getElementById('calAgenda'),
-    itemSelector: '[data-cal-hor-id]',
-    onDrop: dropIndex=>finishCalHorarioDrag(horarioId, dropIndex)
+    getOrigMinutes: ()=>{
+      const item = horarioItemsForDate(_calViewDate).find(h=>h.ID===horarioId);
+      const norm = normalizeTimeValue(item?item.Hora:'');
+      if(!norm) return 0;
+      const [hh,mm] = norm.split(':').map(Number);
+      return hh*60+mm;
+    },
+    onDrop: newMin=>finishCalHorarioDrag(horarioId, newMin)
   });
 }
-function finishCalHorarioDrag(horarioId, dropIndex){
-  const items = horarioItemsForDate(_calViewDate).filter(h=>h.ID!==horarioId);
-  const before = items[dropIndex-1];
-  const after = items[dropIndex];
-  const toMin = t=>{ const [hh,mm]=normalizeTimeValue(t).split(':').map(Number); return hh*60+mm; };
-  const toHHMM = mins=>{ mins=Math.max(0,Math.min(23*60+59,Math.round(mins/5)*5)); return String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0'); };
-  let newMin;
-  if(before && after) newMin = Math.round((toMin(before.Hora)+toMin(after.Hora))/2);
-  else if(!before && after) newMin = Math.max(0, toMin(after.Hora)-30);
-  else if(before && !after) newMin = Math.min(23*60+59, toMin(before.Hora)+30);
-  else { renderCalAgenda(); return; } // única actividad ese día: no hay a dónde moverla
-  const newHora = toHHMM(newMin);
+function finishCalHorarioDrag(horarioId, newMin){
+  const newHora = String(Math.floor(newMin/60)).padStart(2,'0')+':'+String(newMin%60).padStart(2,'0');
   renderCalAgenda(); // vuelve a acomodar visualmente YA (sigue con la hora vieja hasta confirmar)
   const rowEl = document.querySelector('[data-cal-hor-id="'+horarioId+'"]');
   showHorarioDropConfirm(rowEl, ()=>{

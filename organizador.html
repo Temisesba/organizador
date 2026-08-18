@@ -757,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Queretaro';
+const BUILD_VERSION = 'Morelia';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3064,18 +3064,15 @@ function getFilteredSortedNotes(query, applyTagFilters, notebookOverride){
   notes.sort((a,b)=>{
     let av=a[sortState.col], bv=b[sortState.col];
     if(sortState.col==='Pinned'){ av=a.Pinned?1:0; bv=b.Pinned?1:0; }
-    // Para una Tarea, Fecha es su fecha LÍMITE (puede estar en el
-    // futuro), no cuándo se creó/editó — usarla tal cual en "Más
-    // recientes" hacía que Tareas quedara siempre arriba de todo con
-    // solo tener UNA tarea con vencimiento lejano, tapando notas
-    // genuinamente más recientes (reportado: "sale hasta arriba
-    // tareas y no la última nota"). Para el orden general por Fecha se
-    // usa FechaEdicion en su lugar — el mismo significado ("cuándo se
-    // tocó por última vez") que Fecha ya tiene para cualquier otra
-    // nota. El orden POR vencimiento dentro del propio capítulo de
-    // Tareas (sortTasksUrgentFirst) no se toca, sigue usando Fecha.
-    if(sortState.col==='Fecha' && a.Notebook===TAREAS_NOTEBOOK) av = a.FechaEdicion||a.Fecha;
-    if(sortState.col==='Fecha' && b.Notebook===TAREAS_NOTEBOOK) bv = b.FechaEdicion||b.Fecha;
+    // El especial-caso de "para Tareas, Fecha es su fecha LÍMITE" que
+    // vivía aquí quedó OBSOLETO con el rediseño de fecha_limite (ver
+    // getTaskDueDate/setTaskDueDate) — Fecha ya es SIEMPRE cuándo se
+    // escribió la nota, para cualquier cuaderno, así que "Más
+    // recientes" ordena por lo mismo en Tareas que en cualquier otro
+    // lado sin necesitar ningún ajuste. El orden POR vencimiento
+    // dentro del propio capítulo de Tareas (sortTasksUrgentFirst) usa
+    // getTaskDueDate directo, no esta función.
+    if(sortState.col==='FechaLimite'){ av=getTaskDueDate(a); bv=getTaskDueDate(b); av=av?av.toISOString():''; bv=bv?bv.toISOString():''; }
     if(av===undefined) av=''; if(bv===undefined) bv='';
     const dyn = sortState.col.startsWith('kv:');
     if(dyn){ const k=sortState.col.slice(3); av=keyValueTags(a)[k]||''; bv=keyValueTags(b)[k]||''; }
@@ -3629,15 +3626,52 @@ function fmtTime(d){ return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:
 function fmtDateTime(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return fmtDate(iso); return fmtDate(iso)+' '+fmtTime(d); }
 
 function sortArrow(col){ return sortState.col===col ? (sortState.dir==='asc'?' ▲':' ▼') : ''; }
+/* Columnas de Vista Tabla: además de las fijas de siempre, cualquier
+   etiqueta "#clave:valor" usada en CUALQUIER nota ya se vuelve su
+   propia columna sola (kv:clave — ver allDynamicKeys/keyValueTags, ya
+   existía). Se agregaron Fecha límite y ✓ Hecha (de tareas — vacías
+   para notas que no lo son). Pedido explícito: "para q no sean mil
+   columnas... un botón para chequar q columnas ver y cuales no" — qué
+   columnas se ven se guarda en localStorage (getHiddenTableCols),
+   mismo criterio que los favoritos de la barra de herramientas. */
+function allTableColumns(){
+  return [['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas'],['FechaLimite','Fecha límite'],['Hecha','✓ Hecha'],['Contenido','Contenido']].concat(allDynamicKeys().map(k=>['kv:'+k,k]));
+}
+function getHiddenTableCols(){
+  try{ const v = JSON.parse(localStorage.getItem('org_table_hidden_cols')); return new Set(Array.isArray(v)?v:[]); }
+  catch(e){ return new Set(); }
+}
+function toggleTableColumn(key){
+  const hidden = getHiddenTableCols();
+  if(hidden.has(key)) hidden.delete(key); else hidden.add(key);
+  localStorage.setItem('org_table_hidden_cols', JSON.stringify(Array.from(hidden)));
+  renderMain();
+}
+function openTableColumnsPicker(){
+  document.querySelectorAll('#tableColumnsPickerOverlay').forEach(o=>o.remove());
+  const hidden = getHiddenTableCols();
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print'; overlay.id='tableColumnsPickerOverlay';
+  overlay.innerHTML = `<div class="modal" style="width:min(320px,100%)">
+    <div class="modal-head"><b>Columnas de la tabla</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:8px">
+      ${allTableColumns().map(([key,label])=>`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px"><input type="checkbox" ${hidden.has(key)?'':'checked'} onchange="toggleTableColumn('${escAttr(key)}')"> ${escHtml(label)}</label>`).join('')}
+    </div>
+  </div>`;
+  overlay.addEventListener('mousedown', e=>{ if(e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
 function tableHTML(notes){
-  const dynKeys = allDynamicKeys();
-  const cols = [['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas'],['Contenido','Contenido']].concat(dynKeys.map(k=>['kv:'+k,k]));
+  const hidden = getHiddenTableCols();
+  const cols = allTableColumns().filter(([key])=>!hidden.has(key));
   let head = cols.map(([key,label])=>`<th onclick="sortBy('${key}')">${escHtml(label)}${sortArrow(key)}</th>`).join('') + '<th></th>';
   let rows = notes.map(n=>{
     const kv = keyValueTags(n);
+    const isTask = isTaskNote(n);
     const cells = cols.map(([key])=>{
       if(key==='Titulo') return `<td class="title-cell" onclick="openNoteEditor('${n.ID}')">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}</td>`;
       if(key==='Fecha') return `<td>${fmtDate(n.Fecha)}</td>`;
+      if(key==='FechaLimite'){ const due=getTaskDueDate(n); return `<td>${due?escHtml(fmtDate(due)):''}</td>`; }
+      if(key==='Hecha') return `<td>${isTask?`<input type="checkbox" ${isTaskDone(n)?'checked':''} onclick="toggleTaskDone('${n.ID}');renderMain()" title="Marcar como cumplida">`:''}</td>`;
       if(key==='Notebook') return `<td>${escHtml(n.Notebook||'')}</td>`;
       if(key==='Tags') return `<td>${effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)};cursor:pointer" onclick="toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`).join(' ')}</td>`;
       if(key==='Contenido') return `<td style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="openNoteEditor('${n.ID}')" title="${escAttr(noteSnippetText(n).slice(0,300))}">${escHtml(noteSnippetText(n).split('\n')[0].slice(0,90))}</td>`;
@@ -3646,7 +3680,8 @@ function tableHTML(notes){
     }).join('');
     return `<tr>${cells}<td><button class="icon-btn" onclick="exportNotePDF('${n.ID}')" title="PDF">🖨️</button> <button class="icon-btn" onclick="deleteNoteUI('${n.ID}')" title="Borrar">🗑️</button></td></tr>`;
   }).join('');
-  return `<div style="overflow:auto"><table class="org-table"><thead><tr>${head}</tr></thead><tbody>${rows||'<tr><td colspan="99" style="text-align:center;color:var(--text-dim)">Sin notas</td></tr>'}</tbody></table></div>`;
+  return `<div style="display:flex;justify-content:flex-end;margin-bottom:6px" class="no-print"><button class="mini-btn" style="width:auto" onclick="openTableColumnsPicker()">⚙️ Columnas</button></div>
+    <div style="overflow:auto"><table class="org-table"><thead><tr>${head}</tr></thead><tbody>${rows||'<tr><td colspan="99" style="text-align:center;color:var(--text-dim)">Sin notas</td></tr>'}</tbody></table></div>`;
 }
 function sortBy(col){
   if(sortState.col===col) sortState.dir = sortState.dir==='asc'?'desc':'asc';
@@ -6049,6 +6084,13 @@ function stripHtmlToText(html){
     if(node.nodeType!==1) return;
     if(node.tagName==='BR'){ parts.push('\n'); return; }
     if(node.tagName==='BUTTON') return; // ej. el botón de expandir/contener tablas anidadas — no es contenido de la nota
+    // .task-due-field (setTaskDueDate) es metadata escondida del área de
+    // escritura (ver CSS .rich-editor .task-due-field) — sin este corte
+    // se colaba como texto real en todo lo que usa stripHtmlToText: el
+    // propio "#fecha_limite" aparecía como si fuera una etiqueta más de
+    // la nota (inlineTagsFromContent escanea "#palabra" en este mismo
+    // texto), y el valor crudo (un ISO largo) se veía en vistas previas.
+    if(node.classList && node.classList.contains('task-due-field')) return;
     Array.from(node.childNodes).forEach(walk);
     if(BLOCK.test(node.tagName)) parts.push('\n');
   })(d);

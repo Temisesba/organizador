@@ -303,6 +303,12 @@ table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{backgrou
 .swatch{width:20px;height:20px;border-radius:50%;border:1px solid var(--border);cursor:pointer}
 .editor-body{flex:1;display:flex;min-height:0;padding:12px;gap:10px;overflow:hidden}
 .rich-editor{width:100%;height:100%;border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow-y:auto;outline:none;font-size:14.5px;line-height:1.6;background:var(--bg-elev)}
+/* La fecha límite de una tarea (setTaskDueDate) se guarda DENTRO del
+   contenido como un #campo más (para leerla con getNoteFields, igual
+   que cualquier otro campo), pero se ve/edita arriba junto a
+   Fecha/Cuaderno/Color — no como texto suelto mezclado con lo que
+   estás redactando. */
+.rich-editor .task-due-field{display:none}
 .rich-editor:empty::before{content:attr(data-placeholder);color:var(--text-dim)}
 .rich-editor p{margin:.35em 0}
 .rich-editor h1{font-size:1.5em;font-weight:800;margin:.5em 0 .2em}
@@ -751,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Cuernavaca';
+const BUILD_VERSION = 'Queretaro';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1354,21 +1360,25 @@ function renderCalHabitosSinHora(){
   const activos = DATA.habitos.filter(h=>h.Activo!=='0' && !habitHorasList(h).length);
   el.innerHTML = activos.length ? activos.map(h=>calAgendaHabitRowHTML(h, dateStr)).join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin hábitos sin hora para hoy.</p>';
 }
-/* Tareas (#task, cuaderno Tareas): "tiene hora" se decide por si la
-   parte de hora de su Fecha es EXACTAMENTE medianoche local — ese es el
-   valor que queda cuando el formulario de Tareas solo recibe fecha (sin
-   hora explícita), nunca cuando de verdad se puso una hora. Las tareas
-   viejas (antes de este cambio) casi nunca caían justo en medianoche
-   (quedaban a las 09:00 o a la hora exacta de creación), así que siguen
-   viéndose con SU hora tal cual quedaron guardadas — compatible sin
-   tocar ningún dato existente. */
+/* Tareas (#task, cuaderno Tareas): la fecha límite (getTaskDueDate,
+   NO n.Fecha — esa ahora es solo cuándo se escribió la nota) es la que
+   manda para Calendario/Pendientes. "Tiene hora" se decide por si la
+   parte de hora de esa fecha límite es EXACTAMENTE medianoche local —
+   ese es el valor que queda cuando solo se puso fecha (sin hora
+   explícita). Una tarea sin fecha límite (ninguna puesta todavía) no
+   "tiene hora" — tampoco aparece en Calendario en absoluto, ver
+   tasksForDate. */
 function taskHasHour(n){
-  const d = new Date(n.Fecha);
-  return !(d.getHours()===0 && d.getMinutes()===0);
+  const d = getTaskDueDate(n);
+  return !!d && !(d.getHours()===0 && d.getMinutes()===0);
 }
 function tasksForDate(dateObj){
   const dayStr = dateObj.toDateString();
-  return activeNotes().filter(n=>n.Notebook===TAREAS_NOTEBOOK && n.Fecha && new Date(n.Fecha).toDateString()===dayStr);
+  return activeNotes().filter(n=>{
+    if(!isTaskNote(n)) return false;
+    const due = getTaskDueDate(n);
+    return !!due && due.toDateString()===dayStr;
+  });
 }
 function calAgendaTaskRowHTML(n){
   const done = isTaskDone(n);
@@ -1391,15 +1401,21 @@ function calNoHoraTaskRowHTML(n, vencida){
   // categoría pertenecía cada pendiente.
   const chapterTag = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente') || '';
   const tagHTML = chapterTag ? `<span class="tag-badge" style="border-color:${tagColor(chapterTag)};margin-left:4px" onclick="event.stopPropagation();toggleTagFilter('${escAttr(chapterTag)}')" title="Filtrar por #${escAttr(chapterTag)}">#${escHtml(chapterTag)}</span>` : '';
+  const due = getTaskDueDate(n);
   return `<div class="settings-row" style="cursor:pointer${vencida?';border-left:3px solid var(--danger)':''}" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
     <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}');renderCalDayDynamic()" title="Marcar como cumplida">
-    <span style="flex:1${done?';text-decoration:line-through;opacity:.6':''}">${vencida?'⏰':'⚑'} ${escHtml(n.Titulo||'(sin título)')}${tagHTML}${vencida&&!done?` <span style="color:var(--danger);font-size:11px">(venció ${escHtml(fmtDate(n.Fecha))})</span>`:''}</span>
+    <span style="flex:1${done?';text-decoration:line-through;opacity:.6':''}">${vencida?'⏰':'⚑'} ${escHtml(n.Titulo||'(sin título)')}${tagHTML}${vencida&&!done&&due?` <span style="color:var(--danger);font-size:11px">(venció ${escHtml(fmtDate(due))})</span>`:''}</span>
   </div>`;
 }
 function renderCalNoHoraTasks(){
   const el = document.getElementById('calTasksNoHora'); if(!el) return;
   const todayMid = new Date(); todayMid.setHours(0,0,0,0);
-  const overdue = activeNotes().filter(n=>n.Notebook===TAREAS_NOTEBOOK && n.Fecha && !isTaskDone(n) && new Date(n.Fecha)<todayMid).sort((a,b)=>new Date(a.Fecha)-new Date(b.Fecha));
+  const overdue = activeNotes()
+    .filter(n=>isTaskNote(n) && !isTaskDone(n))
+    .map(n=>({ n, due:getTaskDueDate(n) }))
+    .filter(x=>x.due && x.due<todayMid)
+    .sort((a,b)=>a.due-b.due)
+    .map(x=>x.n);
   const sinHora = tasksForDate(_calViewDate).filter(n=>!taskHasHour(n) && !overdue.includes(n));
   const rows = overdue.map(n=>calNoHoraTaskRowHTML(n,true)).concat(sinHora.map(n=>calNoHoraTaskRowHTML(n,false)));
   el.innerHTML = rows.length ? rows.join('') : '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin tareas pendientes.</p>';
@@ -1454,7 +1470,7 @@ function renderCalAgenda(){
     if(habito && habito.Activo!=='0') bucket.linkedHabits.push({ habito, horarioItem:h });
     else bucket.horario.push(h);
   });
-  tasks.forEach(n=>ensure(minsOf(new Date(n.Fecha))).tasks.push(n));
+  tasks.forEach(n=>ensure(minsOf(getTaskDueDate(n))).tasks.push(n));
   habitsConHora.forEach(h=>habitHorasList(h).forEach(hora=>ensure(minsOfHHMM(hora)).habits.push(h)));
   // Se agrupa por su hora de INICIO (cuándo de verdad empezó esa
   // actividad), no la de cierre (cuándo la escribiste) — así queda "a
@@ -2621,6 +2637,80 @@ function getNoteFields(note){
   });
   return fields;
 }
+/* "Fecha límite" de una tarea — vive DENTRO del contenido de la nota
+   como un campo más (#fecha_limite), no como columna aparte de NOTAS.
+   Pedido explícito: "quiero mantener la fecha de creación de la nota
+   pero ponerle una fecha límite a esa task" — Fecha (la de arriba)
+   ahora SIEMPRE es cuándo se escribió la nota, para cualquiera,
+   incluidas las de Tareas; la fecha límite es un dato aparte, y las
+   dos conviven sin pisarse. Se guarda/lee con el mismo mecanismo de
+   #campo que ya usan Cornell y las plantillas de campos
+   (extractFieldPairs/getNoteFields), así que funciona igual sea cual
+   sea la forma del contenido, y en CUALQUIER nota con #task — no solo
+   las del cuaderno Tareas (ver isTaskNote más abajo). */
+function getTaskDueDate(note){
+  const raw = getNoteFields(note).fecha_limite;
+  if(!raw) return null;
+  const d = new Date(raw);
+  return isNaN(d) ? null : d;
+}
+/* Deja el campo SIEMPRE como la última fila/párrafo del contenido — no
+   intenta "mantener su lugar" entre lo demás que hayas escrito, porque
+   es un dato de metadata (como Fecha/Cuaderno/Color), no algo que se
+   espere leer mezclado con el resto del texto. isoValue vacío ('')
+   borra el campo si ya existía (tarea sin fecha límite todavía). */
+function setTaskDueDate(note, isoValue){
+  const container = document.createElement('div'); container.innerHTML = note.Contenido||'';
+  // .task-due-field: se guarda en el contenido (para leerlo con
+  // getNoteFields, mismo mecanismo que cualquier otro #campo) pero se
+  // ESCONDE del área de escritura — pedido explícito: el campito vive
+  // arriba, junto a Fecha/Cuaderno/Color, no mezclado como texto visible
+  // dentro de lo que estás redactando (ver CSS .rich-editor
+  // .task-due-field). No afecta a extractFieldPairs/getNoteFields, que
+  // leen el HTML guardado directo, sin importar si algo ahí es visible
+  // o no en pantalla.
+  if(isCornellNote(note)){
+    const table = container.querySelector('table.cornell-table');
+    if(table){
+      Array.from(table.rows).forEach(r=>{ const c=r.cells[0]; if(c && c.textContent.trim()==='#fecha_limite') r.remove(); });
+      if(isoValue){
+        const row = table.insertRow(-1);
+        row.className = 'task-due-field';
+        const cue = row.insertCell(-1); cue.className='cornell-cue-cell'; cue.textContent='#fecha_limite';
+        row.insertCell(-1).innerHTML = '<p>'+escHtml(isoValue)+'</p>';
+      }
+      note.Contenido = container.innerHTML;
+      return;
+    }
+  }
+  // Párrafos sueltos: quita el cue viejo Y todo lo que fuera su valor
+  // (todo lo que seguía hasta el próximo cue), luego agrega el par
+  // nuevo al final si hay valor.
+  const children = Array.from(container.children);
+  const cueIdx = children.findIndex(el=>(el.textContent||'').trim()==='#fecha_limite');
+  if(cueIdx>=0){
+    let endIdx = cueIdx+1;
+    while(endIdx<children.length){
+      const t = (children[endIdx].textContent||'').trim();
+      if(children[endIdx].classList.contains('cf-cue') || /^#[a-zA-Z0-9_áéíóúñÁÉÍÓÚÑ-]+$/.test(t)) break;
+      endIdx++;
+    }
+    for(let i=endIdx-1;i>=cueIdx;i--) children[i].remove();
+  }
+  if(isoValue){
+    const wrap = document.createElement('div'); wrap.innerHTML = '<p class="task-due-field">#fecha_limite</p><p class="task-due-field">'+escHtml(isoValue)+'</p>';
+    Array.from(wrap.children).forEach(c=>container.appendChild(c));
+  }
+  note.Contenido = container.innerHTML;
+}
+/* Una nota "es una tarea" (participa en Calendario/Pendientes) si vive
+   en el cuaderno Tareas O si trae la etiqueta #task en cualquier otro
+   cuaderno — pedido explícito de seguimiento ("q un #task en cualquier
+   nota" también cuente). taskTagList se define más abajo (junto al
+   resto de lo de Tareas) — se puede llamar desde aquí igual porque
+   para cuando esto de verdad se ejecuta (nunca antes de que interactúes
+   con la app) ya está declarada. */
+function isTaskNote(n){ return n.Notebook===TAREAS_NOTEBOOK || taskTagList(n).includes('task'); }
 function allEntities(){
   return activeNotes().map(n=>{
     const origin = Array.from(new Set([...parseTagsText(n.Tags), ...notebookInherited(n.Notebook)]));
@@ -3471,7 +3561,7 @@ function taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pan
       <div class="field-card-tag" style="display:flex;align-items:center;gap:6px">
         <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}')" title="Marcar como cumplida">
         <button class="icon-btn" style="padding:0 3px;opacity:${urgent?'1':'.35'}" onclick="event.stopPropagation();toggleTaskUrgent('${n.ID}')" title="${urgent?'Quitar urgente':'Marcar como urgente'}">🔥</button>
-        <span>${escHtml(fmtDate(n.Fecha))}</span>
+        <span${getTaskDueDate(n)?'':' style="color:var(--text-dim);font-style:italic"'}>${getTaskDueDate(n)?escHtml(fmtDate(getTaskDueDate(n))):'sin fecha límite'}</span>
       </div>
       <div class="field-card-text"${done?' style="text-decoration:line-through;opacity:.6"':''}>${escHtml(n.Titulo||'(sin título)')}</div>
       ${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}
@@ -3838,18 +3928,13 @@ function newBlankNote(notebookOverride){
   // si fuera el nombre de un cuaderno.
   const nb = notebookOverride!==undefined ? notebookOverride : (activeNotebook===NO_NOTEBOOK_SENTINEL ? '' : activeNotebook);
   const inherited = notebookInherited(nb);
-  // Bug real reportado: "la fecha q se pone para cumplimiento es la de
-  // creación vdd? eso lo ves bien?" — SÍ, y no estaba bien: una nota
-  // nueva en el cuaderno Tareas (ej. con "+ Nota" en vez del formulario
-  // dedicado de "+ Tarea") tomaba como Fecha el momento EXACTO de
-  // creación (con hora real), que luego se lee como "vence hoy a esa
-  // hora" en Calendario/Pendientes — nadie eligió eso a propósito. Se
-  // ancla a HOY A MEDIANOCHE en vez de a la hora de creación — mismo
-  // sentinel "sin hora todavía" que ya usa el formulario de +Tarea (ver
-  // taskHasHour), cae en "⚑ Pendientes sin hora" en vez de aparecer en
-  // la agenda a una hora que nadie escogió.
-  const fecha = nb===TAREAS_NOTEBOOK ? (()=>{ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString(); })() : new Date().toISOString();
-  return { ID:'', Fecha:fecha, FechaEdicion:new Date().toISOString(), Titulo:'', Contenido:'', Tags:inherited.join(' '), Notebook:nb, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'' };
+  // Fecha es SIEMPRE cuándo se escribió la nota — para cualquier
+  // cuaderno, incluido Tareas. La fecha límite de una tarea es un dato
+  // aparte (getTaskDueDate/setTaskDueDate, guardado como campo
+  // #fecha_limite dentro del contenido) que no se toca aquí — una nota
+  // nueva en Tareas simplemente no tiene fecha límite todavía hasta
+  // que se le ponga una a propósito.
+  return { ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(), Titulo:'', Contenido:'', Tags:inherited.join(' '), Notebook:nb, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'' };
 }
 /* Si la nota que se estaba editando se queda vacía (nunca se le puso
    título ni contenido) se descarta sola en vez de quedar como basura en
@@ -4601,7 +4686,11 @@ function editorInnerHTML(note, isModal, slot, backSide){
       <input type="text" id="${eid('noteTags',slot)}" value="${escAttr(note.Tags)}" placeholder="#etiquetas separadas por espacio">
     </div>
     <input type="color" id="${eid('noteColor',slot)}" value="${note.Color||'#8a5a3b'}" title="Color de la nota">
-    <input type="datetime-local" id="${eid('noteFecha',slot)}" value="${toDatetimeLocal(new Date(note.Fecha))}" title="Fecha de la nota — con esta se ubica en Calendario, así que una tarea con fecha futura aparece ese día" style="width:auto">
+    <input type="datetime-local" id="${eid('noteFecha',slot)}" value="${toDatetimeLocal(new Date(note.Fecha))}" title="Cuándo se escribió esta nota" style="width:auto">
+    ${isTaskNote(note)?(()=>{
+      const due = getTaskDueDate(note);
+      return `<label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-dim)" title="Fecha límite de esta tarea — aparte de cuándo se escribió la nota. Vacía = sin vencimiento todavía.">⏰<input type="datetime-local" id="${eid('noteFechaLimite',slot)}" value="${due?toDatetimeLocal(due):''}" style="width:auto"></label>`;
+    })():''}
     <button class="icon-btn" onclick="pickFilesForNote(${sOnly})" title="Vincular archivo(s)">📎</button>
     <button class="icon-btn" onclick="pickFolderForNote(${sOnly})" title="Vincular carpeta">📁</button>
     <button class="icon-btn" id="${eid('fileChipToggleBtn',slot)}" onclick="toggleFileChips(this${s})" title="Ocultar archivos vinculados" style="${getNoteLinks(note).length?'':'display:none'}">▾</button>
@@ -4871,6 +4960,16 @@ function collectNoteFromForm(slot){
   if(fechaEl && fechaEl.value){ const d=new Date(fechaEl.value); if(!isNaN(d)) base.Fecha = d.toISOString(); }
   const mainEl = document.getElementById(eid('mainArea',slot));
   if(mainEl) base.Contenido = normalizeContentHTML(mainEl.innerHTML);
+  // El campito de fecha límite solo existe en el DOM si la nota YA era
+  // una tarea cuando se dibujó el editor (ver isTaskNote en
+  // editorInnerHTML) — si no está, no se toca lo que ya hubiera
+  // guardado (nada que hacer: nunca se pudo escribir nada ahí).
+  const fechaLimiteEl = document.getElementById(eid('noteFechaLimite',slot));
+  if(fechaLimiteEl){
+    let iso = '';
+    if(fechaLimiteEl.value){ const d=new Date(fechaLimiteEl.value); if(!isNaN(d)) iso = d.toISOString(); }
+    setTaskDueDate(base, iso);
+  }
   return base;
 }
 // Un timer de debounce y un candado de guardado POR slot (ver bloque de
@@ -6771,10 +6870,14 @@ function toggleTaskUrgent(id){
   renderAll();
 }
 function sortTasksUrgentFirst(rows){
+  // Sin fecha límite puesta se ordena AL FINAL (no antes) — no tiene
+  // sentido que una tarea todavía sin fecha aparezca "primero" solo
+  // porque una cadena vacía ordena antes que cualquier fecha real.
+  const dueKey = n => { const d=getTaskDueDate(n); return d ? d.toISOString() : '9999-12-31'; };
   return rows.slice().sort((a,b)=>{
     const au = isTaskUrgent(a), bu = isTaskUrgent(b);
     if(au!==bu) return au ? -1 : 1;
-    return String(a.Fecha).localeCompare(String(b.Fecha));
+    return dueKey(a).localeCompare(dueKey(b));
   });
 }
 function urgentPendingTasks(){
@@ -6785,7 +6888,7 @@ function openQuickTaskModal(){
   overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
     <div class="modal-head"><b>⚑ Tareas</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">Se guarda en tu listado de Tareas con #task en automático. Ponle fecha límite para que se ordene por eso (y aparezca ese día en 📅 Calendario). Si además le pones hora, aparece junto a tus eventos y hábitos en la agenda del día; sin hora, se ve aparte en "⚑ Pendientes sin hora". Agrégale etiquetas extra como #familia #trabajo para poder filtrarlas después.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12.5px;margin:0 0 10px">Se guarda en tu listado de Tareas con #task en automático. Ponle fecha límite para que aparezca ese día en 📅 Calendario (sin fecha, se guarda igual pero no aparece ahí todavía). Si además le pones hora, aparece junto a tus eventos y hábitos en la agenda del día; sin hora, se ve aparte en "⚑ Pendientes sin hora". Agrégale etiquetas extra como #familia #trabajo para poder filtrarlas después.</p>
       <input type="text" id="quickTaskInput" placeholder="ej. Pagar el internet">
       <div style="display:flex;gap:6px;margin-top:10px">
         <div style="flex:1">
@@ -6820,22 +6923,26 @@ async function saveQuickTask(){
     const horaInp = document.getElementById('quickTaskHora');
     const extraInp = document.getElementById('quickTaskExtraTags');
     const urgentInp = document.getElementById('quickTaskUrgent');
-    // Nunca se inventa una hora: si no se puso ninguna, la tarea queda
-    // en medianoche local — el sentinel que taskHasHour() reconoce como
-    // "sin hora" (cae en "⚑ Pendientes sin hora" en vez de la agenda a
-    // las 09:00 como antes). Sin fecha tampoco, se usa hoy.
-    const baseDateStr = dateInp.value || toDatetimeLocal(new Date()).slice(0,10);
-    const dueDate = new Date(baseDateStr+'T'+(horaInp.value||'00:00')+':00').toISOString();
+    // Fecha límite es de verdad opcional ahora: sin fecha puesta, la
+    // tarea se guarda SIN vencimiento (no aparece en Calendario ni en
+    // Pendientes hasta que le pongas una) — antes, dejarla en blanco
+    // igual la anclaba a "hoy" por dentro, lo cual contradecía el
+    // propio texto de ayuda de este modal ("ponle fecha límite para
+    // que... aparezca ese día en Calendario"). Si SÍ hay fecha pero no
+    // hora, queda en medianoche — el sentinel que taskHasHour()
+    // reconoce como "sin hora" (cae en "⚑ Pendientes sin hora").
+    const dueDate = dateInp.value ? new Date(dateInp.value+'T'+(horaInp.value||'00:00')+':00').toISOString() : '';
     const extraTags = (extraInp.value||'').split(/\s+/).map(s=>s.replace(/^#/,'').trim()).filter(Boolean);
     const allTags = ['task'].concat(extraTags.filter(t=>t && t!=='task'));
     if(urgentInp && urgentInp.checked && !allTags.includes('urgente')) allTags.push('urgente');
     const nb = await ensureTareasNotebook();
     const note = {
-      ID:uid(), Fecha: dueDate, FechaEdicion: new Date().toISOString(),
+      ID:uid(), Fecha: new Date().toISOString(), FechaEdicion: new Date().toISOString(),
       Titulo: titulo,
       Contenido: '<p>'+escHtml(titulo)+'</p>',
       Tags: allTags.map(t=>'#'+t).join(' '), Notebook: nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:''
     };
+    if(dueDate) setTaskDueDate(note, dueDate);
     // saveEntity ya deja DATA al día de inmediato (síncrono) antes de su
     // propio await interno al backend — esperar ESE viaje de ida y
     // vuelta antes de refrescar la pantalla es lo que hacía sentir el
@@ -6877,7 +6984,7 @@ function renderQuickTaskList(){
         <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}');renderQuickTaskList()" title="Marcar como cumplida">
         <button class="icon-btn" style="padding:0 3px;opacity:${urgent?'1':'.35'}" onclick="event.stopPropagation();toggleTaskUrgent('${n.ID}');renderQuickTaskList()" title="${urgent?'Quitar urgente':'Marcar como urgente'}">🔥</button>
         <span style="flex:1;font-size:13px${done?';text-decoration:line-through;opacity:.6':''}">${escHtml(n.Titulo)}</span>
-        <span style="color:var(--text-dim);font-size:11px">${fmtDate(n.Fecha)}</span>
+        <span style="color:var(--text-dim);font-size:11px">${getTaskDueDate(n)?fmtDate(getTaskDueDate(n)):'sin fecha'}</span>
       </div>`;
       }).join('')}
     </div>`;

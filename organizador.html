@@ -653,7 +653,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <button class="icon-btn no-print" onclick="openAIDrawer()" title="Asistente IA">✨</button>
     <button class="icon-btn no-print" id="syncBtn" onclick="syncBtnClick()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel" class="desktop-only">Sync</span></button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
-    <button class="btn no-print" id="headerNewNoteBtn" onclick="openNoteEditor(null)">+ Nota</button>
+    <button class="btn no-print" id="headerNewNoteBtn" onclick="openNoteEditor(null, null, currentView==='split' ? (splitTagTarget==='left'?'left':'right') : undefined)">+ Nota</button>
     <button class="btn no-print" onclick="openCreateMenu()" title="Dato general, plantilla o registro de tiempo">+</button>
   </header>
 
@@ -751,7 +751,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Toluca';
+const BUILD_VERSION = 'Cuernavaca';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3825,14 +3825,31 @@ function initSplitResizerOnce(){
 }
 
 /* ============ Editor de notas ============ */
-function newBlankNote(){
+/* notebookOverride (opcional): para cuando quien llama YA sabe a qué
+   cuaderno debe ir (ej. Vista Dividida — ver openNoteEditor, cada
+   panel tiene el suyo propio) sin depender del filtro global
+   activeNotebook, que puede ser de un cuaderno totalmente distinto que
+   se dejó elegido la última vez que se usó Tarjetas. Sin este
+   argumento, el comportamiento de siempre (Tarjetas/modal). */
+function newBlankNote(notebookOverride){
   // "Sin cuaderno" es un filtro de VISTA, no un cuaderno real — una nota
   // nueva creada mientras se está viendo ese filtro debe quedar sin
   // cuaderno de verdad (Notebook:''), no con el sentinel literal como
   // si fuera el nombre de un cuaderno.
-  const nb = activeNotebook===NO_NOTEBOOK_SENTINEL ? '' : activeNotebook;
+  const nb = notebookOverride!==undefined ? notebookOverride : (activeNotebook===NO_NOTEBOOK_SENTINEL ? '' : activeNotebook);
   const inherited = notebookInherited(nb);
-  return { ID:'', Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(), Titulo:'', Contenido:'', Tags:inherited.join(' '), Notebook:nb, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'' };
+  // Bug real reportado: "la fecha q se pone para cumplimiento es la de
+  // creación vdd? eso lo ves bien?" — SÍ, y no estaba bien: una nota
+  // nueva en el cuaderno Tareas (ej. con "+ Nota" en vez del formulario
+  // dedicado de "+ Tarea") tomaba como Fecha el momento EXACTO de
+  // creación (con hora real), que luego se lee como "vence hoy a esa
+  // hora" en Calendario/Pendientes — nadie eligió eso a propósito. Se
+  // ancla a HOY A MEDIANOCHE en vez de a la hora de creación — mismo
+  // sentinel "sin hora todavía" que ya usa el formulario de +Tarea (ver
+  // taskHasHour), cae en "⚑ Pendientes sin hora" en vez de aparecer en
+  // la agenda a una hora que nadie escogió.
+  const fecha = nb===TAREAS_NOTEBOOK ? (()=>{ const d=new Date(); d.setHours(0,0,0,0); return d.toISOString(); })() : new Date().toISOString();
+  return { ID:'', Fecha:fecha, FechaEdicion:new Date().toISOString(), Titulo:'', Contenido:'', Tags:inherited.join(' '), Notebook:nb, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'', Papelera:'' };
 }
 /* Si la nota que se estaba editando se queda vacía (nunca se le puso
    título ni contenido) se descarta sola en vez de quedar como basura en
@@ -3888,7 +3905,15 @@ async function openNoteEditor(id, scrollToCue, pane){
       // que se guarde algo) — así cualquier guardado parcial por
       // blur/cierre de pestaña siempre apunta al mismo registro, en
       // vez de que una condición de carrera cree dos notas.
-      const blank = newBlankNote();
+      // Bug real reportado: "+ Nota" en Vista Dividida se quedaba con
+      // el cuaderno que estuviera activo la última vez en Tarjetas
+      // (activeNotebook, global) en vez del cuaderno propio de ESTE
+      // panel — cada mitad puede tener el suyo (splitLeftNotebook/
+      // splitRightNotebook, ver arriba). Si el panel no tiene uno
+      // elegido (ve todos), la nota queda sin cuaderno en vez de
+      // heredar uno de Tarjetas que no tiene nada que ver.
+      const paneNotebook = side==='left' ? splitLeftNotebook : splitRightNotebook;
+      const blank = newBlankNote(paneNotebook || '');
       blank.ID = uid();
       DATA.notas.push(blank);
       id = blank.ID;

@@ -757,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Morelia';
+const BUILD_VERSION = 'Zacatecas';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1399,7 +1399,7 @@ function calNoHoraTaskRowHTML(n, vencida){
   // pedido explícito: mostrar también su etiqueta (#familia, #trabajo…)
   // aquí — antes solo se veía el título, sin saber de un vistazo a qué
   // categoría pertenecía cada pendiente.
-  const chapterTag = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente') || '';
+  const chapterTag = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante') || '';
   const tagHTML = chapterTag ? `<span class="tag-badge" style="border-color:${tagColor(chapterTag)};margin-left:4px" onclick="event.stopPropagation();toggleTagFilter('${escAttr(chapterTag)}')" title="Filtrar por #${escAttr(chapterTag)}">#${escHtml(chapterTag)}</span>` : '';
   const due = getTaskDueDate(n);
   return `<div class="settings-row" style="cursor:pointer${vencida?';border-left:3px solid var(--danger)':''}" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
@@ -3360,9 +3360,9 @@ function cardsHTML(notes, query, pane){
       if(taskChaptersRendered) return '';
       taskChaptersRendered = true;
       const taskNotes = notes.filter(x=>x.Notebook===TAREAS_NOTEBOOK);
-      const chapterTags = sortChapterTags(Array.from(new Set(taskNotes.map(x=>taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente') || ''))));
+      const chapterTags = sortChapterTags(Array.from(new Set(taskNotes.map(x=>taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante') || ''))));
       return chapterTags.map(chapterTag=>{
-        const chapterNotes = taskNotes.filter(x=>(taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente')||'')===chapterTag);
+        const chapterNotes = taskNotes.filter(x=>(taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante')||'')===chapterTag);
         return taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane);
       }).join('');
     }
@@ -3635,7 +3635,28 @@ function sortArrow(col){ return sortState.col===col ? (sortState.dir==='asc'?' �
    columnas se ven se guarda en localStorage (getHiddenTableCols),
    mismo criterio que los favoritos de la barra de herramientas. */
 function allTableColumns(){
-  return [['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas'],['FechaLimite','Fecha límite'],['Hecha','✓ Hecha'],['Contenido','Contenido']].concat(allDynamicKeys().map(k=>['kv:'+k,k]));
+  const cols = [['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas'],['FechaLimite','Fecha límite'],['Hecha','✓ Hecha'],['Importante','⭐ Importante'],['Contenido','Contenido']].concat(allDynamicKeys().map(k=>['kv:'+k,k]));
+  const blockTag = getTableBlockTagCol();
+  if(blockTag) cols.push(['blocktag','#'+blockTag+' (texto)']);
+  return cols;
+}
+/* Columna extra opcional: texto del PRIMER bloque/párrafo de la nota que
+   tenga la etiqueta elegida (ej. "#task lavar trastes" -> muestra eso),
+   reutilizando getNoteBlocks (el mismo mecanismo de 🧩 Tablas) pero como
+   UNA columna más de Vista Tabla en vez de su propia vista aparte —
+   pedido explícito tras aclarar que "tabla" = Vista Tabla, no 🧩 Tablas. */
+function getTableBlockTagCol(){ return localStorage.getItem('org_table_block_tag_col') || ''; }
+function setTableBlockTagCol(tag){
+  if(tag) localStorage.setItem('org_table_block_tag_col', tag);
+  else localStorage.removeItem('org_table_block_tag_col');
+  renderMain();
+  openTableColumnsPicker();
+}
+function firstBlockTextForTag(note, tag){
+  if(!tag) return '';
+  const tagL = tag.toLowerCase();
+  const block = getNoteBlocks(note).find(b=>b.effectiveTags.some(t=>t.toLowerCase()===tagL));
+  return block ? block.text : '';
 }
 function getHiddenTableCols(){
   try{ const v = JSON.parse(localStorage.getItem('org_table_hidden_cols')); return new Set(Array.isArray(v)?v:[]); }
@@ -3650,10 +3671,19 @@ function toggleTableColumn(key){
 function openTableColumnsPicker(){
   document.querySelectorAll('#tableColumnsPickerOverlay').forEach(o=>o.remove());
   const hidden = getHiddenTableCols();
+  const currentBlockTag = getTableBlockTagCol();
+  const tagOptions = Array.from(new Set(DATA.tags.map(t=>t.Etiqueta))).sort((a,b)=>a.localeCompare(b));
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print'; overlay.id='tableColumnsPickerOverlay';
   overlay.innerHTML = `<div class="modal" style="width:min(320px,100%)">
     <div class="modal-head"><b>Columnas de la tabla</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body" style="display:flex;flex-direction:column;gap:8px">
+      <div>
+        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Columna de texto por etiqueta</label>
+        <select onchange="setTableBlockTagCol(this.value)" style="width:100%">
+          <option value="">(ninguna)</option>
+          ${tagOptions.map(t=>`<option value="${escAttr(t)}" ${t===currentBlockTag?'selected':''}>#${escHtml(t)}</option>`).join('')}
+        </select>
+      </div>
       ${allTableColumns().map(([key,label])=>`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13.5px"><input type="checkbox" ${hidden.has(key)?'':'checked'} onchange="toggleTableColumn('${escAttr(key)}')"> ${escHtml(label)}</label>`).join('')}
     </div>
   </div>`;
@@ -3672,6 +3702,8 @@ function tableHTML(notes){
       if(key==='Fecha') return `<td>${fmtDate(n.Fecha)}</td>`;
       if(key==='FechaLimite'){ const due=getTaskDueDate(n); return `<td>${due?escHtml(fmtDate(due)):''}</td>`; }
       if(key==='Hecha') return `<td>${isTask?`<input type="checkbox" ${isTaskDone(n)?'checked':''} onclick="toggleTaskDone('${n.ID}');renderMain()" title="Marcar como cumplida">`:''}</td>`;
+      if(key==='Importante') return `<td>${isTask?`<input type="checkbox" ${isTaskImportant(n)?'checked':''} onclick="toggleTaskImportant('${n.ID}');renderMain()" title="Marcar como importante">`:''}</td>`;
+      if(key==='blocktag'){ const txt = firstBlockTextForTag(n, getTableBlockTagCol()); return `<td style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escAttr(txt)}">${escHtml(txt)}</td>`; }
       if(key==='Notebook') return `<td>${escHtml(n.Notebook||'')}</td>`;
       if(key==='Tags') return `<td>${effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)};cursor:pointer" onclick="toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`).join(' ')}</td>`;
       if(key==='Contenido') return `<td style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="openNoteEditor('${n.ID}')" title="${escAttr(noteSnippetText(n).slice(0,300))}">${escHtml(noteSnippetText(n).split('\n')[0].slice(0,90))}</td>`;
@@ -6911,6 +6943,20 @@ function toggleTaskUrgent(id){
   saveEntity('NOTAS', n);
   renderAll();
 }
+/* Importancia (matriz de Eisenhower simplificada: Importante + Urgente
+   como dos flags binarios, no una escala 1-5 — mismo criterio que ya
+   usan Todoist/Things y que el propio #urgente de esta app). #importante
+   se excluye de "capítulo" igual que #hecho/#urgente. */
+function isTaskImportant(n){ return taskTagList(n).includes('importante'); }
+function toggleTaskImportant(id){
+  const n = DATA.notas.find(x=>x.ID===id); if(!n) return;
+  const tags = taskTagList(n);
+  const idx = tags.indexOf('importante');
+  if(idx>=0) tags.splice(idx,1); else { tags.push('importante'); ensureTagsRegistered('#importante'); }
+  n.Tags = tags.map(t=>'#'+t).join(' ');
+  saveEntity('NOTAS', n);
+  renderAll();
+}
 function sortTasksUrgentFirst(rows){
   // Sin fecha límite puesta se ordena AL FINAL (no antes) — no tiene
   // sentido que una tarea todavía sin fecha aparezca "primero" solo
@@ -6945,6 +6991,7 @@ function openQuickTaskModal(){
       <label style="font-size:12px;font-weight:600;display:block;margin-top:10px">Etiquetas extra (opcional)</label>
       <input type="text" id="quickTaskExtraTags" placeholder="#familia #trabajo" oninput="updateTagSuggestFromInput(this)" onkeydown="if(handleTagSuggestKeydown(event))return false;" onblur="scheduleHideGlobalTagSuggest()">
       <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;cursor:pointer"><input type="checkbox" id="quickTaskUrgent"> 🔥 Urgente (se ordena arriba y avisa junto con tus hábitos)</label>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="quickTaskImportant"> ⭐ Importante</label>
       <div style="margin-top:12px"><button class="btn" id="quickTaskSaveBtn" onclick="saveQuickTask()">Guardar</button></div>
       <div id="quickTaskList" style="margin-top:14px"></div>
     </div>
@@ -6965,6 +7012,7 @@ async function saveQuickTask(){
     const horaInp = document.getElementById('quickTaskHora');
     const extraInp = document.getElementById('quickTaskExtraTags');
     const urgentInp = document.getElementById('quickTaskUrgent');
+    const importantInp = document.getElementById('quickTaskImportant');
     // Fecha límite es de verdad opcional ahora: sin fecha puesta, la
     // tarea se guarda SIN vencimiento (no aparece en Calendario ni en
     // Pendientes hasta que le pongas una) — antes, dejarla en blanco
@@ -6977,6 +7025,7 @@ async function saveQuickTask(){
     const extraTags = (extraInp.value||'').split(/\s+/).map(s=>s.replace(/^#/,'').trim()).filter(Boolean);
     const allTags = ['task'].concat(extraTags.filter(t=>t && t!=='task'));
     if(urgentInp && urgentInp.checked && !allTags.includes('urgente')) allTags.push('urgente');
+    if(importantInp && importantInp.checked && !allTags.includes('importante')) allTags.push('importante');
     const nb = await ensureTareasNotebook();
     const note = {
       ID:uid(), Fecha: new Date().toISOString(), FechaEdicion: new Date().toISOString(),
@@ -6994,7 +7043,7 @@ async function saveQuickTask(){
     allTags.forEach(t=>ensureTagsRegistered('#'+t));
     renderAll();
     showToast('⚑ Tarea guardada');
-    inp.value=''; dateInp.value=''; horaInp.value=''; extraInp.value=''; if(urgentInp) urgentInp.checked=false; inp.focus();
+    inp.value=''; dateInp.value=''; horaInp.value=''; extraInp.value=''; if(urgentInp) urgentInp.checked=false; if(importantInp) importantInp.checked=false; inp.focus();
     renderQuickTaskList();
   });
 }
@@ -7010,7 +7059,7 @@ function renderQuickTaskList(){
   if(!items.length){ wrap.innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin tareas todavía — la primera que guardes aparece arriba.</p>'; return; }
   const groups = {}; const order = [];
   items.forEach(n=>{
-    const chapter = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente') || 'Sin categoría';
+    const chapter = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante') || 'Sin categoría';
     if(!groups[chapter]){ groups[chapter]=[]; order.push(chapter); }
     groups[chapter].push(n);
   });

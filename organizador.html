@@ -757,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Hermosillo';
+const BUILD_VERSION = 'Culiacán';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -9673,7 +9673,7 @@ function captureAiInsertRange(){
    (listar/buscar) se ejecutan directo, sin interrumpir. */
 let aiAgentContents = [];
 let agentDisplayLog = [];
-const AGENT_WRITE_TOOLS = new Set(['marcar_estado_tarea','marcar_prioridad_tarea','crear_tarea','crear_nota','crear_evento_calendario']);
+const AGENT_WRITE_TOOLS = new Set(['marcar_estado_tarea','marcar_prioridad_tarea','crear_tarea','crear_nota','crear_evento_calendario','editar_nota','eliminar_nota','editar_evento_calendario','eliminar_evento_calendario']);
 const AGENT_MAX_STEPS = 6;
 const AGENT_TOOLS = [
   { name:'listar_pendientes', description:'Lista las tareas pendientes (no hechas) del usuario, ya ordenadas por prioridad de la matriz de Eisenhower (importante+urgente primero).', parameters:{ type:'OBJECT', properties:{} } },
@@ -9683,7 +9683,12 @@ const AGENT_TOOLS = [
   { name:'marcar_prioridad_tarea', description:'Marca o desmarca una tarea EXISTENTE como importante y/o urgente (matriz de Eisenhower).', parameters:{ type:'OBJECT', properties:{ id:{type:'STRING'}, importante:{type:'BOOLEAN'}, urgente:{type:'BOOLEAN'} }, required:['id'] } },
   { name:'crear_tarea', description:'Crea una tarea nueva en el cuaderno Tareas, opcionalmente con fecha límite e importancia/urgencia.', parameters:{ type:'OBJECT', properties:{ titulo:{type:'STRING'}, fechaLimite:{type:'STRING', description:'Fecha (y opcionalmente hora) en formato ISO 8601, ej 2026-08-25T10:00:00'}, importante:{type:'BOOLEAN'}, urgente:{type:'BOOLEAN'} }, required:['titulo'] } },
   { name:'crear_nota', description:'Crea una nota nueva en un cuaderno específico (si el cuaderno no existe todavía, se crea).', parameters:{ type:'OBJECT', properties:{ cuaderno:{type:'STRING'}, titulo:{type:'STRING'}, contenido:{type:'STRING', description:'Texto plano del cuerpo de la nota'} }, required:['cuaderno','titulo'] } },
-  { name:'crear_evento_calendario', description:'Crea un evento REAL en el Google Calendar conectado del usuario.', parameters:{ type:'OBJECT', properties:{ titulo:{type:'STRING'}, fechaHoraInicio:{type:'STRING', description:'ISO 8601, ej 2026-08-25T10:00:00'}, fechaHoraFin:{type:'STRING', description:'ISO 8601, opcional — por defecto 1 hora después del inicio'}, notas:{type:'STRING'} }, required:['titulo','fechaHoraInicio'] } }
+  { name:'crear_evento_calendario', description:'Crea un evento REAL en el Google Calendar conectado del usuario.', parameters:{ type:'OBJECT', properties:{ titulo:{type:'STRING'}, fechaHoraInicio:{type:'STRING', description:'ISO 8601, ej 2026-08-25T10:00:00'}, fechaHoraFin:{type:'STRING', description:'ISO 8601, opcional — por defecto 1 hora después del inicio'}, notas:{type:'STRING'} }, required:['titulo','fechaHoraInicio'] } },
+  { name:'editar_nota', description:'Modifica una nota o tarea EXISTENTE: título, contenido y/o fecha límite (para notas que no son tarea, poner fecha límite las convierte en algo con vencimiento visible en Calendario/Pendientes).', parameters:{ type:'OBJECT', properties:{ id:{type:'STRING', description:'ID de la nota, obtenido antes con listar_pendientes, listar_notas o buscar_notas'}, titulo:{type:'STRING'}, contenido:{type:'STRING', description:'Si se manda, REEMPLAZA el cuerpo actual de la nota'}, fechaLimite:{type:'STRING', description:'ISO 8601; manda cadena vacía para quitar la fecha límite'} }, required:['id'] } },
+  { name:'eliminar_nota', description:'Mueve una nota o tarea EXISTENTE a la papelera (se puede recuperar desde ahí, no es un borrado permanente inmediato).', parameters:{ type:'OBJECT', properties:{ id:{type:'STRING'} }, required:['id'] } },
+  { name:'listar_eventos_calendario', description:'Lista los eventos REALES del Google Calendar conectado del usuario en un rango de fechas, para poder encontrar el eventId de uno que el usuario quiera editar o eliminar.', parameters:{ type:'OBJECT', properties:{ fechaInicio:{type:'STRING', description:'ISO 8601, por defecto ahora'}, fechaFin:{type:'STRING', description:'ISO 8601, por defecto 7 días después de fechaInicio'} } } },
+  { name:'editar_evento_calendario', description:'Modifica un evento EXISTENTE del Google Calendar real del usuario (título, horario y/o notas).', parameters:{ type:'OBJECT', properties:{ eventId:{type:'STRING', description:'Obtenido antes con listar_eventos_calendario'}, titulo:{type:'STRING'}, fechaHoraInicio:{type:'STRING', description:'ISO 8601'}, fechaHoraFin:{type:'STRING', description:'ISO 8601'}, notas:{type:'STRING'} }, required:['eventId'] } },
+  { name:'eliminar_evento_calendario', description:'Elimina PERMANENTEMENTE un evento del Google Calendar real del usuario. No se puede deshacer.', parameters:{ type:'OBJECT', properties:{ eventId:{type:'STRING', description:'Obtenido antes con listar_eventos_calendario'} }, required:['eventId'] } }
 ];
 function agentSystemPrompt(){
   return 'Eres el asistente personal integrado en la app de notas/tareas "Organizador" del usuario. Hoy es '+new Date().toLocaleString('es-MX')+'. '+
@@ -9697,7 +9702,11 @@ function agentToolDescription(name, args){
     marcar_prioridad_tarea: 'Cambiar importante/urgente de una tarea',
     crear_tarea: 'Crear la tarea "'+(args.titulo||'')+'"'+(args.fechaLimite?(' con fecha límite '+fmtDateTime(new Date(args.fechaLimite).toISOString())):''),
     crear_nota: 'Crear la nota "'+(args.titulo||'')+'" en el cuaderno "'+(args.cuaderno||'')+'"',
-    crear_evento_calendario: 'Crear el evento "'+(args.titulo||'')+'"'+(args.fechaHoraInicio?(' el '+fmtDateTime(new Date(args.fechaHoraInicio).toISOString())):'')+' en tu Google Calendar real'
+    crear_evento_calendario: 'Crear el evento "'+(args.titulo||'')+'"'+(args.fechaHoraInicio?(' el '+fmtDateTime(new Date(args.fechaHoraInicio).toISOString())):'')+' en tu Google Calendar real',
+    editar_nota: 'Editar la nota/tarea'+(args.titulo?(' → "'+args.titulo+'"'):'')+(args.fechaLimite!==undefined?(args.fechaLimite?(', fecha límite '+fmtDateTime(new Date(args.fechaLimite).toISOString())):', quitar fecha límite'):''),
+    eliminar_nota: 'Mover esta nota/tarea a la papelera',
+    editar_evento_calendario: 'Editar un evento'+(args.titulo?(' → "'+args.titulo+'"'):'')+(args.fechaHoraInicio?(', nuevo horario '+fmtDateTime(new Date(args.fechaHoraInicio).toISOString())):'')+' en tu Google Calendar real',
+    eliminar_evento_calendario: 'Eliminar PERMANENTEMENTE un evento de tu Google Calendar real'
   };
   return map[name] || name;
 }
@@ -9773,6 +9782,78 @@ async function agentToolCrearEventoCalendario(args){
   renderCalendarView();
   return { ok:true, eventId:data.id, titulo:body.summary, cuando: fmtDateTime(start.toISOString()) };
 }
+/* Editar/eliminar (pedido explícito: "¿puedo también eliminarlos o
+   modificarlos?") reusan exactamente los mismos endpoints/patrones que
+   ya usaba el resto de la app a mano — eliminar_nota es el mismo
+   soft-delete a Papelera de deleteNoteUI, editar/eliminar_evento_
+   calendario son el mismo PATCH/DELETE directo con reintento por 401
+   que ya usaban saveEventForm/deleteGoogleEventUI. editar_nota, si
+   reemplaza el contenido, reinserta la fecha límite que ya tuviera —
+   si no, un "cambia el título de X" borraría sin querer el
+   #fecha_limite oculto que vive DENTRO de Contenido. */
+function agentToolEditarNota(args){
+  const n = getNote(args.id); if(!n) return { error:'No encontré una nota con ese ID' };
+  if(args.titulo!==undefined) n.Titulo = args.titulo;
+  if(args.contenido!==undefined){
+    const dueBefore = getTaskDueDate(n);
+    n.Contenido = '<p>'+escHtml(args.contenido)+'</p>';
+    if(dueBefore) setTaskDueDate(n, dueBefore.toISOString());
+  }
+  if(args.fechaLimite!==undefined){
+    const d = args.fechaLimite ? new Date(args.fechaLimite) : null;
+    setTaskDueDate(n, (d && !isNaN(d)) ? d.toISOString() : '');
+  }
+  saveEntity('NOTAS', n);
+  renderAll();
+  return { ok:true, id:n.ID, titulo:n.Titulo };
+}
+function agentToolEliminarNota(args){
+  const n = getNote(args.id); if(!n) return { error:'No encontré una nota con ese ID' };
+  n.Papelera = new Date().toISOString();
+  saveEntity('NOTAS', n);
+  renderAll();
+  return { ok:true, titulo:n.Titulo };
+}
+async function agentToolListarEventosCalendario(args){
+  if(!googleAccessToken) return { error:'Google Calendar no está conectado. Pídele al usuario que lo conecte en Configuración → Conexión.' };
+  const start = args.fechaInicio ? new Date(args.fechaInicio) : new Date();
+  const end = args.fechaFin ? new Date(args.fechaFin) : new Date(start.getTime()+7*86400000);
+  const params = new URLSearchParams({ timeMin:start.toISOString(), timeMax:end.toISOString(), singleEvents:'true', orderBy:'startTime' });
+  let res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?'+params.toString(), { headers:{ Authorization:'Bearer '+googleAccessToken } });
+  if(res.status===401 && await maybeRefreshGoogleToken()){
+    res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?'+params.toString(), { headers:{ Authorization:'Bearer '+googleAccessToken } });
+  }
+  if(!res.ok) return { error:'No se pudo leer el calendario (HTTP '+res.status+')' };
+  const data = await res.json();
+  return (data.items||[]).slice(0,30).map(ev=>({ eventId:ev.id, titulo:ev.summary||'(sin título)', inicio: ev.start&&(ev.start.dateTime||ev.start.date), fin: ev.end&&(ev.end.dateTime||ev.end.date) }));
+}
+async function agentToolEditarEventoCalendario(args){
+  if(!googleAccessToken) return { error:'Google Calendar no está conectado.' };
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const body = {};
+  if(args.titulo!==undefined) body.summary = args.titulo;
+  if(args.notas!==undefined) body.description = args.notas;
+  if(args.fechaHoraInicio){ const d=new Date(args.fechaHoraInicio); if(!isNaN(d)) body.start = {dateTime:d.toISOString(), timeZone:tz}; }
+  if(args.fechaHoraFin){ const d=new Date(args.fechaHoraFin); if(!isNaN(d)) body.end = {dateTime:d.toISOString(), timeZone:tz}; }
+  let res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+args.eventId, { method:'PATCH', headers:{ Authorization:'Bearer '+googleAccessToken, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  if(res.status===401 && await maybeRefreshGoogleToken()){
+    res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+args.eventId, { method:'PATCH', headers:{ Authorization:'Bearer '+googleAccessToken, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  }
+  if(!res.ok) return { error:'No se pudo editar el evento (HTTP '+res.status+')' };
+  const data = await res.json();
+  renderCalendarView();
+  return { ok:true, eventId:data.id, titulo:data.summary };
+}
+async function agentToolEliminarEventoCalendario(args){
+  if(!googleAccessToken) return { error:'Google Calendar no está conectado.' };
+  let res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+args.eventId, { method:'DELETE', headers:{ Authorization:'Bearer '+googleAccessToken } });
+  if(res.status===401 && await maybeRefreshGoogleToken()){
+    res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events/'+args.eventId, { method:'DELETE', headers:{ Authorization:'Bearer '+googleAccessToken } });
+  }
+  if(!res.ok && res.status!==410 && res.status!==204) return { error:'No se pudo eliminar el evento (HTTP '+res.status+')' };
+  renderCalendarView();
+  return { ok:true };
+}
 async function executeAgentTool(name, args){
   try{
     if(name==='listar_pendientes') return agentToolListarPendientes();
@@ -9783,6 +9864,11 @@ async function executeAgentTool(name, args){
     if(name==='crear_tarea') return await agentToolCrearTarea(args);
     if(name==='crear_nota') return await agentToolCrearNota(args);
     if(name==='crear_evento_calendario') return await agentToolCrearEventoCalendario(args);
+    if(name==='editar_nota') return agentToolEditarNota(args);
+    if(name==='eliminar_nota') return agentToolEliminarNota(args);
+    if(name==='listar_eventos_calendario') return await agentToolListarEventosCalendario(args);
+    if(name==='editar_evento_calendario') return await agentToolEditarEventoCalendario(args);
+    if(name==='eliminar_evento_calendario') return await agentToolEliminarEventoCalendario(args);
     return { error:'Herramienta desconocida: '+name };
   } catch(e){
     return { error: e.message||'Error ejecutando la acción' };

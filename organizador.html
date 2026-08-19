@@ -757,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Mazatlán';
+const BUILD_VERSION = 'Los Mochis';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3704,16 +3704,22 @@ function tableHTML(notes){
   let head = cols.map(([key,label])=>`<th onclick="sortBy('${key}')">${escHtml(label)}${sortArrow(key)}</th>`).join('') + '<th></th>';
   let rows = notes.map(n=>{
     const kv = keyValueTags(n);
-    const isTask = isTaskNote(n);
     const cells = cols.map(([key])=>{
       if(key==='Titulo') return `<td class="title-cell" onclick="openNoteEditor('${n.ID}')">${n.Pinned?'📌 ':''}${escHtml(n.Titulo||'(sin título)')}</td>`;
       if(key==='Fecha') return `<td>${fmtDate(n.Fecha)}</td>`;
       if(key==='FechaLimite'){ const due=getTaskDueDate(n); return `<td>${due?escHtml(fmtDate(due)):''}</td>`; }
-      if(key==='Hecha') return `<td>${isTask?`<input type="checkbox" ${isTaskDone(n)?'checked':''} onclick="toggleTaskDone('${n.ID}');renderMain()" title="Marcar como cumplida">`:''}</td>`;
-      if(key==='Urgente') return `<td>${isTask?`<input type="checkbox" ${isTaskUrgent(n)?'checked':''} onclick="toggleTaskUrgent('${n.ID}');renderMain()" title="Marcar como urgente">`:''}</td>`;
-      if(key==='Importante') return `<td>${isTask?`<input type="checkbox" ${isTaskImportant(n)?'checked':''} onclick="toggleTaskImportant('${n.ID}');renderMain()" title="Marcar como importante">`:''}</td>`;
-      if(key==='Prioridad') return `<td>${isTask?escHtml(taskPriorityLabel(n)):''}</td>`;
-      if(key==='Estado') return `<td>${isTask?`<select onchange="setTaskStatus('${n.ID}',this.value);renderMain()"><option value="pendiente" ${taskStatus(n)==='pendiente'?'selected':''}>Pendiente</option><option value="haciendo" ${taskStatus(n)==='haciendo'?'selected':''}>▶️ Haciendo</option><option value="hecho" ${taskStatus(n)==='hecho'?'selected':''}>✓ Hecha</option></select>`:''}</td>`;
+      // Antes estos 5 solo se veían en notas ya marcadas como tarea
+      // (isTaskNote) — pedido explícito: "q todos tengan la opcion de
+      // poner el check", cualquier nota puede marcarse hecha/urgente/
+      // importante/estado desde la tabla, sin necesitar el tag #task ni
+      // vivir en el cuaderno Tareas. Togglearlas aquí simplemente les
+      // agrega el tag correspondiente (#hecho/#urgente/#importante/
+      // #haciendo) a esa nota, igual que ya hacían para una tarea.
+      if(key==='Hecha') return `<td><input type="checkbox" ${isTaskDone(n)?'checked':''} onclick="toggleTaskDone('${n.ID}');renderMain()" title="Marcar como cumplida"></td>`;
+      if(key==='Urgente') return `<td><input type="checkbox" ${isTaskUrgent(n)?'checked':''} onclick="toggleTaskUrgent('${n.ID}');renderMain()" title="Marcar como urgente"></td>`;
+      if(key==='Importante') return `<td><input type="checkbox" ${isTaskImportant(n)?'checked':''} onclick="toggleTaskImportant('${n.ID}');renderMain()" title="Marcar como importante"></td>`;
+      if(key==='Prioridad') return `<td>${escHtml(taskPriorityLabel(n))}</td>`;
+      if(key==='Estado') return `<td><select onchange="setTaskStatus('${n.ID}',this.value);renderMain()"><option value="pendiente" ${taskStatus(n)==='pendiente'?'selected':''}>Pendiente</option><option value="haciendo" ${taskStatus(n)==='haciendo'?'selected':''}>▶️ Haciendo</option><option value="hecho" ${taskStatus(n)==='hecho'?'selected':''}>✓ Hecha</option></select></td>`;
       if(key==='blocktag'){ const txt = firstBlockTextForTag(n, getTableBlockTagCol()); return `<td style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escAttr(txt)}">${escHtml(txt)}</td>`; }
       if(key==='Notebook') return `<td>${escHtml(n.Notebook||'')}</td>`;
       if(key==='Tags') return `<td>${effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)};cursor:pointer" onclick="toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`).join(' ')}</td>`;

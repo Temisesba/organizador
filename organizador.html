@@ -757,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Durango';
+const BUILD_VERSION = 'Hermosillo';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -9868,7 +9868,13 @@ async function runAgentTurn(step){
   // algunos SDKs/blogs, no del contrato REST crudo). El resultado de la
   // herramienta va en un turno "user" más, con la parte functionResponse
   // adentro — igual que el turno de texto normal del usuario.
-  aiAgentContents.push({ role:'model', parts:[{ functionCall:{ name:r.name, args:r.args } }] });
+  // thoughtSignature (modelos con "thinking"): tiene que reinsertarse
+  // EXACTO como llegó, como sibling de functionCall dentro de la misma
+  // parte — si se omite, el siguiente turno truena con "missing a
+  // thought_signature" (otro bug real reportado, justo después del de
+  // arriba). Cuando el modelo no manda ninguna (undefined), JSON.stringify
+  // simplemente omite la llave — no hace falta condicional aparte.
+  aiAgentContents.push({ role:'model', parts:[{ functionCall:{ name:r.name, args:r.args }, thoughtSignature:r.thoughtSignature }] });
   if(AGENT_WRITE_TOOLS.has(r.name)){
     const proceed = await confirmAgentAction(r.name, r.args);
     if(!proceed){

@@ -427,7 +427,14 @@ function aiAgent(contents, tools, systemInstruction) {
   if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) return { ok: false, error: 'Sin respuesta del modelo' };
   const parts = data.candidates[0].content.parts || [];
   const fnPart = parts.filter(function (p) { return p.functionCall; })[0];
-  if (fnPart) return { ok: true, type: 'functionCall', name: fnPart.functionCall.name, args: fnPart.functionCall.args || {} };
+  // Modelos con "thinking" (ej. gemini-3.x) exigen que cualquier parte
+  // functionCall que se vuelva a mandar como historial lleve exactamente
+  // la misma thoughtSignature con la que llegó — si no, el siguiente
+  // turno truena con "missing a thought_signature" (bug real reportado).
+  // Se manda tal cual de vuelta al cliente para que la reinserte en el
+  // mismo lugar (sibling de functionCall dentro de la misma parte) al
+  // reconstruir el turno "model" en el historial.
+  if (fnPart) return { ok: true, type: 'functionCall', name: fnPart.functionCall.name, args: fnPart.functionCall.args || {}, thoughtSignature: fnPart.thoughtSignature };
   const textPart = parts.filter(function (p) { return p.text; }).map(function (p) { return p.text; }).join('\n');
   return { ok: true, type: 'text', text: textPart.trim() };
 }

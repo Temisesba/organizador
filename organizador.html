@@ -757,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Zacatecas';
+const BUILD_VERSION = 'Aguascalientes';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1402,9 +1402,10 @@ function calNoHoraTaskRowHTML(n, vencida){
   const chapterTag = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante') || '';
   const tagHTML = chapterTag ? `<span class="tag-badge" style="border-color:${tagColor(chapterTag)};margin-left:4px" onclick="event.stopPropagation();toggleTagFilter('${escAttr(chapterTag)}')" title="Filtrar por #${escAttr(chapterTag)}">#${escHtml(chapterTag)}</span>` : '';
   const due = getTaskDueDate(n);
+  const prioHTML = !done ? `<span style="font-size:11px;color:var(--text-dim);margin-left:6px">${taskPriorityLabel(n)}</span>` : '';
   return `<div class="settings-row" style="cursor:pointer${vencida?';border-left:3px solid var(--danger)':''}" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
     <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}');renderCalDayDynamic()" title="Marcar como cumplida">
-    <span style="flex:1${done?';text-decoration:line-through;opacity:.6':''}">${vencida?'⏰':'⚑'} ${escHtml(n.Titulo||'(sin título)')}${tagHTML}${vencida&&!done&&due?` <span style="color:var(--danger);font-size:11px">(venció ${escHtml(fmtDate(due))})</span>`:''}</span>
+    <span style="flex:1${done?';text-decoration:line-through;opacity:.6':''}">${vencida?'⏰':'⚑'} ${escHtml(n.Titulo||'(sin título)')}${tagHTML}${prioHTML}${vencida&&!done&&due?` <span style="color:var(--danger);font-size:11px">(venció ${escHtml(fmtDate(due))})</span>`:''}</span>
   </div>`;
 }
 function renderCalNoHoraTasks(){
@@ -3073,6 +3074,7 @@ function getFilteredSortedNotes(query, applyTagFilters, notebookOverride){
     // dentro del propio capítulo de Tareas (sortTasksUrgentFirst) usa
     // getTaskDueDate directo, no esta función.
     if(sortState.col==='FechaLimite'){ av=getTaskDueDate(a); bv=getTaskDueDate(b); av=av?av.toISOString():''; bv=bv?bv.toISOString():''; }
+    if(sortState.col==='Prioridad'){ av=taskPriorityRank(a); bv=taskPriorityRank(b); }
     if(av===undefined) av=''; if(bv===undefined) bv='';
     const dyn = sortState.col.startsWith('kv:');
     if(dyn){ const k=sortState.col.slice(3); av=keyValueTags(a)[k]||''; bv=keyValueTags(b)[k]||''; }
@@ -3554,13 +3556,16 @@ function taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pan
     const innerTags = tagName ? `<span class="tag-badge${hit?' hit':''}" style="border-color:${tagColor(tagName)};cursor:pointer" onclick="event.stopPropagation();toggleTagFilter('${escAttr(tagName)}')" title="Filtrar por #${escAttr(tagName)}">#${escHtml(tagName)}</span>` : '';
     const done = isTaskDone(n);
     const urgent = isTaskUrgent(n);
+    const important = isTaskImportant(n);
     return `<div class="field-card"${urgent&&!done?' style="border-color:var(--danger)"':''} onclick="event.stopPropagation();openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})">
       <div class="field-card-tag" style="display:flex;align-items:center;gap:6px">
         <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}')" title="Marcar como cumplida">
         <button class="icon-btn" style="padding:0 3px;opacity:${urgent?'1':'.35'}" onclick="event.stopPropagation();toggleTaskUrgent('${n.ID}')" title="${urgent?'Quitar urgente':'Marcar como urgente'}">🔥</button>
+        <button class="icon-btn" style="padding:0 3px;opacity:${important?'1':'.35'}" onclick="event.stopPropagation();toggleTaskImportant('${n.ID}')" title="${important?'Quitar importante':'Marcar como importante'}">⭐</button>
         <span${getTaskDueDate(n)?'':' style="color:var(--text-dim);font-style:italic"'}>${getTaskDueDate(n)?escHtml(fmtDate(getTaskDueDate(n))):'sin fecha límite'}</span>
       </div>
       <div class="field-card-text"${done?' style="text-decoration:line-through;opacity:.6"':''}>${escHtml(n.Titulo||'(sin título)')}</div>
+      ${!done?`<div style="font-size:11px;color:var(--text-dim);margin-top:2px">${taskPriorityLabel(n)}</div>`:''}
       ${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}
     </div>`;
   }).join('');
@@ -3635,7 +3640,7 @@ function sortArrow(col){ return sortState.col===col ? (sortState.dir==='asc'?' �
    columnas se ven se guarda en localStorage (getHiddenTableCols),
    mismo criterio que los favoritos de la barra de herramientas. */
 function allTableColumns(){
-  const cols = [['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas'],['FechaLimite','Fecha límite'],['Hecha','✓ Hecha'],['Importante','⭐ Importante'],['Contenido','Contenido']].concat(allDynamicKeys().map(k=>['kv:'+k,k]));
+  const cols = [['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas'],['FechaLimite','Fecha límite'],['Hecha','✓ Hecha'],['Importante','⭐ Importante'],['Prioridad','Prioridad'],['Contenido','Contenido']].concat(allDynamicKeys().map(k=>['kv:'+k,k]));
   const blockTag = getTableBlockTagCol();
   if(blockTag) cols.push(['blocktag','#'+blockTag+' (texto)']);
   return cols;
@@ -3703,6 +3708,7 @@ function tableHTML(notes){
       if(key==='FechaLimite'){ const due=getTaskDueDate(n); return `<td>${due?escHtml(fmtDate(due)):''}</td>`; }
       if(key==='Hecha') return `<td>${isTask?`<input type="checkbox" ${isTaskDone(n)?'checked':''} onclick="toggleTaskDone('${n.ID}');renderMain()" title="Marcar como cumplida">`:''}</td>`;
       if(key==='Importante') return `<td>${isTask?`<input type="checkbox" ${isTaskImportant(n)?'checked':''} onclick="toggleTaskImportant('${n.ID}');renderMain()" title="Marcar como importante">`:''}</td>`;
+      if(key==='Prioridad') return `<td>${isTask?escHtml(taskPriorityLabel(n)):''}</td>`;
       if(key==='blocktag'){ const txt = firstBlockTextForTag(n, getTableBlockTagCol()); return `<td style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escAttr(txt)}">${escHtml(txt)}</td>`; }
       if(key==='Notebook') return `<td>${escHtml(n.Notebook||'')}</td>`;
       if(key==='Tags') return `<td>${effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)};cursor:pointer" onclick="toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`).join(' ')}</td>`;
@@ -6957,14 +6963,29 @@ function toggleTaskImportant(id){
   saveEntity('NOTAS', n);
   renderAll();
 }
+/* Matriz de Eisenhower (Importante × Urgente), pedido explícito tras la
+   imagen de referencia: 4 cuadrantes, orden fijo Hacer ya > Programar >
+   Delegar > Eliminar — mismo orden en que el usuario los nombró. Antes
+   sortTasksUrgentFirst solo miraba #urgente; ahora una tarea Importante
+   (sin ser urgente) también se adelanta a una que no es ninguna de las
+   dos, aunque siga detrás de Urgente+Importante. */
+const TASK_PRIORITY_LABELS = ['🔴 Hacer ya','🟡 Programar','🟠 Delegar','⚪ Eliminar'];
+function taskPriorityRank(n){
+  const imp = isTaskImportant(n), urg = isTaskUrgent(n);
+  if(imp && urg) return 0;
+  if(imp) return 1;
+  if(urg) return 2;
+  return 3;
+}
+function taskPriorityLabel(n){ return TASK_PRIORITY_LABELS[taskPriorityRank(n)]; }
 function sortTasksUrgentFirst(rows){
   // Sin fecha límite puesta se ordena AL FINAL (no antes) — no tiene
   // sentido que una tarea todavía sin fecha aparezca "primero" solo
   // porque una cadena vacía ordena antes que cualquier fecha real.
   const dueKey = n => { const d=getTaskDueDate(n); return d ? d.toISOString() : '9999-12-31'; };
   return rows.slice().sort((a,b)=>{
-    const au = isTaskUrgent(a), bu = isTaskUrgent(b);
-    if(au!==bu) return au ? -1 : 1;
+    const ra = taskPriorityRank(a), rb = taskPriorityRank(b);
+    if(ra!==rb) return ra-rb;
     return dueKey(a).localeCompare(dueKey(b));
   });
 }

@@ -757,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Los Mochis';
+const BUILD_VERSION = 'Nogales';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2206,7 +2206,7 @@ async function syncNow(manual){
     // la cola pendiente (arriba) y se reintenta en el siguiente ciclo. Así
     // no hay forma de que la sincronización de fondo pise texto que
     // todavía no se ha guardado en el servidor.
-    if(!isEditingActive()){
+    if(!isEditingActive() && _pendingWriteCount===0){
       const r = await apiPostReal('getAll', {});
       if(r && r.ok){
         DATA = normalizeData(r.data);
@@ -2365,6 +2365,21 @@ function cacheData(){ try{ localStorage.setItem('org_data_cache', JSON.stringify
    guardó cuando en realidad el servidor lo rechazó — y se regresa
    {conflict:true, currentRow, attempted} en vez de la fila guardada,
    para que quien llamó decida qué hacer (ver [[bug-pattern-lost-update-multi-device]]). */
+/* _pendingWriteCount (bug real reportado: "elimino notas en Vista Tabla
+   y regresan"): deleteNoteUI/saveEntity/deleteEntity guardan optimista
+   en DATA local YA, pero la escritura real al backend sigue viajando
+   sin que quien llamó la espere. syncNow corre cada 60s y, mientras no
+   haya un editor de nota abierto, REEMPLAZA DATA entero con lo que
+   diga el servidor (getAll) — si ese tick cae justo en la ventana en
+   que un guardado/borrado local todavía no aterriza en el Sheet, la
+   copia vieja que trae el servidor pisa el cambio local optimista y
+   "resucita" lo que se acababa de borrar/editar. Vista Tabla no cuenta
+   como "editando" (isEditingActive solo mira el editor de notas), así
+   que ahí el riesgo es mayor que en el resto de la app. Este contador
+   global (no por slot, a diferencia de _saveInFlight que ya existía
+   para el editor) le avisa a syncNow que hay algo en el aire y que
+   espere al siguiente ciclo en vez de arriesgarse a pisarlo. */
+let _pendingWriteCount = 0;
 async function saveEntity(table, obj, expectedFechaEdicion){
   if(!obj.ID) obj.ID = uid();
   const key = TABLE_KEY[table];
@@ -2375,7 +2390,9 @@ async function saveEntity(table, obj, expectedFechaEdicion){
   cacheData();
   const params = { table, row: obj };
   if(expectedFechaEdicion!==undefined) params.expectedFechaEdicion = expectedFechaEdicion;
-  const r = await apiPost('saveRow', params);
+  _pendingWriteCount++;
+  let r;
+  try{ r = await apiPost('saveRow', params); } finally{ _pendingWriteCount--; }
   if(r && r.conflict){
     const idx2 = arr.findIndex(x=>x.ID===obj.ID);
     // Si YA había una copia local antes de este intento, se regresa a
@@ -2401,7 +2418,8 @@ async function deleteEntity(table, id){
   const key = TABLE_KEY[table];
   DATA[key] = DATA[key].filter(x=>x.ID!==id);
   cacheData();
-  await apiPost('deleteRow', { table, id });
+  _pendingWriteCount++;
+  try{ await apiPost('deleteRow', { table, id }); } finally{ _pendingWriteCount--; }
 }
 
 /* ============ Etiquetas / cuadernos ============ */

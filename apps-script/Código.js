@@ -92,6 +92,7 @@ function doPost(e) {
     else if (action === 'toggleHistorialItem')  result = toggleHistorialItem(body.sheetId, body.historialId, body.index);
     else if (action === 'updateHistorialItems') result = updateHistorialItems(body.sheetId, body.historialId, body.items);
     else if (action === 'aiAssist')             result = aiAssist(body.mode, body.text, body.instruction);
+    else if (action === 'aiAgent')              result = aiAgent(body.contents, body.tools, body.systemInstruction);
     else if (action === 'translate')            result = translate(body.text, body.direction);
     else if (action === 'aiEnglishLesson')      result = aiEnglishLesson(body.text);
     else if (action === 'ocrImage')             result = ocrImage(body.imageBase64, body.mimeType);
@@ -401,6 +402,34 @@ function aiAssist(mode, text, instruction) {
   // prompt del sistema.
   const systemPrompt = (mode === 'personalizada' && instruction) ? instruction : (prompts[mode] || prompts.organizar);
   return askAI(systemPrompt, text);
+}
+
+// Asistente-agente (2026-08-19): a diferencia de aiAssist/translate (una
+// sola pregunta-respuesta sin memoria), esto sostiene una conversación
+// con function-calling real de Gemini — el cliente manda el historial
+// completo (contents) + el set de herramientas que puede pedir usar
+// (tools), y si Gemini responde con una functionCall en vez de texto, el
+// cliente la EJECUTA ahí mismo (lee/escribe DATA, o Google Calendar con
+// el token del usuario — cosas que solo existen en el navegador, nunca
+// aquí) y manda el resultado de vuelta como un turno más para que
+// Gemini siga. Este backend es solo el proxy que sabe hablarle a la API
+// de Gemini con tools/systemInstruction — no tiene ni ejecuta lógica de
+// la app.
+function aiAgent(contents, tools, systemInstruction) {
+  if (!contents || !contents.length) return { ok: false, error: 'Sin conversación' };
+  const payload = { contents: contents };
+  if (tools && tools.length) payload.tools = [{ functionDeclarations: tools }];
+  if (systemInstruction) payload.systemInstruction = { parts: [{ text: systemInstruction }] };
+  const response = UrlFetchApp.fetch(GEMINI_API, { method: 'post', contentType: 'application/json', payload: JSON.stringify(payload), muteHttpExceptions: true });
+  const data = JSON.parse(response.getContentText());
+  if (response.getResponseCode() === 429 || isGeminiQuotaError(data)) return { ok: false, error: 'Límite de IA alcanzado, intenta más tarde' };
+  if (data.error) return { ok: false, error: data.error.message || 'Error de IA' };
+  if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) return { ok: false, error: 'Sin respuesta del modelo' };
+  const parts = data.candidates[0].content.parts || [];
+  const fnPart = parts.filter(function (p) { return p.functionCall; })[0];
+  if (fnPart) return { ok: true, type: 'functionCall', name: fnPart.functionCall.name, args: fnPart.functionCall.args || {} };
+  const textPart = parts.filter(function (p) { return p.text; }).map(function (p) { return p.text; }).join('\n');
+  return { ok: true, type: 'text', text: textPart.trim() };
 }
 
 function translate(text, direction) {

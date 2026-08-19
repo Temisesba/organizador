@@ -757,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Aguascalientes';
+const BUILD_VERSION = 'Chihuahua';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1399,10 +1399,11 @@ function calNoHoraTaskRowHTML(n, vencida){
   // pedido explícito: mostrar también su etiqueta (#familia, #trabajo…)
   // aquí — antes solo se veía el título, sin saber de un vistazo a qué
   // categoría pertenecía cada pendiente.
-  const chapterTag = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante') || '';
+  const chapterTag = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante' && t!=='haciendo') || '';
   const tagHTML = chapterTag ? `<span class="tag-badge" style="border-color:${tagColor(chapterTag)};margin-left:4px" onclick="event.stopPropagation();toggleTagFilter('${escAttr(chapterTag)}')" title="Filtrar por #${escAttr(chapterTag)}">#${escHtml(chapterTag)}</span>` : '';
   const due = getTaskDueDate(n);
-  const prioHTML = !done ? `<span style="font-size:11px;color:var(--text-dim);margin-left:6px">${taskPriorityLabel(n)}</span>` : '';
+  const doing = isTaskDoing(n);
+  const prioHTML = !done ? `<span style="font-size:11px;color:var(--text-dim);margin-left:6px">${doing?'▶️ Haciendo — ':''}${taskPriorityLabel(n)}</span>` : '';
   return `<div class="settings-row" style="cursor:pointer${vencida?';border-left:3px solid var(--danger)':''}" onclick="openNoteFromCalendar('${escAttr(n.ID)}')">
     <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}');renderCalDayDynamic()" title="Marcar como cumplida">
     <span style="flex:1${done?';text-decoration:line-through;opacity:.6':''}">${vencida?'⏰':'⚑'} ${escHtml(n.Titulo||'(sin título)')}${tagHTML}${prioHTML}${vencida&&!done&&due?` <span style="color:var(--danger);font-size:11px">(venció ${escHtml(fmtDate(due))})</span>`:''}</span>
@@ -3362,9 +3363,9 @@ function cardsHTML(notes, query, pane){
       if(taskChaptersRendered) return '';
       taskChaptersRendered = true;
       const taskNotes = notes.filter(x=>x.Notebook===TAREAS_NOTEBOOK);
-      const chapterTags = sortChapterTags(Array.from(new Set(taskNotes.map(x=>taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante') || ''))));
+      const chapterTags = sortChapterTags(Array.from(new Set(taskNotes.map(x=>taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante' && t!=='haciendo') || ''))));
       return chapterTags.map(chapterTag=>{
-        const chapterNotes = taskNotes.filter(x=>(taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante')||'')===chapterTag);
+        const chapterNotes = taskNotes.filter(x=>(taskTagList(x).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante' && t!=='haciendo')||'')===chapterTag);
         return taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pane);
       }).join('');
     }
@@ -3557,15 +3558,17 @@ function taskChapterHTML(chapterTag, chapterNotes, highlight, q, activeTags, pan
     const done = isTaskDone(n);
     const urgent = isTaskUrgent(n);
     const important = isTaskImportant(n);
-    return `<div class="field-card"${urgent&&!done?' style="border-color:var(--danger)"':''} onclick="event.stopPropagation();openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})">
+    const doing = isTaskDoing(n);
+    return `<div class="field-card"${urgent&&!done?' style="border-color:var(--danger)"':(doing&&!done?' style="border-color:var(--accent)"':'')} onclick="event.stopPropagation();openNoteEditor('${n.ID}',null${pane?`,'${pane}'`:''})">
       <div class="field-card-tag" style="display:flex;align-items:center;gap:6px">
         <input type="checkbox" ${done?'checked':''} onclick="event.stopPropagation();toggleTaskDone('${n.ID}')" title="Marcar como cumplida">
         <button class="icon-btn" style="padding:0 3px;opacity:${urgent?'1':'.35'}" onclick="event.stopPropagation();toggleTaskUrgent('${n.ID}')" title="${urgent?'Quitar urgente':'Marcar como urgente'}">🔥</button>
         <button class="icon-btn" style="padding:0 3px;opacity:${important?'1':'.35'}" onclick="event.stopPropagation();toggleTaskImportant('${n.ID}')" title="${important?'Quitar importante':'Marcar como importante'}">⭐</button>
+        <button class="icon-btn" style="padding:0 3px;opacity:${doing?'1':'.35'}" onclick="event.stopPropagation();toggleTaskDoing('${n.ID}')" title="${doing?'Quitar en progreso':'Marcar en progreso'}">▶️</button>
         <span${getTaskDueDate(n)?'':' style="color:var(--text-dim);font-style:italic"'}>${getTaskDueDate(n)?escHtml(fmtDate(getTaskDueDate(n))):'sin fecha límite'}</span>
       </div>
       <div class="field-card-text"${done?' style="text-decoration:line-through;opacity:.6"':''}>${escHtml(n.Titulo||'(sin título)')}</div>
-      ${!done?`<div style="font-size:11px;color:var(--text-dim);margin-top:2px">${taskPriorityLabel(n)}</div>`:''}
+      ${!done?`<div style="font-size:11px;color:var(--text-dim);margin-top:2px">${doing?'▶️ Haciendo — ':''}${taskPriorityLabel(n)}</div>`:''}
       ${innerTags?`<div class="nc-tags" style="margin-top:6px">${innerTags}</div>`:''}
     </div>`;
   }).join('');
@@ -3640,7 +3643,7 @@ function sortArrow(col){ return sortState.col===col ? (sortState.dir==='asc'?' �
    columnas se ven se guarda en localStorage (getHiddenTableCols),
    mismo criterio que los favoritos de la barra de herramientas. */
 function allTableColumns(){
-  const cols = [['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas'],['FechaLimite','Fecha límite'],['Hecha','✓ Hecha'],['Importante','⭐ Importante'],['Prioridad','Prioridad'],['Contenido','Contenido']].concat(allDynamicKeys().map(k=>['kv:'+k,k]));
+  const cols = [['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas'],['FechaLimite','Fecha límite'],['Hecha','✓ Hecha'],['Importante','⭐ Importante'],['Prioridad','Prioridad'],['Estado','Estado'],['Contenido','Contenido']].concat(allDynamicKeys().map(k=>['kv:'+k,k]));
   const blockTag = getTableBlockTagCol();
   if(blockTag) cols.push(['blocktag','#'+blockTag+' (texto)']);
   return cols;
@@ -3709,6 +3712,7 @@ function tableHTML(notes){
       if(key==='Hecha') return `<td>${isTask?`<input type="checkbox" ${isTaskDone(n)?'checked':''} onclick="toggleTaskDone('${n.ID}');renderMain()" title="Marcar como cumplida">`:''}</td>`;
       if(key==='Importante') return `<td>${isTask?`<input type="checkbox" ${isTaskImportant(n)?'checked':''} onclick="toggleTaskImportant('${n.ID}');renderMain()" title="Marcar como importante">`:''}</td>`;
       if(key==='Prioridad') return `<td>${isTask?escHtml(taskPriorityLabel(n)):''}</td>`;
+      if(key==='Estado') return `<td>${isTask?`<select onchange="setTaskStatus('${n.ID}',this.value);renderMain()"><option value="pendiente" ${taskStatus(n)==='pendiente'?'selected':''}>Pendiente</option><option value="haciendo" ${taskStatus(n)==='haciendo'?'selected':''}>▶️ Haciendo</option><option value="hecho" ${taskStatus(n)==='hecho'?'selected':''}>✓ Hecha</option></select>`:''}</td>`;
       if(key==='blocktag'){ const txt = firstBlockTextForTag(n, getTableBlockTagCol()); return `<td style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escAttr(txt)}">${escHtml(txt)}</td>`; }
       if(key==='Notebook') return `<td>${escHtml(n.Notebook||'')}</td>`;
       if(key==='Tags') return `<td>${effectiveTags(n).map(t=>`<span class="tag-badge" style="border-color:${tagColor(t)};cursor:pointer" onclick="toggleTagFilter('${escAttr(t)}')" title="Filtrar por #${escAttr(t)}">#${escHtml(t)}</span>`).join(' ')}</td>`;
@@ -6926,7 +6930,11 @@ function toggleTaskDone(id){
   const n = DATA.notas.find(x=>x.ID===id); if(!n) return;
   const tags = taskTagList(n);
   const idx = tags.indexOf('hecho');
-  if(idx>=0) tags.splice(idx,1); else { tags.push('hecho'); ensureTagsRegistered('#hecho'); }
+  if(idx>=0) tags.splice(idx,1);
+  else {
+    tags.push('hecho'); ensureTagsRegistered('#hecho');
+    const dIdx = tags.indexOf('haciendo'); if(dIdx>=0) tags.splice(dIdx,1);
+  }
   n.Tags = tags.map(t=>'#'+t).join(' ');
   saveEntity('NOTAS', n);
   renderAll();
@@ -6962,6 +6970,38 @@ function toggleTaskImportant(id){
   n.Tags = tags.map(t=>'#'+t).join(' ');
   saveEntity('NOTAS', n);
   renderAll();
+}
+/* Estado de tarea a 3 valores (pendiente/haciendo/hecho), pedido
+   explícito ("marca esto como realizando"). Se implementa como el
+   mismo mecanismo de #etiqueta que hecho/urgente/importante (#haciendo)
+   en vez de una columna nueva — pero con exclusión mutua real: no tiene
+   sentido que algo esté "haciendo" Y "hecho" al mismo tiempo, así que
+   marcar una apaga la otra automáticamente. */
+function isTaskDoing(n){ return taskTagList(n).includes('haciendo'); }
+function toggleTaskDoing(id){
+  const n = DATA.notas.find(x=>x.ID===id); if(!n) return;
+  const tags = taskTagList(n);
+  const idx = tags.indexOf('haciendo');
+  if(idx>=0) tags.splice(idx,1);
+  else {
+    tags.push('haciendo'); ensureTagsRegistered('#haciendo');
+    const hIdx = tags.indexOf('hecho'); if(hIdx>=0) tags.splice(hIdx,1);
+  }
+  n.Tags = tags.map(t=>'#'+t).join(' ');
+  saveEntity('NOTAS', n);
+  renderAll();
+}
+function taskStatus(n){ return isTaskDone(n) ? 'hecho' : (isTaskDoing(n) ? 'haciendo' : 'pendiente'); }
+/* Setter de una sola llamada para el asistente/agente (ver runAgentTool
+   más abajo): recibe el estado deseado directo en vez de togglear a
+   ciegas, así el modelo puede simplemente pedir "pon esto en haciendo"
+   sin necesitar saber el estado actual primero. */
+function setTaskStatus(id, estado){
+  const n = DATA.notas.find(x=>x.ID===id); if(!n) return null;
+  if(estado==='hecho'){ if(!isTaskDone(n)) toggleTaskDone(n.ID); }
+  else if(estado==='haciendo'){ if(!isTaskDoing(n)) toggleTaskDoing(n.ID); }
+  else { if(isTaskDone(n)) toggleTaskDone(n.ID); if(isTaskDoing(n)) toggleTaskDoing(n.ID); }
+  return DATA.notas.find(x=>x.ID===id);
 }
 /* Matriz de Eisenhower (Importante × Urgente), pedido explícito tras la
    imagen de referencia: 4 cuadrantes, orden fijo Hacer ya > Programar >
@@ -7080,7 +7120,7 @@ function renderQuickTaskList(){
   if(!items.length){ wrap.innerHTML = '<p class="hint" style="color:var(--text-dim);font-size:12px">Sin tareas todavía — la primera que guardes aparece arriba.</p>'; return; }
   const groups = {}; const order = [];
   items.forEach(n=>{
-    const chapter = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante') || 'Sin categoría';
+    const chapter = taskTagList(n).find(t=>t!=='task' && t!=='hecho' && t!=='urgente' && t!=='importante' && t!=='haciendo') || 'Sin categoría';
     if(!groups[chapter]){ groups[chapter]=[]; order.push(chapter); }
     groups[chapter].push(n);
   });
@@ -9608,6 +9648,234 @@ function captureAiInsertRange(){
   const sel = window.getSelection();
   _aiInsertRange = (mainArea && sel.rangeCount && mainArea.contains(sel.anchorNode)) ? sel.getRangeAt(0).cloneRange() : null;
 }
+/* ============ Asistente-agente (2026-08-19): pedido explícito de que
+   el botón de "asistente personal" pueda leer/actuar sobre la app
+   entera con lenguaje natural ("dime qué priorizo", "marca esto como
+   haciendo", "pon esto en el calendario y la tarea 5 días antes",
+   "busca en mis notas..."). A diferencia del resto del panel (una sola
+   pregunta-respuesta sin memoria), esto sostiene una conversación real
+   con function-calling de Gemini: aiAgentContents es el historial que
+   se manda COMPLETO en cada turno (el backend/Gemini no guardan nada
+   entre llamadas); cuando el modelo responde con una functionCall en
+   vez de texto, se ejecuta acá mismo (herramientas agentTool*, únicas
+   que tienen acceso real a DATA/saveEntity/Google Calendar — el
+   backend es solo un proxy ciego a la API de Gemini, ver aiAgent() en
+   Código.js) y el resultado se manda de vuelta como turno "function"
+   para que el modelo siga. agentDisplayLog es SOLO para pintar las
+   burbujas del hilo (separado de aiAgentContents, que tiene el formato
+   crudo que espera Gemini) — cada entrada se re-renderiza completa en
+   cada cambio, así confirmar/cancelar una acción (resolveAgentConfirm)
+   solo cambia el "kind" de su propia entrada.
+   Cualquier herramienta que ESCRIBA algo real (AGENT_WRITE_TOOLS) pausa
+   el hilo pidiendo confirmación explícita antes de ejecutarla — pedido
+   implícito al advertirle al usuario del riesgo de que actúe solo sobre
+   su Google Calendar real sin que se dé cuenta. Las de solo lectura
+   (listar/buscar) se ejecutan directo, sin interrumpir. */
+let aiAgentContents = [];
+let agentDisplayLog = [];
+const AGENT_WRITE_TOOLS = new Set(['marcar_estado_tarea','marcar_prioridad_tarea','crear_tarea','crear_nota','crear_evento_calendario']);
+const AGENT_MAX_STEPS = 6;
+const AGENT_TOOLS = [
+  { name:'listar_pendientes', description:'Lista las tareas pendientes (no hechas) del usuario, ya ordenadas por prioridad de la matriz de Eisenhower (importante+urgente primero).', parameters:{ type:'OBJECT', properties:{} } },
+  { name:'listar_notas', description:'Lista un resumen de las notas del usuario (título, cuaderno, etiquetas, fecha) de TODOS los cuadernos, para tener una vista general de cómo están organizadas y poder opinar sobre el orden.', parameters:{ type:'OBJECT', properties:{} } },
+  { name:'buscar_notas', description:'Busca en TODOS los cuadernos del usuario notas cuyo título, contenido o etiquetas contengan un texto.', parameters:{ type:'OBJECT', properties:{ query:{ type:'STRING', description:'Texto a buscar' } }, required:['query'] } },
+  { name:'marcar_estado_tarea', description:'Cambia el estado de una tarea EXISTENTE a pendiente, haciendo (en progreso) o hecho.', parameters:{ type:'OBJECT', properties:{ id:{type:'STRING', description:'ID de la tarea, obtenido antes con listar_pendientes o buscar_notas'}, estado:{type:'STRING', enum:['pendiente','haciendo','hecho']} }, required:['id','estado'] } },
+  { name:'marcar_prioridad_tarea', description:'Marca o desmarca una tarea EXISTENTE como importante y/o urgente (matriz de Eisenhower).', parameters:{ type:'OBJECT', properties:{ id:{type:'STRING'}, importante:{type:'BOOLEAN'}, urgente:{type:'BOOLEAN'} }, required:['id'] } },
+  { name:'crear_tarea', description:'Crea una tarea nueva en el cuaderno Tareas, opcionalmente con fecha límite e importancia/urgencia.', parameters:{ type:'OBJECT', properties:{ titulo:{type:'STRING'}, fechaLimite:{type:'STRING', description:'Fecha (y opcionalmente hora) en formato ISO 8601, ej 2026-08-25T10:00:00'}, importante:{type:'BOOLEAN'}, urgente:{type:'BOOLEAN'} }, required:['titulo'] } },
+  { name:'crear_nota', description:'Crea una nota nueva en un cuaderno específico (si el cuaderno no existe todavía, se crea).', parameters:{ type:'OBJECT', properties:{ cuaderno:{type:'STRING'}, titulo:{type:'STRING'}, contenido:{type:'STRING', description:'Texto plano del cuerpo de la nota'} }, required:['cuaderno','titulo'] } },
+  { name:'crear_evento_calendario', description:'Crea un evento REAL en el Google Calendar conectado del usuario.', parameters:{ type:'OBJECT', properties:{ titulo:{type:'STRING'}, fechaHoraInicio:{type:'STRING', description:'ISO 8601, ej 2026-08-25T10:00:00'}, fechaHoraFin:{type:'STRING', description:'ISO 8601, opcional — por defecto 1 hora después del inicio'}, notas:{type:'STRING'} }, required:['titulo','fechaHoraInicio'] } }
+];
+function agentSystemPrompt(){
+  return 'Eres el asistente personal integrado en la app de notas/tareas "Organizador" del usuario. Hoy es '+new Date().toLocaleString('es-MX')+'. '+
+    'Tienes herramientas para LEER y MODIFICAR de verdad sus tareas, notas y su Google Calendar real —úsalas cuando la petición lo requiera, en vez de solo describir qué harías. '+
+    'Si el usuario pide varias cosas encadenadas (ej. "pon esto en el calendario y crea la tarea 5 días antes"), calcula tú las fechas relativas a partir de la fecha de hoy y llama a las herramientas necesarias, una por turno, en el orden correcto. '+
+    'Antes de decir que ya hiciste algo, de verdad haz la llamada a la herramienta correspondiente. Responde siempre en español, breve y concreto; cuando termines de actuar, confirma en una frase qué hiciste.';
+}
+function agentToolDescription(name, args){
+  const map = {
+    marcar_estado_tarea: 'Cambiar el estado de una tarea a "'+(args.estado||'')+'"',
+    marcar_prioridad_tarea: 'Cambiar importante/urgente de una tarea',
+    crear_tarea: 'Crear la tarea "'+(args.titulo||'')+'"'+(args.fechaLimite?(' con fecha límite '+fmtDateTime(new Date(args.fechaLimite).toISOString())):''),
+    crear_nota: 'Crear la nota "'+(args.titulo||'')+'" en el cuaderno "'+(args.cuaderno||'')+'"',
+    crear_evento_calendario: 'Crear el evento "'+(args.titulo||'')+'"'+(args.fechaHoraInicio?(' el '+fmtDateTime(new Date(args.fechaHoraInicio).toISOString())):'')+' en tu Google Calendar real'
+  };
+  return map[name] || name;
+}
+function agentToolListarPendientes(){
+  const rows = sortTasksUrgentFirst(activeNotes().filter(n=>isTaskNote(n) && !isTaskDone(n)));
+  return rows.slice(0,40).map(n=>({
+    id:n.ID, titulo:n.Titulo||'(sin título)', cuaderno:n.Notebook||'',
+    prioridad: taskPriorityLabel(n), estado: taskStatus(n),
+    fechaLimite: getTaskDueDate(n) ? fmtDate(getTaskDueDate(n)) : null
+  }));
+}
+function agentToolListarNotas(){
+  return activeNotes().filter(n=>n.Notebook!==MEJORAS_NOTEBOOK).slice(0,80).map(n=>({
+    id:n.ID, titulo:n.Titulo||'(sin título)', cuaderno:n.Notebook||'', etiquetas: effectiveTags(n), fecha: fmtDate(n.Fecha)
+  }));
+}
+function agentToolBuscarNotas(args){
+  const q = String((args&&args.query)||'').toLowerCase().trim();
+  if(!q) return { error:'Falta el texto a buscar' };
+  return activeNotes().filter(n=>{
+    if(n.Notebook===MEJORAS_NOTEBOOK) return false;
+    const hay = (n.Titulo+' '+noteSnippetText(n)+' '+n.Tags).toLowerCase();
+    return hay.includes(q);
+  }).slice(0,25).map(n=>({ id:n.ID, titulo:n.Titulo||'(sin título)', cuaderno:n.Notebook||'', snippet: noteSnippetText(n).slice(0,200) }));
+}
+function agentToolMarcarEstadoTarea(args){
+  const n = getNote(args.id); if(!n) return { error:'No encontré una tarea con ese ID' };
+  setTaskStatus(n.ID, args.estado);
+  return { ok:true, titulo:n.Titulo, estado:args.estado };
+}
+function agentToolMarcarPrioridadTarea(args){
+  const n = getNote(args.id); if(!n) return { error:'No encontré una tarea con ese ID' };
+  if(args.importante!==undefined && isTaskImportant(n)!==!!args.importante) toggleTaskImportant(n.ID);
+  if(args.urgente!==undefined && isTaskUrgent(n)!==!!args.urgente) toggleTaskUrgent(n.ID);
+  return { ok:true, titulo:n.Titulo };
+}
+async function agentToolCrearTarea(args){
+  const nb = await ensureTareasNotebook();
+  const allTags = ['task'];
+  if(args.importante) allTags.push('importante');
+  if(args.urgente) allTags.push('urgente');
+  const note = { ID:uid(), Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(), Titulo:args.titulo||'(sin título)', Contenido:'<p>'+escHtml(args.titulo||'')+'</p>', Tags:allTags.map(t=>'#'+t).join(' '), Notebook:nb.Nombre, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'' };
+  if(args.fechaLimite){ const d = new Date(args.fechaLimite); if(!isNaN(d)) setTaskDueDate(note, d.toISOString()); }
+  saveEntity('NOTAS', note);
+  allTags.forEach(t=>ensureTagsRegistered('#'+t));
+  renderAll();
+  return { ok:true, id:note.ID, titulo:note.Titulo };
+}
+async function agentToolCrearNota(args){
+  const cuaderno = String(args.cuaderno||'').trim();
+  if(!cuaderno) return { error:'Falta el cuaderno' };
+  if(!DATA.notebooks.find(nb=>nb.Nombre===cuaderno)){
+    saveEntity('NOTEBOOKS', { ID:uid(), Nombre:cuaderno, TagsHeredados:'', Color:'', TagAuto:'', Password:'' });
+  }
+  const note = { ID:uid(), Fecha:new Date().toISOString(), FechaEdicion:new Date().toISOString(), Titulo:args.titulo||'(sin título)', Contenido:'<p>'+escHtml(args.contenido||'')+'</p>', Tags:'', Notebook:cuaderno, Cornell:'', CornellCue:'', Color:'', Pinned:'', Orden:0, Archivo:'' };
+  saveEntity('NOTAS', note);
+  renderAll();
+  return { ok:true, id:note.ID, titulo:note.Titulo, cuaderno };
+}
+async function agentToolCrearEventoCalendario(args){
+  if(!googleAccessToken) return { error:'Google Calendar no está conectado. Pídele al usuario que lo conecte en Configuración → Conexión, e intenta de nuevo después.' };
+  const start = new Date(args.fechaHoraInicio);
+  if(isNaN(start)) return { error:'fechaHoraInicio inválida' };
+  const end = args.fechaHoraFin ? new Date(args.fechaHoraFin) : new Date(start.getTime()+60*60000);
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const body = { summary: args.titulo||'(sin título)', description: args.notas||undefined, start:{dateTime:start.toISOString(),timeZone:tz}, end:{dateTime:end.toISOString(),timeZone:tz} };
+  let res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', { method:'POST', headers:{ Authorization:'Bearer '+googleAccessToken, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  if(res.status===401 && await maybeRefreshGoogleToken()){
+    res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', { method:'POST', headers:{ Authorization:'Bearer '+googleAccessToken, 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  }
+  if(!res.ok) return { error:'No se pudo crear el evento (HTTP '+res.status+')' };
+  const data = await res.json();
+  renderCalendarView();
+  return { ok:true, eventId:data.id, titulo:body.summary, cuando: fmtDateTime(start.toISOString()) };
+}
+async function executeAgentTool(name, args){
+  try{
+    if(name==='listar_pendientes') return agentToolListarPendientes();
+    if(name==='listar_notas') return agentToolListarNotas();
+    if(name==='buscar_notas') return agentToolBuscarNotas(args);
+    if(name==='marcar_estado_tarea') return agentToolMarcarEstadoTarea(args);
+    if(name==='marcar_prioridad_tarea') return agentToolMarcarPrioridadTarea(args);
+    if(name==='crear_tarea') return await agentToolCrearTarea(args);
+    if(name==='crear_nota') return await agentToolCrearNota(args);
+    if(name==='crear_evento_calendario') return await agentToolCrearEventoCalendario(args);
+    return { error:'Herramienta desconocida: '+name };
+  } catch(e){
+    return { error: e.message||'Error ejecutando la acción' };
+  }
+}
+function agentUserBubbleHTML(text){
+  return `<div style="text-align:right;margin-bottom:6px"><span style="display:inline-block;background:var(--accent);color:#fff;border-radius:10px;padding:6px 10px;font-size:13px;max-width:85%;text-align:left">${escHtml(text)}</span></div>`;
+}
+function agentModelBubbleHTML(html){
+  return `<div style="margin-bottom:6px"><div style="display:inline-block;background:var(--bg-elev);border:1px solid var(--border);border-radius:10px;padding:6px 10px;font-size:13px;max-width:92%">${html}</div></div>`;
+}
+function agentActionBubbleHTML(text){
+  return `<div style="margin-bottom:6px;font-size:12px;color:var(--text-dim)">⚙️ ${escHtml(text)}</div>`;
+}
+function renderAgentThread(){
+  const el = document.getElementById('agentThread'); if(!el) return;
+  el.innerHTML = agentDisplayLog.map((e,idx)=>{
+    if(e.kind==='user') return agentUserBubbleHTML(e.text);
+    if(e.kind==='model') return agentModelBubbleHTML(mdToHtml(e.text));
+    if(e.kind==='action') return agentActionBubbleHTML(e.text);
+    if(e.kind==='error') return `<div style="margin-bottom:6px;color:var(--danger,#c0392b);font-size:13px">${escHtml(e.text)}</div>`;
+    if(e.kind==='confirm-pending') return `<div style="margin-bottom:6px;border:1px solid var(--border);border-radius:8px;padding:8px;font-size:13px">
+      <div>${escHtml(e.desc)}</div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn" onclick="resolveAgentConfirm(${idx},true)">✅ Confirmar</button>
+        <button class="btn secondary" onclick="resolveAgentConfirm(${idx},false)">✕ Cancelar</button>
+      </div>
+    </div>`;
+    if(e.kind==='confirm-done') return `<div style="margin-bottom:6px;font-size:12px;color:var(--text-dim)">${e.ok?'✅ Confirmado: ':'✕ Cancelado: '}${escHtml(e.desc)}</div>`;
+    return '';
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+function resetAgentThread(){ aiAgentContents = []; agentDisplayLog = []; renderAgentThread(); }
+function confirmAgentAction(name, args){
+  return new Promise(resolve=>{
+    const idx = agentDisplayLog.length;
+    agentDisplayLog.push({ kind:'confirm-pending', desc: agentToolDescription(name,args) });
+    renderAgentThread();
+    window._agentConfirmResolvers = window._agentConfirmResolvers || {};
+    window._agentConfirmResolvers[idx] = resolve;
+  });
+}
+function resolveAgentConfirm(idx, val){
+  const e = agentDisplayLog[idx]; if(!e) return;
+  e.kind = 'confirm-done'; e.ok = val;
+  renderAgentThread();
+  const resolve = window._agentConfirmResolvers && window._agentConfirmResolvers[idx];
+  if(resolve){ delete window._agentConfirmResolvers[idx]; resolve(val); }
+}
+async function sendAgentMessage(){
+  const input = document.getElementById('agentInput');
+  const text = (input.value||'').trim();
+  if(!text) return;
+  if(!navigator.onLine){ showToast('El asistente necesita conexión'); return; }
+  input.value = '';
+  agentDisplayLog.push({ kind:'user', text }); renderAgentThread();
+  aiAgentContents.push({ role:'user', parts:[{text}] });
+  await runAgentTurn(0);
+}
+async function runAgentTurn(step){
+  const statusEl = document.getElementById('agentStatus');
+  if(statusEl) statusEl.textContent = 'Pensando…';
+  if(step >= AGENT_MAX_STEPS){
+    if(statusEl) statusEl.textContent = '';
+    agentDisplayLog.push({ kind:'model', text:'Me detuve por seguridad después de varios pasos seguidos — dime si quieres que siga.' }); renderAgentThread();
+    return;
+  }
+  const r = await apiPost('aiAgent', { contents: aiAgentContents, tools: AGENT_TOOLS, systemInstruction: agentSystemPrompt() });
+  if(statusEl) statusEl.textContent = '';
+  if(!r || !r.ok){
+    agentDisplayLog.push({ kind:'error', text:'Error: '+((r&&r.error)||'sin respuesta') }); renderAgentThread();
+    return;
+  }
+  if(r.type==='text'){
+    aiAgentContents.push({ role:'model', parts:[{text:r.text}] });
+    agentDisplayLog.push({ kind:'model', text:r.text }); renderAgentThread();
+    return;
+  }
+  aiAgentContents.push({ role:'model', parts:[{ functionCall:{ name:r.name, args:r.args } }] });
+  if(AGENT_WRITE_TOOLS.has(r.name)){
+    const proceed = await confirmAgentAction(r.name, r.args);
+    if(!proceed){
+      aiAgentContents.push({ role:'function', parts:[{ functionResponse:{ name:r.name, response:{ result:{ cancelado:true, motivo:'El usuario canceló esta acción, no la ejecutes de nuevo sin volver a preguntar primero.' } } } }] });
+      await runAgentTurn(step+1);
+      return;
+    }
+  }
+  agentDisplayLog.push({ kind:'action', text: agentToolDescription(r.name, r.args)+'…' }); renderAgentThread();
+  const result = await executeAgentTool(r.name, r.args);
+  aiAgentContents.push({ role:'function', parts:[{ functionResponse:{ name:r.name, response:{ result } } }] });
+  await runAgentTurn(step+1);
+}
 /* Antes: modal centrado con fondo oscuro que tapaba/bloqueaba toda la
    app (drawer-overlay), una sola respuesta a la vez, y cada clic en ✨
    creaba un panel nuevo desde cero. Ahora, mismo patrón que el panel de
@@ -9632,6 +9900,19 @@ function openAIDrawer(){
   panel.innerHTML = `
     <div class="drawer-head"><b>✨ Asistente</b><span><button class="icon-btn" onclick="minimizeAIPanel()" title="Minimizar — la conversación sigue aquí cuando vuelvas">➖</button><button class="icon-btn" onclick="closeAIPanel()">✕</button></span></div>
     <div style="padding:12px;overflow-y:auto;flex:1">
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <h3 style="margin:0">🤖 Pregúntale a tu Organizador</h3>
+          <button class="icon-btn" onclick="resetAgentThread()" title="Nueva conversación">🗑️</button>
+        </div>
+        <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0 8px">Ej. "dime qué priorizo de mis pendientes", "marca X como haciendo", "busca en mis notas qué dice de...", "pon una junta el jueves a las 10am en el calendario y crea la tarea 5 días antes". Antes de crear/cambiar algo real (calendario, tareas, notas) te voy a pedir que confirmes.</p>
+        <div id="agentThread"></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input type="text" id="agentInput" placeholder="Escribe qué necesitas…" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();sendAgentMessage();}">
+          <button class="btn" onclick="sendAgentMessage()">Enviar</button>
+        </div>
+        <p id="agentStatus" style="font-size:12.5px;color:var(--text-dim);margin:6px 0 0"></p>
+      </div>
       <textarea id="aiInput" rows="5" placeholder="Pega o escribe el texto…">${escHtml(selectedText)}</textarea>
       <button class="mini-btn" style="margin-top:6px" onclick="pullFromActiveNote()">↙ usar texto de la nota abierta</button>
       <label style="font-size:12.5px;display:flex;align-items:center;gap:6px;margin-top:10px;cursor:pointer" title="Además de lo que pidas con cualquier botón de abajo, analiza el texto en inglés y guarda una lección aparte (nota en el cuaderno Inglés)">
@@ -9663,7 +9944,7 @@ function openAIDrawer(){
   document.body.appendChild(panel);
   bringToFront(panel);
   document.body.classList.add('has-ai-panel');
-  renderDicList(); renderFeedbackList(); renderEnglishLessonHistory(); renderAiThread();
+  renderDicList(); renderFeedbackList(); renderEnglishLessonHistory(); renderAiThread(); renderAgentThread();
 }
 function minimizeAIPanel(){
   const panel = document.getElementById('aiPanel'); if(!panel) return;
@@ -9688,6 +9969,7 @@ function closeAIPanel(){
   const chip = document.getElementById('aiMinChip'); if(chip) chip.remove();
   document.body.classList.remove('has-ai-panel');
   aiConversation = []; _aiInsertRange = null;
+  aiAgentContents = []; agentDisplayLog = [];
 }
 /* #mainArea es un <div contenteditable>, no un <textarea> — no tiene
    .value (eso siempre devolvía undefined y el cuadro de IA se llenaba

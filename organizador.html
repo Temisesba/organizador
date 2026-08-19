@@ -757,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Chihuahua';
+const BUILD_VERSION = 'Durango';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -9862,18 +9862,24 @@ async function runAgentTurn(step){
     agentDisplayLog.push({ kind:'model', text:r.text }); renderAgentThread();
     return;
   }
+  // La API real solo acepta role "user"/"model" en contents (bug real
+  // reportado: "Role 'function' is not supported" — la convención de
+  // usar role:"function" para el resultado de una herramienta es de
+  // algunos SDKs/blogs, no del contrato REST crudo). El resultado de la
+  // herramienta va en un turno "user" más, con la parte functionResponse
+  // adentro — igual que el turno de texto normal del usuario.
   aiAgentContents.push({ role:'model', parts:[{ functionCall:{ name:r.name, args:r.args } }] });
   if(AGENT_WRITE_TOOLS.has(r.name)){
     const proceed = await confirmAgentAction(r.name, r.args);
     if(!proceed){
-      aiAgentContents.push({ role:'function', parts:[{ functionResponse:{ name:r.name, response:{ result:{ cancelado:true, motivo:'El usuario canceló esta acción, no la ejecutes de nuevo sin volver a preguntar primero.' } } } }] });
+      aiAgentContents.push({ role:'user', parts:[{ functionResponse:{ name:r.name, response:{ result:{ cancelado:true, motivo:'El usuario canceló esta acción, no la ejecutes de nuevo sin volver a preguntar primero.' } } } }] });
       await runAgentTurn(step+1);
       return;
     }
   }
   agentDisplayLog.push({ kind:'action', text: agentToolDescription(r.name, r.args)+'…' }); renderAgentThread();
   const result = await executeAgentTool(r.name, r.args);
-  aiAgentContents.push({ role:'function', parts:[{ functionResponse:{ name:r.name, response:{ result } } }] });
+  aiAgentContents.push({ role:'user', parts:[{ functionResponse:{ name:r.name, response:{ result } } }] });
   await runAgentTurn(step+1);
 }
 /* Antes: modal centrado con fondo oscuro que tapaba/bloqueaba toda la

@@ -757,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Culiacán';
+const BUILD_VERSION = 'Mazatlán';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -3643,7 +3643,7 @@ function sortArrow(col){ return sortState.col===col ? (sortState.dir==='asc'?' �
    columnas se ven se guarda en localStorage (getHiddenTableCols),
    mismo criterio que los favoritos de la barra de herramientas. */
 function allTableColumns(){
-  const cols = [['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas'],['FechaLimite','Fecha límite'],['Hecha','✓ Hecha'],['Importante','⭐ Importante'],['Prioridad','Prioridad'],['Estado','Estado'],['Contenido','Contenido']].concat(allDynamicKeys().map(k=>['kv:'+k,k]));
+  const cols = [['Hecha','✓ Hecha'],['Fecha','Fecha'],['Titulo','Título'],['Notebook','Cuaderno'],['Tags','Etiquetas'],['FechaLimite','Fecha límite'],['Urgente','🔥 Urgente'],['Importante','⭐ Importante'],['Prioridad','Prioridad'],['Estado','Estado'],['Contenido','Contenido']].concat(allDynamicKeys().map(k=>['kv:'+k,k]));
   const blockTag = getTableBlockTagCol();
   if(blockTag) cols.push(['blocktag','#'+blockTag+' (texto)']);
   return cols;
@@ -3710,6 +3710,7 @@ function tableHTML(notes){
       if(key==='Fecha') return `<td>${fmtDate(n.Fecha)}</td>`;
       if(key==='FechaLimite'){ const due=getTaskDueDate(n); return `<td>${due?escHtml(fmtDate(due)):''}</td>`; }
       if(key==='Hecha') return `<td>${isTask?`<input type="checkbox" ${isTaskDone(n)?'checked':''} onclick="toggleTaskDone('${n.ID}');renderMain()" title="Marcar como cumplida">`:''}</td>`;
+      if(key==='Urgente') return `<td>${isTask?`<input type="checkbox" ${isTaskUrgent(n)?'checked':''} onclick="toggleTaskUrgent('${n.ID}');renderMain()" title="Marcar como urgente">`:''}</td>`;
       if(key==='Importante') return `<td>${isTask?`<input type="checkbox" ${isTaskImportant(n)?'checked':''} onclick="toggleTaskImportant('${n.ID}');renderMain()" title="Marcar como importante">`:''}</td>`;
       if(key==='Prioridad') return `<td>${isTask?escHtml(taskPriorityLabel(n)):''}</td>`;
       if(key==='Estado') return `<td>${isTask?`<select onchange="setTaskStatus('${n.ID}',this.value);renderMain()"><option value="pendiente" ${taskStatus(n)==='pendiente'?'selected':''}>Pendiente</option><option value="haciendo" ${taskStatus(n)==='haciendo'?'selected':''}>▶️ Haciendo</option><option value="hecho" ${taskStatus(n)==='hecho'?'selected':''}>✓ Hecha</option></select>`:''}</td>`;

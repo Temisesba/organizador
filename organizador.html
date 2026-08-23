@@ -757,7 +757,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Nogales';
+const BUILD_VERSION = 'Guaymas';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -7741,12 +7741,27 @@ function bindPasteImages(ta){
       }
     }
     const html = e.clipboardData && e.clipboardData.getData('text/html');
+    const text = e.clipboardData && e.clipboardData.getData('text/plain');
     let rows = (html && /<table[\s>]/i.test(html)) ? parsePastedTableRows(html) : null;
-    if(!rows){
-      const text = e.clipboardData && e.clipboardData.getData('text/plain');
-      rows = parsePastedPlainTextRows(text);
+    if(!rows) rows = parsePastedPlainTextRows(text);
+    if(rows && rows.length){ e.preventDefault(); pasteTableRows(rows, slot); return; }
+    // Cualquier otro pegado (texto de una web, código con resaltado de
+    // sintaxis, etc.) se inserta SIEMPRE como texto plano en vez de
+    // dejar que el navegador use su pegado nativo — ese pegado nativo
+    // arrastra los estilos en línea del HTML copiado (ej. fondo negro
+    // de un bloque de código). Bug real reportado: la nota se ponía con
+    // fondo negro al pegar y no había forma de quitarlo — el bloque con
+    // background-color se queda "pegado" ahí aunque se borre el texto
+    // de adentro, porque el contenedor con el estilo sigue existiendo
+    // vacío y no es obvio cómo seleccionarlo y borrarlo. Interceptar el
+    // paste y solo insertar el texto evita que ese estilo llegue a la
+    // nota desde el principio.
+    if(text){
+      e.preventDefault();
+      focusMainEditor(slot);
+      document.execCommand('insertHTML', false, escHtml(text).replace(/\r\n|\r|\n/g,'<br>'));
+      scheduleSave(slot);
     }
-    if(rows && rows.length){ e.preventDefault(); pasteTableRows(rows, slot); }
   });
 }
 function parsePastedTableRows(html){

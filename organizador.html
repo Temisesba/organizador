@@ -11237,6 +11237,13 @@ window.addEventListener('DOMContentLoaded', ()=>{
   else boot();
 });
 window.addEventListener('afterprint', ()=>{ document.getElementById('printArea').innerHTML=''; });
+
+// Deep link desde App Completa: abre directo una nota nueva en blanco.
+window.addEventListener('load', () => {
+  if (location.hash === '#nueva-nota') {
+    setTimeout(() => { try { openNoteEditor(null, null); } catch (e) {} }, 400);
+  }
+});
 </script>
 </body>
 </html>

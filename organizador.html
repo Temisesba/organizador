@@ -629,16 +629,14 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 <div id="setupScreen">
   <div class="setup-card">
     <h1>🗂️ Organizador</h1>
-    <p>Vincula tu Google Sheet personal y la Web App de Apps Script. Se guardan solo en este dispositivo (localStorage) — nadie más puede entrar sin estos dos datos.</p>
-    <label for="setupSheet">Enlace de tu Google Sheet</label>
-    <input type="url" id="setupSheet" placeholder="https://docs.google.com/spreadsheets/d/…">
+    <p>Vincula la Web App de Apps Script. Se guarda solo en este dispositivo (localStorage) — nadie más puede entrar sin este dato.</p>
     <label for="setupGas">URL de la Web App (Apps Script)</label>
     <input type="url" id="setupGas" placeholder="https://script.google.com/macros/s/…/exec">
     <div class="setup-err" id="setupErr"></div>
     <div style="margin-top:16px;display:flex;gap:8px">
       <button class="btn" onclick="finishSetup()">Vincular y entrar</button>
     </div>
-    <p class="hint">La primera vez que se guarde algo, la app crea sola las pestañas que necesita dentro de tu Sheet.</p>
+    <p class="hint">La primera vez, la app crea sola tu Google Sheet y las pestañas que necesita — no hace falta pegar ningún enlace de Sheets.</p>
   </div>
 </div>
 
@@ -758,7 +756,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Guaymas';
+const BUILD_VERSION = 'Obregón';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2104,29 +2102,36 @@ async function withSavingFeedback(btn, fn){
 }
 
 /* ============ Setup inicial ============ */
-function extractSheetId(url){
-  const m = String(url||'').match(/\/d\/([a-zA-Z0-9-_]+)/);
-  return m ? m[1] : (String(url||'').match(/^[a-zA-Z0-9-_]{20,}$/) ? url.trim() : '');
-}
+/* Un solo campo (URL de la Web App), pedido explícito — "que solo me
+   pida URL de la Web App", igual que el resto de mis apps (ver
+   BASES_APPS.md #9: pedir también el link del Sheet no suma seguridad
+   real, quien tenga la URL de la Web App ya puede mandar cualquier
+   sheetId). El backend ahora sabe crear su propio Google Sheet solo
+   quien no le mande ninguno (ver initSheet en Código.js) — si YA hay
+   un SHEET_ID guardado en este dispositivo (localStorage, sobrevive a
+   reopenSetup) se manda tal cual y el backend lo reusa; si no hay
+   ninguno (primera vez de verdad), el backend crea uno nuevo y lo
+   regresa, y aquí se guarda. Así "arreglar la URL de la Web App" tras
+   un redeploy no pierde el Sheet ya vinculado. */
 function finishSetup(){
-  const sheetUrl = document.getElementById('setupSheet').value.trim();
   const gasUrl = document.getElementById('setupGas').value.trim();
   const err = document.getElementById('setupErr');
-  const id = extractSheetId(sheetUrl);
-  if(!id){ err.textContent='No pude leer el ID de ese enlace de Sheets — revisa que sea el link completo.'; return; }
   if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(gasUrl)){ err.textContent='La URL de la Web App debe terminar en /exec'; return; }
-  SHEET_ID = id; GAS_URL = gasUrl;
-  localStorage.setItem('org_sheet_id', SHEET_ID);
+  GAS_URL = gasUrl;
+  SHEET_ID = localStorage.getItem('org_sheet_id') || '';
   localStorage.setItem('org_gas_url', GAS_URL);
   err.textContent = 'Conectando…';
   apiPost('init', {}).then(r=>{
-    if(r && r.ok){ boot(); }
-    else { err.textContent = 'No se pudo conectar: '+((r&&r.error)||'revisa los enlaces'); }
-  }).catch(e=>{ err.textContent='Sin conexión ahora mismo — se guardará local y se vinculará cuando haya internet.'; boot(); });
+    if(r && r.ok && r.sheetId){
+      SHEET_ID = r.sheetId;
+      localStorage.setItem('org_sheet_id', SHEET_ID);
+      boot();
+    }
+    else { err.textContent = 'No se pudo conectar: '+((r&&r.error)||'revisa la URL'); }
+  }).catch(e=>{ err.textContent='Sin conexión ahora mismo — inténtalo de nuevo cuando haya internet (la primera vez sí necesita conexión, para crear tu Sheet).'; });
 }
 function needsSetup(){ return !GAS_URL || !SHEET_ID; }
 function reopenSetup(){
-  document.getElementById('setupSheet').value='';
   document.getElementById('setupGas').value=GAS_URL||'';
   document.getElementById('setupScreen').classList.remove('hidden');
   document.getElementById('app').classList.add('hidden');
@@ -2149,7 +2154,15 @@ function enqueue(action, params){
   saveQueue(q); updateSyncIndicator();
 }
 async function apiPost(action, params){
-  if(needsSetup()) return { ok:false, error:'sin vincular' };
+  // 'init' es justo la llamada que VINCULA la app la primera vez — SHEET_ID
+  // sigue vacío en ese momento cuando el backend todavía no ha creado el
+  // Sheet (setup de un solo campo, ver finishSetup), así que no puede
+  // exigirse needsSetup() completo para ella (bug real: needsSetup() la
+  // rechazaba con "sin vincular" antes de siquiera intentar el fetch,
+  // dejando el primer arranque colgado para siempre). Solo GAS_URL hace
+  // falta para poder mandarla.
+  if(action!=='init' && needsSetup()) return { ok:false, error:'sin vincular' };
+  if(action==='init' && !GAS_URL) return { ok:false, error:'sin vincular' };
   try{ return await apiPostReal(action, params); }
   catch(e){
     if(isWriteAction(action)){ enqueue(action, params); return { ok:true, offline:true }; }
@@ -10835,7 +10848,7 @@ function renderSettingsConnection(){
   body.innerHTML = `<p><b>Versión</b><br><span style="font-size:13px">🗺️ ${escHtml(BUILD_VERSION)}</span> <button class="mini-btn" style="width:auto;margin-left:8px" onclick="forceReloadApp()" title="Borra la copia guardada (caché) y vuelve a pedir todo desde internet — úsalo si crees que no estás viendo la versión más reciente">🔄 Recargar app</button> <span style="color:var(--text-dim);font-size:12px">— dime qué lugar ves aquí para saber si estamos viendo lo mismo</span></p>
     <p><b>Sheet vinculado</b><br><span style="font-size:12px;color:var(--text-dim);word-break:break-all">${escHtml(SHEET_ID)}</span></p>
     <p><b>Web App</b><br><span style="font-size:12px;color:var(--text-dim);word-break:break-all">${escHtml(GAS_URL)}</span></p>
-    <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();reopenSetup()">Cambiar Sheet vinculado</button>
+    <button class="btn secondary" onclick="this.closest('.modal-overlay').remove();reopenSetup()" title="Sigue usando el mismo Sheet ya vinculado — solo cambia a dónde apunta la Web App">🔗 Cambiar URL de la Web App</button>
     <button class="btn secondary" onclick="checkDuplicateNoteIds()" title="Revisa si dos notas quedaron con el mismo ID — eso puede hacer que borrar una borre la otra sin querer" style="margin-left:8px">🔍 Revisar notas duplicadas</button>
     <button class="btn secondary" onclick="seedLegacyTemplates()" title="Crea plantillas Cornell, un checklist y cuadernos con auto-ruteo basados en tu sistema anterior (hábitos, diario, metas, salud…) — no duplica si ya los tienes" style="margin-left:8px">🌱 Traer plantillas del sistema anterior</button>
     <p style="margin-top:16px"><b>📅 Google Calendar</b><br><span id="gcalStatusText" style="font-size:12px;color:var(--text-dim)"></span></p>

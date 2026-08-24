@@ -81,7 +81,7 @@ function doPost(e) {
   const action = body.action || '';
   let result;
   try {
-    if (action !== 'ping' && !body.sheetId) throw new Error('Falta sheetId — vincula tu Google Sheet primero');
+    if (action !== 'ping' && action !== 'init' && !body.sheetId) throw new Error('Falta sheetId — vincula tu Google Sheet primero');
 
     if      (action === 'ping')                 result = { ok: true };
     else if (action === 'init')                 result = initSheet(body.sheetId);
@@ -195,10 +195,25 @@ function findRowIndexById(sh, id) {
   return -1;
 }
 
+// Sin sheetId (setup inicial de verdad, pedido explícito: "que solo me
+// pida URL de la Web App" — ya no se pide el link del Sheet aparte) se
+// crea un Google Sheet nuevo ahí mismo, igual que ya hacía crearMiSheet()
+// a mano desde el editor, pero disparado solo desde la app la primera
+// vez. Con sheetId (reconectar, o cambiar solo la URL de la Web App
+// manteniendo el mismo Sheet) se usa tal cual, comportamiento intacto.
 function initSheet(sheetId) {
-  const ss = getSS(sheetId);
+  let id = sheetId;
+  let ss;
+  if (id) {
+    ss = getSS(id);
+  } else {
+    ss = SpreadsheetApp.create('Organizador — datos');
+    id = ss.getId();
+  }
   Object.keys(TABLE_DEFS).forEach(t => getTable(ss, t));
-  return getAllData(sheetId);
+  const result = getAllData(id);
+  result.sheetId = id;
+  return result;
 }
 
 function getAllData(sheetId) {

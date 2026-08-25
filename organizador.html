@@ -756,7 +756,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Obregón';
+const BUILD_VERSION = 'Navojoa';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2228,7 +2228,23 @@ async function syncNow(manual){
         renderAll();
       }
     }
-    if(manual) showToast(loadQueue().length ? '⚠ Aún hay cambios sin sincronizar' : '☁️ Sincronizado');
+    if(manual){
+      // Bug real reportado: con la cola llena SOLO de conflictos (op._conflict,
+      // el bucle de arriba los salta siempre a propósito — no se reintentan
+      // solos, necesitan que la persona elija "Guardar aparte" o 🗑️ en cada
+      // uno), "Sincronizar ahora" no podía hacer nada y el toast genérico
+      // ("Aún hay cambios sin sincronizar") sonaba a que síncronizar de nuevo
+      // debería resolverlo — parecía que el botón no hacía nada / mentía
+      // diciendo que ya no había nada pendiente. Ahora el aviso distingue el
+      // caso "esto SÍ se puede resolver solo, dale tiempo/reintenta" del caso
+      // "esto necesita que tú decidas, sincronizar no lo va a arreglar".
+      const remaining = loadQueue();
+      const conflictos = remaining.filter(x=>x._conflict).length;
+      const pendientesReales = remaining.length - conflictos;
+      if(!remaining.length) showToast('☁️ Sincronizado');
+      else if(!pendientesReales) showToast('⚠️ '+conflictos+' nota'+(conflictos===1?'':'s')+' con conflicto sin resolver — sincronizar no las arregla sola, revísalas abajo (Guardar aparte o 🗑️)');
+      else showToast('⚠ Aún hay cambios sin sincronizar');
+    }
   }catch(e){ if(manual) showToast('Sin conexión'); }
   finally{ _syncing=false; updateSyncIndicator(); }
 }

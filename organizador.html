@@ -756,7 +756,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Navojoa';
+const BUILD_VERSION = 'Guaymas';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2423,6 +2423,23 @@ async function saveEntity(table, obj, expectedFechaEdicion){
   _pendingWriteCount++;
   let r;
   try{ r = await apiPost('saveRow', params); } finally{ _pendingWriteCount--; }
+  // Bug real encontrado 2026-08-25 (Temis reportó que un registro de
+  // tiempo se veía guardado en la app pero nunca llegó al Sheet, sin
+  // ningún aviso ni "N pend."): apiPost() solo encola en el `catch` de
+  // una excepción de RED (fetch rechazado). Pero el backend de Apps
+  // Script responde HTTP 200 con {error:"..."} para sus propias fallas
+  // internas (igual que el patrón de App_Completa) — eso NUNCA lanza
+  // excepción, así que nunca se encolaba: `r` llegaba aquí como
+  // {error:...}, no tenía `.conflict`, y esta función caía derecho al
+  // "return obj" de abajo dándolo por bien guardado. El cambio ya estaba
+  // aplicado LOCAL (arr[idx]=obj arriba, optimista) así que en pantalla
+  // se veía perfecto — pero nunca subió. Ahora cualquier respuesta que
+  // no sea éxito (ni conflicto, ni offline ya encolado por apiPost) se
+  // encola aquí para reintentar, en vez de perderse en silencio.
+  if(r && r.ok===false && !r.offline){
+    enqueue('saveRow', params);
+    updateSyncIndicator();
+  }
   if(r && r.conflict){
     const idx2 = arr.findIndex(x=>x.ID===obj.ID);
     // Si YA había una copia local antes de este intento, se regresa a
@@ -2449,7 +2466,16 @@ async function deleteEntity(table, id){
   DATA[key] = DATA[key].filter(x=>x.ID!==id);
   cacheData();
   _pendingWriteCount++;
-  try{ await apiPost('deleteRow', { table, id }); } finally{ _pendingWriteCount--; }
+  let r;
+  try{ r = await apiPost('deleteRow', { table, id }); } finally{ _pendingWriteCount--; }
+  // Mismo bug que en saveEntity: un error del backend que responde HTTP
+  // 200 con {error:...} nunca lanza excepción, así que apiPost no lo
+  // encola solo — se encola aquí para no dar el borrado por hecho cuando
+  // en realidad nunca llegó al Sheet.
+  if(r && r.ok===false && !r.offline){
+    enqueue('deleteRow', { table, id });
+    updateSyncIndicator();
+  }
 }
 
 /* ============ Etiquetas / cuadernos ============ */

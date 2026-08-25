@@ -11241,10 +11241,18 @@ window.addEventListener('afterprint', ()=>{ document.getElementById('printArea')
 // Deep link desde App Completa: abre el menú "+ Nuevo" (Dato general,
 // Tareas, Plantilla, Checklist, Registro de tiempo, Hábito/medicamento) para
 // que Temis elija qué tipo crear, en vez de ir directo a una nota en blanco.
+// Los otros 3 hashes son los mismos botones que ya existen en la vista de
+// Calendario/Día (+ Nuevo evento, ⏱ Registro de tiempo y sueño, ✏️ Mi
+// horario) — App Completa los llama directo con estos hashes.
 window.addEventListener('load', () => {
-  if (location.hash === '#nuevo') {
-    setTimeout(() => { try { openCreateMenu(); } catch (e) {} }, 400);
-  }
+  const acciones = {
+    '#nuevo': () => openCreateMenu(),
+    '#nuevo-evento': () => openNewEventForm(),
+    '#registro-tiempo': () => openTimeLogModal(new Date()),
+    '#mi-horario': () => openHorarioSettings(),
+  };
+  const accion = acciones[location.hash];
+  if (accion) setTimeout(() => { try { accion(); } catch (e) {} }, 400);
 });
 </script>
 </body>

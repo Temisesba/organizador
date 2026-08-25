@@ -6,7 +6,7 @@
 // navegador no lo había pedido todavía. Con la app abierta con internet
 // (el caso normal) siempre se pide la versión más nueva; solo si de
 // verdad no hay conexión se usa lo último que se guardó.
-const CACHE_NAME = 'organizador-shell-v2';
+const CACHE_NAME = 'organizador-shell-v3';
 const SHELL_FILE = 'organizador.html';
 
 self.addEventListener('install', () => { self.skipWaiting(); });

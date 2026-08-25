@@ -756,7 +756,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Guaymas';
+const BUILD_VERSION = 'Empalme';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -2433,12 +2433,19 @@ async function saveEntity(table, obj, expectedFechaEdicion){
   // {error:...}, no tenía `.conflict`, y esta función caía derecho al
   // "return obj" de abajo dándolo por bien guardado. El cambio ya estaba
   // aplicado LOCAL (arr[idx]=obj arriba, optimista) así que en pantalla
-  // se veía perfecto — pero nunca subió. Ahora cualquier respuesta que
-  // no sea éxito (ni conflicto, ni offline ya encolado por apiPost) se
-  // encola aquí para reintentar, en vez de perderse en silencio.
-  if(r && r.ok===false && !r.offline){
+  // se veía perfecto — pero nunca subió.
+  //
+  // SEGUNDA VUELTA del mismo bug, encontrada probando en vivo con Temis:
+  // el primer intento de arreglo revisaba `r.ok===false` — pero el catch
+  // genérico del backend regresa literal `{error: err.message}`, SIN
+  // ninguna llave `ok` — así que `r.ok` es `undefined`, no `false`, y
+  // `undefined===false` da `false`: la condición nunca se cumplía y el
+  // bug seguía exactamente igual de invisible. Ahora se revisa `r.error`
+  // (o falta de `.ok===true`) en vez de exigir `ok===false` literal.
+  if(r && !r.conflict && !r.offline && (r.error || r.ok!==true)){
     enqueue('saveRow', params);
     updateSyncIndicator();
+    showToast('⚠ No se pudo guardar en el servidor — se puso en la cola para reintentar');
   }
   if(r && r.conflict){
     const idx2 = arr.findIndex(x=>x.ID===obj.ID);
@@ -2468,13 +2475,16 @@ async function deleteEntity(table, id){
   _pendingWriteCount++;
   let r;
   try{ r = await apiPost('deleteRow', { table, id }); } finally{ _pendingWriteCount--; }
-  // Mismo bug que en saveEntity: un error del backend que responde HTTP
-  // 200 con {error:...} nunca lanza excepción, así que apiPost no lo
-  // encola solo — se encola aquí para no dar el borrado por hecho cuando
-  // en realidad nunca llegó al Sheet.
-  if(r && r.ok===false && !r.offline){
+  // Mismo bug que en saveEntity (y mismo ajuste: el catch genérico del
+  // backend regresa {error:...} SIN llave `ok`, así que hay que revisar
+  // `r.error`/`ok!==true`, no exigir literal `ok===false`) — un error del
+  // backend que responde HTTP 200 con {error:...} nunca lanza excepción,
+  // así que apiPost no lo encola solo — se encola aquí para no dar el
+  // borrado por hecho cuando en realidad nunca llegó al Sheet.
+  if(r && !r.offline && (r.error || r.ok!==true)){
     enqueue('deleteRow', { table, id });
     updateSyncIndicator();
+    showToast('⚠ No se pudo borrar en el servidor — se puso en la cola para reintentar');
   }
 }
 

@@ -11250,6 +11250,7 @@ window.addEventListener('load', () => {
     '#nuevo-evento': () => openNewEventForm(),
     '#registro-tiempo': () => openTimeLogModal(new Date()),
     '#mi-horario': () => openHorarioSettings(),
+    '#calendario': () => openCalendarModal(),
   };
   const accion = acciones[location.hash];
   if (accion) setTimeout(() => { try { accion(); } catch (e) {} }, 400);

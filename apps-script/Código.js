@@ -56,9 +56,7 @@ const TABLE_DEFS = {
   COMANDOS:      ['ID', 'Nombre', 'Tipo', 'Valor'],
   HORARIO:       ['ID', 'Hora', 'Actividad', 'Dias', 'Observaciones', 'HabitoID', 'Orden'],
   HORARIO_LOG:   ['ID', 'HorarioID', 'Fecha'],
-  HORARIO_OVERRIDE: ['ID', 'HorarioID', 'Fecha', 'Hora'],
-  DIAPOSITIVAS_ARCHIVOS: ['ID', 'Nombre', 'DriveFileId', 'TotalPaginas', 'Fecha', 'Papelera'],
-  DIAPOSITIVAS_NOTAS:    ['ID', 'ArchivoId', 'NumPagina', 'Notas', 'FechaEdicion']
+  HORARIO_OVERRIDE: ['ID', 'HorarioID', 'Fecha', 'Hora']
 };
 
 // ── Router GET (solo lectura ligera, ej. ping de conexión) ────
@@ -99,7 +97,6 @@ function doPost(e) {
     else if (action === 'aiEnglishLesson')      result = aiEnglishLesson(body.text);
     else if (action === 'ocrImage')             result = ocrImage(body.imageBase64, body.mimeType);
     else if (action === 'uploadImage')          result = uploadImage(body.sheetId, body.imageBase64, body.mimeType, body.fileName);
-    else if (action === 'getDriveFileBase64')   result = getDriveFileBase64(body.fileId);
     else if (action === 'exchangeGoogleCode')   result = exchangeGoogleCode(body.code);
     else if (action === 'refreshGoogleToken')   result = refreshGoogleToken(body.refresh_token);
     else                                        result = { error: 'Acción no reconocida' };
@@ -504,19 +501,6 @@ function uploadImage(sheetId, imageBase64, mimeType, fileName) {
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     const url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1200';
     return { ok: true, url: url, fileId: file.getId() };
-  } catch (e) { return { ok: false, error: 'Drive: ' + e.message }; }
-}
-
-// Recupera un archivo ya subido con uploadImage (ej. el PDF de una
-// presentación) para reabrirlo en otro dispositivo/sesión. Se sirve por
-// este backend en vez de un fetch directo del navegador a Drive porque
-// Drive no manda encabezados CORS al descargar el contenido de un
-// archivo desde otro origen.
-function getDriveFileBase64(fileId) {
-  if (!fileId) return { ok: false, error: 'Falta fileId' };
-  try {
-    const blob = DriveApp.getFileById(fileId).getBlob();
-    return { ok: true, base64: Utilities.base64Encode(blob.getBytes()), mimeType: blob.getContentType() };
   } catch (e) { return { ok: false, error: 'Drive: ' + e.message }; }
 }
 

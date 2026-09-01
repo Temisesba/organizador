@@ -260,6 +260,14 @@ table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{backgrou
 @media (min-width:821px){
   body.has-transcribe-panel #editorOverlay{ right:320px; }
   body.has-ai-panel #editorOverlay{ right:380px; }
+  /* El comentario de arriba decía que #app ya tenía este margen — no era
+     cierto (bug real reportado con captura: Vista Dividida se quedaba
+     tapada detrás del panel del Asistente, sin ningún recorte). #app es
+     el contenedor de TODA la app bajo el header (Cards/Tabla/Vista
+     Dividida) — corriéndole el margen derecho cuando hay un panel
+     abierto hace que se acomode a la izquierda en vez de quedar debajo. */
+  body.has-transcribe-panel #app{ margin-right:320px; }
+  body.has-ai-panel #app{ margin-right:380px; }
 }
 [data-theme="eink"] #editorOverlay{background:rgba(0,0,0,.15)}
 #editorPanel{background:var(--bg-elev);width:min(760px,100%);max-width:100%;display:flex;flex-direction:column;box-shadow:var(--shadow);height:100%}

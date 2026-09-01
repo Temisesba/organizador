@@ -4487,6 +4487,23 @@ function captureTranscribeInsertRange(slot){
   const sel = window.getSelection();
   _transcribeInsertRange = (mainArea && sel.rangeCount && mainArea.contains(sel.anchorNode)) ? sel.getRangeAt(0).cloneRange() : null;
 }
+/* Corrección explícita: "dónde está el cursor en el momento que doy
+   Cortar, no dónde estaba cuando empecé a grabar" — una sola captura al
+   abrir el panel no alcanza si la sesión de transcripción dura un rato
+   y mueves el cursor mientras tanto (revisas otra parte de la nota,
+   etc.). Mientras el panel de Transcribir siga abierto, cada vez que la
+   selección cambie DENTRO de la nota destino, _transcribeInsertRange se
+   actualiza solo — así al momento real de insertar (Cortar o cerrar el
+   panel) ya tiene la posición más reciente, no la del inicio. */
+function updateTranscribeInsertRangeIfRelevant(){
+  if(!document.getElementById('transcribePanel') || !_transcribeTargetNoteId) return;
+  const slot = editingNoteId2===_transcribeTargetNoteId ? 'secondary' : (editingNoteId===_transcribeTargetNoteId ? undefined : null);
+  if(slot===null) return; // la nota destino ni siquiera está abierta ahorita
+  const mainArea = document.getElementById(eid('mainArea',slot));
+  const sel = window.getSelection();
+  if(mainArea && sel.rangeCount && mainArea.contains(sel.anchorNode)) _transcribeInsertRange = sel.getRangeAt(0).cloneRange();
+}
+document.addEventListener('selectionchange', updateTranscribeInsertRangeIfRelevant);
 /* "🔴 Grabar audio" — pedido explícito: además de transcribir a texto,
    poder guardar el audio real del micrófono aparte (útil cuando la
    transcripción automática se equivoca, o para oír el tono/quién dijo

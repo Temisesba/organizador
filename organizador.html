@@ -7,6 +7,14 @@
 <meta name="theme-color" content="#f5f2ea">
 <link rel="manifest" href="manifest.json">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<!-- Diapositivas: pdf.js para dibujar páginas de un PDF en un <canvas>.
+     jsDelivr (no cdnjs) a propósito: cdnjs solo aloja los .js, sin las
+     carpetas standard_fonts/cmaps — sin ellas, cualquier PDF con texto en
+     una fuente NO incrustada se ve con la página en blanco pintada pero
+     SIN ninguna letra (confirmado probándolo: el canvas se pintaba
+     505x715 blanco sólido, cero glifos). jsDelivr sirve el paquete npm
+     completo, con esas carpetas incluidas. -->
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <style>
 :root{
   --bg:#f5f2ea; --bg-elev:#ffffff; --bg-soft:#ece7db;
@@ -408,6 +416,16 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
    pocos píxeles (los títulos/pestañas quedaban invisibles, cortados)
    en vez de que solo esta franja de en medio hiciera scroll. */
 .modal-body{padding:14px 16px;overflow-y:auto;flex:1;min-height:0}
+/* Diapositivas: diapositiva a la izquierda, notas de ESA página a la
+   derecha (como notas ligadas de OneNote). En celular partir la
+   pantalla a la mitad sería inusable de angosto, así que se apila. */
+.diapo-layout{display:flex;flex:1;min-height:0}
+.diapo-canvas-col{flex:1.4;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--border)}
+.diapo-notes-col{flex:1;min-width:0;display:flex;flex-direction:column;padding:12px}
+@media (max-width:820px){
+  .diapo-layout{flex-direction:column}
+  .diapo-canvas-col{border-right:none;border-bottom:1px solid var(--border)}
+}
 /* En celular, más pestañas de las que caben (ej. Configuración con 8)
    se recortaban en silencio — sin overflow-x ni forma de deslizar, las
    de la derecha (Apariencia, Conexión, Papelera, Mejoras) quedaban
@@ -655,6 +673,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
     <div class="spacer"></div>
     <button class="icon-btn no-print desktop-only" onclick="openBlockTables()" title="Tablas por bloque">🧩</button>
     <button class="icon-btn no-print desktop-only" onclick="openGeneralExplorer()" title="Explorador de archivos — guarda varias carpetas como accesos rápidos, etiqueta y busca dentro de ellas">📁</button>
+    <button class="icon-btn no-print desktop-only" onclick="openDiapositivasModal()" title="Diapositivas — abre un PDF y escribe notas al lado de cada diapositiva">📑</button>
     <button class="icon-btn no-print" onclick="openAIDrawer()" title="Asistente IA">✨</button>
     <button class="icon-btn no-print" id="syncBtn" onclick="syncBtnClick()" title="Sincronizar"><span id="syncDot"></span> <span id="syncLabel" class="desktop-only">Sync</span></button>
     <button class="icon-btn no-print" onclick="openSettings()" title="Configuración">⚙️</button>
@@ -674,6 +693,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
         <div class="nb-item" onclick="openGeneralExplorer()">📁 Explorador de archivos</div>
         <div class="nb-item" onclick="openCalendarModal()">📅 Calendario</div>
         <div class="nb-item" onclick="openBlockTables()">🧩 Tablas</div>
+        <div class="nb-item" onclick="openDiapositivasModal()">📑 Diapositivas</div>
       </div>
 
       <!-- Pedido explícito: orden y filtro de fecha van pegados arriba,
@@ -756,7 +776,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Empalme';
+const BUILD_VERSION = 'Diapositivas';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
@@ -1961,7 +1981,7 @@ function deleteGoogleEventUI(eventId){
 }
 let GAS_URL = localStorage.getItem('org_gas_url') || '';
 let SHEET_ID = localStorage.getItem('org_sheet_id') || '';
-let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[], personas:[], habitos:[], habito_log:[], comandos:[], horario:[], horario_log:[], horario_override:[] };
+let DATA = { notas:[], tags:[], notebooks:[], plantillas:[], historial:[], diccionario:[], feedback:[], bloque_tablas:[], plantillas_prop:[], flags:[], busquedas:[], personas:[], habitos:[], habito_log:[], comandos:[], horario:[], horario_log:[], horario_override:[], diapositivas_archivos:[], diapositivas_notas:[] };
 // Banderas rápidas de fábrica (no se pueden borrar) — las que agrega el
 // usuario desde Configuración se guardan como filas normales en el Sheet
 // (tabla FLAGS), igual que cualquier otra etiqueta o nota, para que
@@ -2381,12 +2401,13 @@ function normalizeData(d){
     diccionario: d.diccionario||[], feedback: d.feedback||[],
     bloque_tablas: d.bloque_tablas||[], plantillas_prop: d.plantillas_prop||[],
     flags: d.flags||[], busquedas: d.busquedas||[], personas: d.personas||[],
-    habitos: d.habitos||[], habito_log: d.habito_log||[], comandos: d.comandos||[], horario: d.horario||[], horario_log: d.horario_log||[], horario_override: d.horario_override||[]
+    habitos: d.habitos||[], habito_log: d.habito_log||[], comandos: d.comandos||[], horario: d.horario||[], horario_log: d.horario_log||[], horario_override: d.horario_override||[],
+    diapositivas_archivos: d.diapositivas_archivos||[], diapositivas_notas: d.diapositivas_notas||[]
   };
 }
 
 /* ============ CRUD genérico local + remoto ============ */
-const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas', HABITOS:'habitos', HABITO_LOG:'habito_log', COMANDOS:'comandos', HORARIO:'horario', HORARIO_LOG:'horario_log', HORARIO_OVERRIDE:'horario_override' };
+const TABLE_KEY = { NOTAS:'notas', TAGS:'tags', NOTEBOOKS:'notebooks', PLANTILLAS:'plantillas', HISTORIAL:'historial', DICCIONARIO:'diccionario', FEEDBACK:'feedback', BLOQUE_TABLAS:'bloque_tablas', PLANTILLAS_PROP:'plantillas_prop', FLAGS:'flags', BUSQUEDAS:'busquedas', PERSONAS:'personas', HABITOS:'habitos', HABITO_LOG:'habito_log', COMANDOS:'comandos', HORARIO:'horario', HORARIO_LOG:'horario_log', HORARIO_OVERRIDE:'horario_override', DIAPOSITIVAS_ARCHIVOS:'diapositivas_archivos', DIAPOSITIVAS_NOTAS:'diapositivas_notas' };
 function cacheData(){ try{ localStorage.setItem('org_data_cache', JSON.stringify(DATA)); }catch(e){} }
 /* expectedFechaEdicion (opcional, 3er parámetro): ver la nota extensa
    junto a saveRow() en el backend. Si el guardado vuelve con conflicto
@@ -7940,6 +7961,176 @@ async function insertImage(file, slot){
   } else {
     showToast('Imagen insertada');
   }
+}
+
+/* ============ Diapositivas: PDF + notas por página, como OneNote ============
+   Se sube un PDF (se abre de inmediato en el navegador con pdf.js, sin
+   esperar la subida a Drive), y cada página guarda su PROPIA nota — al
+   pasar de diapositiva cambia también el bloque de notas de al lado.
+   Persistencia: DIAPOSITIVAS_ARCHIVOS (uno por PDF subido) y
+   DIAPOSITIVAS_NOTAS (una fila por ArchivoId+NumPagina con texto), ambas
+   por el CRUD genérico (saveEntity) — mismo esquema que cualquier otra
+   tabla de la app, sin acción nueva de backend aparte de
+   getDriveFileBase64 (reabrir un PDF ya subido en otro dispositivo). */
+const PDFJS_ASSET_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/';
+if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_ASSET_BASE+'build/pdf.worker.min.js';
+function abrirPdfDesdeDatos(data){
+  return pdfjsLib.getDocument({ data, standardFontDataUrl: PDFJS_ASSET_BASE+'standard_fonts/', cMapUrl: PDFJS_ASSET_BASE+'cmaps/', cMapPacked: true }).promise;
+}
+let _diapoState = { archivo:null, pdfDoc:null, pagina:1, totalPaginas:1, saveTimer:null };
+
+function diapositivasArchivos(){ return (DATA.diapositivas_archivos||[]).filter(a=>!(a.Papelera===true||String(a.Papelera).toLowerCase()==='true')); }
+
+function openDiapositivasModal(){
+  document.getElementById('diapoListOverlay')?.remove();
+  const archivos = diapositivasArchivos().slice().sort((a,b)=>(b.Fecha||'').localeCompare(a.Fecha||''));
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print'; overlay.id='diapoListOverlay';
+  overlay.innerHTML = `<div class="modal" style="width:min(480px,100%)">
+    <div class="modal-head"><b>📑 Diapositivas</b><span><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
+    <div class="modal-body">
+      <p class="hint" style="margin:0 0 10px">Abre un PDF de diapositivas y escribe notas junto a cada una — cada diapositiva guarda su propia nota, como en OneNote.</p>
+      <input type="file" id="diapoFileInput" accept="application/pdf" style="display:none" onchange="handleDiapositivasUpload(event)">
+      <button class="btn" onclick="document.getElementById('diapoFileInput').click()">+ Subir PDF</button>
+      <div id="diapoList" style="margin-top:14px">${archivos.length ? archivos.map(a=>`
+        <div class="fill-row" style="justify-content:space-between;cursor:pointer" onclick="abrirArchivoDiapositivas('${a.ID}')">
+          <span>📄 ${escHtml(a.Nombre)} <span class="hint">(${a.TotalPaginas||'?'} diapositivas)</span></span>
+          <button class="icon-btn" onclick="event.stopPropagation();eliminarArchivoDiapositivas('${a.ID}')" title="Eliminar">🗑️</button>
+        </div>`).join('') : '<p class="hint">Sin PDFs guardados todavía.</p>'}</div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function handleDiapositivasUpload(e){
+  const file = e.target.files[0]; e.target.value=''; if(!file) return;
+  if(file.type!=='application/pdf'){ showToast('Elige un archivo PDF'); return; }
+  if(!window.pdfjsLib){ showToast('No se pudo cargar el lector de PDF (revisa tu conexión) e inténtalo de nuevo'); return; }
+  showToast('Abriendo PDF…');
+  const arrayBuffer = await file.arrayBuffer();
+  let pdfDoc;
+  try{ pdfDoc = await abrirPdfDesdeDatos(arrayBuffer.slice(0)); }
+  catch(err){ showToast('No se pudo leer ese PDF'); return; }
+  const archivo = { ID: uid(), Nombre: file.name, DriveFileId:'', TotalPaginas: pdfDoc.numPages, Fecha: new Date().toISOString(), Papelera:false };
+  DATA.diapositivas_archivos.push(archivo); cacheData();
+  document.getElementById('diapoListOverlay')?.remove();
+  renderDiapositivasViewer(archivo, pdfDoc);
+  // Subir a Drive en segundo plano — así se puede reabrir después o desde
+  // otro dispositivo. Si falla o no hay conexión, el visor ya abrió igual
+  // (usa el PDF que sigue en memoria), solo no queda guardado en la nube.
+  if(navigator.onLine){
+    const base64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=rej; r.readAsDataURL(file); });
+    const up = await apiPost('uploadImage', { imageBase64: base64, mimeType:'application/pdf', fileName: file.name });
+    if(up && up.ok){ archivo.DriveFileId = up.fileId; await saveEntity('DIAPOSITIVAS_ARCHIVOS', archivo); }
+    else showToast('Se abrió, pero no se pudo guardar en la nube — por ahora solo está en este dispositivo');
+  } else {
+    showToast('Sin conexión — el PDF se abrió aquí pero no se guardó en la nube todavía');
+  }
+}
+
+async function abrirArchivoDiapositivas(id){
+  const archivo = DATA.diapositivas_archivos.find(a=>a.ID===id); if(!archivo) return;
+  if(!window.pdfjsLib){ showToast('No se pudo cargar el lector de PDF (revisa tu conexión) e inténtalo de nuevo'); return; }
+  if(!archivo.DriveFileId){ showToast('Este PDF no llegó a guardarse en la nube (se subió sin conexión) — vuelve a subirlo'); return; }
+  document.getElementById('diapoListOverlay')?.remove();
+  showToast('Cargando PDF…');
+  const r = await apiPost('getDriveFileBase64', { fileId: archivo.DriveFileId });
+  if(!(r && r.ok)){ showToast('No se pudo abrir: '+((r&&r.error)||'')); return; }
+  const bytes = Uint8Array.from(atob(r.base64), c=>c.charCodeAt(0));
+  let pdfDoc;
+  try{ pdfDoc = await abrirPdfDesdeDatos(bytes); }
+  catch(err){ showToast('No se pudo leer ese PDF'); return; }
+  renderDiapositivasViewer(archivo, pdfDoc);
+}
+
+async function eliminarArchivoDiapositivas(id){
+  if(!confirm('¿Eliminar este PDF? Las notas que escribiste en sus diapositivas se quedan guardadas por si lo subes de nuevo.')) return;
+  const archivo = DATA.diapositivas_archivos.find(a=>a.ID===id); if(!archivo) return;
+  archivo.Papelera = true;
+  await saveEntity('DIAPOSITIVAS_ARCHIVOS', archivo);
+  openDiapositivasModal();
+}
+
+function notaDiapositiva(archivoId, pagina){
+  return (DATA.diapositivas_notas||[]).find(n=>n.ArchivoId===archivoId && Number(n.NumPagina)===Number(pagina));
+}
+
+function renderDiapositivasViewer(archivo, pdfDoc){
+  document.getElementById('diapoViewerOverlay')?.remove();
+  _diapoState = { archivo, pdfDoc, pagina:1, totalPaginas: pdfDoc.numPages, saveTimer:null };
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print'; overlay.id='diapoViewerOverlay';
+  overlay.innerHTML = `<div class="modal" style="width:min(1100px,98vw);height:90vh">
+    <div class="modal-head">
+      <b>📑 ${escHtml(archivo.Nombre)}</b>
+      <span><button class="icon-btn mobile-only" onclick="toggleModalFullscreen(this)" title="Pantalla completa">⛶</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span>
+    </div>
+    <div class="modal-body diapo-layout" style="padding:0">
+      <div class="diapo-canvas-col">
+        <div id="diapoCanvasWrap" style="flex:1;min-height:0;overflow:auto;display:flex;align-items:center;justify-content:center;background:var(--bg-soft)">
+          <canvas id="diapoCanvas"></canvas>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:14px;padding:10px;border-top:1px solid var(--border)">
+          <button class="icon-btn" onclick="irADiapositivaPagina(_diapoState.pagina-1)" title="Anterior">◀</button>
+          <span id="diapoPageIndicator" style="min-width:70px;text-align:center">1 / ${pdfDoc.numPages}</span>
+          <button class="icon-btn" onclick="irADiapositivaPagina(_diapoState.pagina+1)" title="Siguiente">▶</button>
+        </div>
+      </div>
+      <div class="diapo-notes-col">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <b style="font-size:13px;color:var(--text-dim)">Notas de esta diapositiva</b>
+          <span id="diapoSaveStatus" class="hint"></span>
+        </div>
+        <textarea id="diapoNotaText" style="flex:1;resize:none;width:100%" placeholder="Escribe aquí lo que quieras recordar de esta diapositiva…" oninput="scheduleSaveDiapositivaNota()"></textarea>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  window.addEventListener('resize', _diapoResizeHandler);
+  irADiapositivaPagina(1);
+}
+function _diapoResizeHandler(){
+  if(!document.getElementById('diapoViewerOverlay')){ window.removeEventListener('resize', _diapoResizeHandler); return; }
+  renderDiapositivaCanvas();
+}
+
+async function renderDiapositivaCanvas(){
+  const page = await _diapoState.pdfDoc.getPage(_diapoState.pagina);
+  const canvas = document.getElementById('diapoCanvas'); if(!canvas) return;
+  const wrap = document.getElementById('diapoCanvasWrap');
+  const baseViewport = page.getViewport({ scale:1 });
+  const scale = Math.max(0.1, Math.min((wrap.clientWidth-20)/baseViewport.width, (wrap.clientHeight-20)/baseViewport.height, 3)) || 1;
+  const dpr = window.devicePixelRatio || 1;
+  const viewport = page.getViewport({ scale: scale*dpr });
+  canvas.width = viewport.width; canvas.height = viewport.height;
+  canvas.style.width = (viewport.width/dpr)+'px'; canvas.style.height = (viewport.height/dpr)+'px';
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+}
+
+function irADiapositivaPagina(n){
+  if(n<1 || n>_diapoState.totalPaginas) return;
+  clearTimeout(_diapoState.saveTimer);
+  _diapoState.pagina = n;
+  const ind = document.getElementById('diapoPageIndicator'); if(ind) ind.textContent = n+' / '+_diapoState.totalPaginas;
+  renderDiapositivaCanvas();
+  const nota = notaDiapositiva(_diapoState.archivo.ID, n);
+  const ta = document.getElementById('diapoNotaText'); if(ta) ta.value = nota ? nota.Notas : '';
+  const st = document.getElementById('diapoSaveStatus'); if(st) st.textContent = '';
+}
+
+function scheduleSaveDiapositivaNota(){
+  const st = document.getElementById('diapoSaveStatus'); if(st) st.textContent = 'Guardando…';
+  clearTimeout(_diapoState.saveTimer);
+  _diapoState.saveTimer = setTimeout(guardarNotaDiapositivaAhora, 600);
+}
+
+async function guardarNotaDiapositivaAhora(){
+  const archivo = _diapoState.archivo, pagina = _diapoState.pagina;
+  const ta = document.getElementById('diapoNotaText'); if(!ta || !archivo) return;
+  const texto = ta.value;
+  let nota = notaDiapositiva(archivo.ID, pagina);
+  if(!nota){ nota = { ID: uid(), ArchivoId: archivo.ID, NumPagina: pagina, Notas: texto, FechaEdicion: new Date().toISOString() }; }
+  else { nota.Notas = texto; nota.FechaEdicion = new Date().toISOString(); }
+  await saveEntity('DIAPOSITIVAS_NOTAS', nota);
+  if(_diapoState.pagina===pagina){ const st = document.getElementById('diapoSaveStatus'); if(st) st.textContent = 'Guardado'; }
 }
 
 /* ============ Checklists: plantillas + historial ============ */

@@ -334,7 +334,7 @@ table.org-table td.field-cell:hover,table.org-table td.field-cell:focus{backgrou
 table.rt-table{border-collapse:collapse;margin:.5em 0;width:100%}
 table.rt-table td,table.rt-table th{border:1px solid var(--border);padding:6px 9px;min-width:40px;vertical-align:top}
 table.rt-table tr:nth-child(even) td{background:var(--bg-soft)}
-table.rt-table td.cornell-cue-cell{font-weight:700;color:var(--accent);background:var(--accent-soft, var(--bg-soft));width:26%}
+table.rt-table td.cornell-cue-cell{font-weight:700;color:var(--accent);background:var(--accent-soft, var(--bg-soft));width:var(--cornell-cue-w,26%)}
 .scroll-flash{animation:scrollFlash 1.6s ease;border-radius:4px}
 @keyframes scrollFlash{ 0%{outline:3px solid var(--accent)} 75%{outline:3px solid var(--accent)} 100%{outline:3px solid transparent} }
 table.cornell-table{border:2px solid var(--accent)}
@@ -4380,6 +4380,67 @@ function initImageResizerOnce(){
   document.addEventListener('touchmove', e=>{ if(_imgResizing && e.touches[0]) moveResize(e.touches[0].clientX, e.touches[0].clientY); }, {passive:true});
   document.addEventListener('touchend', ()=>{ if(_imgResizing){ _imgResizing=null; scheduleSave(); } });
 }
+/* Pedido explícito (2026-09-01) tras usar Diapositivas: la columna
+   izquierda del modo Cornell (cornell-cue-cell) es fija en 26% —
+   suficiente para una palabra clave, muy angosto para ver una
+   diapositiva completa. Mismo patrón que initImageResizerOnce: sin
+   asa visible en el HTML (nada que se guarde de más en el contenido de
+   la nota), se detecta mousedown/touchstart cerca del borde derecho de
+   CUALQUIER celda cornell-cue-cell de la tabla bajo el cursor. El ancho
+   elegido se guarda como variable CSS en el propio <table style="...">
+   — es HTML normal de la nota, así que persiste solo al guardar
+   (scheduleSave), y cada nota Cornell puede tener su propio ancho sin
+   afectar a las demás. */
+let _cornellColResizing = null;
+function initCornellColResizerOnce(){
+  const EDGE = 10;
+  const nearRightEdge = (cell, x, y) => {
+    const r = cell.getBoundingClientRect();
+    return x >= r.right-EDGE && x <= r.right+4 && y >= r.top && y <= r.bottom;
+  };
+  const cueCellAt = (x, y) => {
+    const cells = document.querySelectorAll('.rich-editor table.cornell-table td.cornell-cue-cell');
+    for(const c of cells){ if(nearRightEdge(c, x, y)) return c; }
+    return null;
+  };
+  const move = (clientX) => {
+    if(!_cornellColResizing) return;
+    const { table, startX, startWpx, tableWpx } = _cornellColResizing;
+    const wPx = Math.max(60, Math.min(tableWpx-120, startWpx + (clientX-startX)));
+    const pct = Math.max(10, Math.min(75, (wPx/tableWpx)*100));
+    table.style.setProperty('--cornell-cue-w', pct.toFixed(1)+'%');
+  };
+  const start = (cell, clientX) => {
+    const table = cell.closest('table.cornell-table');
+    const r = cell.getBoundingClientRect();
+    _cornellColResizing = { table, startX:clientX, startWpx:r.width, tableWpx: table.getBoundingClientRect().width };
+  };
+  const end = () => {
+    if(!_cornellColResizing) return;
+    const table = _cornellColResizing.table;
+    _cornellColResizing = null;
+    document.body.style.cursor = '';
+    const mainEl = table.closest('.rich-editor');
+    const slot = mainEl && mainEl.id===eid('mainArea','secondary') ? 'secondary' : undefined;
+    scheduleSave(slot);
+  };
+  document.addEventListener('mousedown', e=>{
+    const cell = cueCellAt(e.clientX, e.clientY);
+    if(cell){ e.preventDefault(); start(cell, e.clientX); }
+  });
+  document.addEventListener('mousemove', e=>{
+    if(_cornellColResizing){ move(e.clientX); return; }
+    document.body.style.cursor = cueCellAt(e.clientX, e.clientY) ? 'col-resize' : '';
+  });
+  document.addEventListener('mouseup', end);
+  document.addEventListener('touchstart', e=>{
+    const t = e.touches[0]; if(!t) return;
+    const cell = cueCellAt(t.clientX, t.clientY);
+    if(cell) start(cell, t.clientX);
+  }, {passive:true});
+  document.addEventListener('touchmove', e=>{ if(_cornellColResizing && e.touches[0]) move(e.touches[0].clientX); }, {passive:true});
+  document.addEventListener('touchend', end);
+}
 async function closeNoteEditor(){
   // OJO: cerrar la nota ya NO cierra el panel de transcripción (vive
   // aparte, ver openOrRestoreTranscribePanel) — sigue grabando hacia
@@ -4931,7 +4992,7 @@ function editorInnerHTML(note, isModal, slot, backSide){
   </div>
   <div id="${eid('swatchBar',slot)}" class="swatch-row hidden"></div>
   <div id="${eid('routeHints',slot)}" class="hidden"></div>
-  ${cornellOn ? '<div class="cornell-bar"><span class="desktop-only">📐 Modo Cornell — cada fila: columna izq. = pista/palabra clave, columna der. = desarrollo</span><span class="mobile-only">📐 Modo Cornell</span> <button class="mini-btn" style="width:auto" onmousedown="event.preventDefault()" onclick="addCornellRowDirect('+(sOnly||'undefined')+')">+ agregar fila</button></div>' : ''}`;
+  ${cornellOn ? '<div class="cornell-bar"><span class="desktop-only">📐 Modo Cornell — cada fila: columna izq. = pista/palabra clave, columna der. = desarrollo (arrastra el borde entre columnas para cambiar su ancho)</span><span class="mobile-only">📐 Modo Cornell — jala el borde entre columnas para su ancho</span> <button class="mini-btn" style="width:auto" onmousedown="event.preventDefault()" onclick="addCornellRowDirect('+(sOnly||'undefined')+')">+ agregar fila</button></div>' : ''}`;
   const body = `
   <div class="editor-body" id="${eid('editorBody',slot)}">
     <div id="${eid('mainArea',slot)}" class="rich-editor" contenteditable="true" data-placeholder="Escribe aquí…">${note.Contenido||''}</div>
@@ -11182,6 +11243,7 @@ function boot(){
   initSplitPaneSelectOnce();
   initEditorResizerOnce();
   initImageResizerOnce();
+  initCornellColResizerOnce();
   initResizableTablesObserver();
   initBackButtonNav();
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }

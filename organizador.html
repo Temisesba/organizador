@@ -4932,6 +4932,7 @@ function editorInnerHTML(note, isModal, slot, backSide){
     <button class="icon-btn" onclick="pickFilesForNote(${sOnly})" title="Vincular archivo(s)">📎</button>
     <button class="icon-btn" onclick="pickFolderForNote(${sOnly})" title="Vincular carpeta">📁</button>
     <button class="icon-btn" id="${eid('fileChipToggleBtn',slot)}" onclick="toggleFileChips(this${s})" title="Ocultar archivos vinculados" style="${getNoteLinks(note).length?'':'display:none'}">▾</button>
+    <span style="margin-left:auto;font-size:12px;color:var(--text-dim);white-space:nowrap"><span id="${eid('saveStatus',slot)}">Guardado ${fmtTime(new Date())}</span> <button class="icon-btn" style="padding:2px 6px" onmousedown="event.preventDefault()" onclick="doSaveNow(${sOnly})" title="Guardar ahora (por si no se guardó solo)">💾</button></span>
   </div>
   <div class="editor-meta" id="${eid('fileChipWrap',slot)}" style="flex-wrap:wrap">${linksChipsHTML(getNoteLinks(note), slot)}</div>
   <div class="editor-toolbar-fav">
@@ -4998,7 +4999,6 @@ function editorInnerHTML(note, isModal, slot, backSide){
     <div id="${eid('mainArea',slot)}" class="rich-editor" contenteditable="true" data-placeholder="Escribe aquí…">${note.Contenido||''}</div>
   </div>
   <div class="editor-bottom">
-    <span><span id="${eid('saveStatus',slot)}">Guardado ${fmtTime(new Date())}</span> <button class="icon-btn" style="padding:2px 6px" onmousedown="event.preventDefault()" onclick="doSaveNow(${sOnly})" title="Guardar ahora (por si no se guardó solo)">💾</button></span>
     <span>${fmtDate(note.Fecha)}${note.FechaEdicion?(' · editado '+fmtDate(note.FechaEdicion)):''}</span>
   </div>`;
   // En Vista Dividida el panel entero (.split-left/.split-right) es el

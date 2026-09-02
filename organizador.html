@@ -4538,8 +4538,14 @@ function openOrRestoreTranscribePanel(slot){
   if(!targetId) return;
   panel = document.createElement('div');
   panel.id = 'transcribePanel'; panel.className = 'transcribe-side-panel';
+  const targetNote = getNote(targetId);
+  const targetTitle = escHtml(targetNote ? (targetNote.Titulo||'(sin título)') : '(nota)');
   panel.innerHTML = `
     <div class="drawer-head"><b>🎙️ Transcribir</b><span><button class="icon-btn" onclick="minimizeTranscribePanel()" title="Minimizar — sigue escuchando aunque no lo veas">➖</button><button class="icon-btn" onclick="closeTranscribePanel()">✕</button></span></div>
+    <div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12.5px;color:var(--text-dim);display:flex;align-items:center;gap:6px">
+      <span>📌 Va hacia:</span>
+      <b id="transcribeTargetLabel" style="color:var(--text);cursor:pointer;text-decoration:underline" onclick="openNoteEditor('${targetId}')" title="Abrir esa nota">${targetTitle}</b>
+    </div>
     <div style="padding:10px;overflow-y:auto;flex:1;display:flex;flex-direction:column;min-height:0">
       <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Idioma</label>
       <select id="transcribeLangSelect">

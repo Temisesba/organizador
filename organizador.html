@@ -8115,9 +8115,18 @@ async function insertDiapositivas(file, slot){
   const mainEl = document.getElementById(eid('mainArea',slot));
   const table = mainEl && mainEl.querySelector('table.cornell-table');
   if(!table){ showToast('No se pudo preparar la nota para las diapositivas'); return; }
+  const nombreArchivo = (file.name||'diapositiva').replace(/\.pdf$/i,'');
+  // Pedido explícito: "si lo interrumpo, ¿cómo subo las que faltaron?" —
+  // si se cierra la nota, se corta la conexión, o se cancela a medio
+  // subir, volver a adjuntar el MISMO PDF no debe repetir las páginas
+  // que ya quedaron insertadas. Se detectan por data-diapo-src/
+  // data-diapo-page en la celda (no por el texto visible del pie de
+  // foto, que ella puede editar) y solo se suben las que faltan.
+  const yaSubidas = new Set(Array.from(table.querySelectorAll('td.cornell-cue-cell[data-diapo-src="'+escAttr(nombreArchivo)+'"]')).map(c=>Number(c.dataset.diapoPage)));
   const total = pdfDoc.numPages;
-  let subidas = 0;
+  let subidas = 0, saltadas = 0;
   for(let n=1; n<=total; n++){
+    if(yaSubidas.has(n)){ saltadas++; continue; }
     showToast('Subiendo diapositiva '+n+' de '+total+'…');
     const page = await pdfDoc.getPage(n);
     const viewport = page.getViewport({ scale: 1.6 });
@@ -8128,16 +8137,19 @@ async function insertDiapositivas(file, slot){
     const blob = await new Promise(res=>canvas.toBlob(res, 'image/jpeg', 0.85));
     if(!blob) continue;
     const base64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=rej; r.readAsDataURL(blob); });
-    const up = await apiPost('uploadImage', { imageBase64: base64, mimeType:'image/jpeg', fileName:(file.name||'diapositiva').replace(/\.pdf$/i,'')+'-p'+n+'.jpg' });
+    const up = await apiPost('uploadImage', { imageBase64: base64, mimeType:'image/jpeg', fileName:nombreArchivo+'-p'+n+'.jpg' });
     if(!(up && up.ok)) continue;
     const row = table.insertRow(-1);
     const cue = row.insertCell(-1); cue.className='cornell-cue-cell';
+    cue.dataset.diapoSrc = nombreArchivo; cue.dataset.diapoPage = n;
     cue.innerHTML = '<img src="'+up.url+'" alt="diapositiva '+n+'" style="max-width:100%;display:block"><p>Diapositiva '+n+'</p>';
     const val = row.insertCell(-1); val.innerHTML = '<br>';
     subidas++;
   }
   scheduleSave(slot);
-  showToast(subidas ? subidas+' diapositivas agregadas — escribe tus notas a la derecha de cada una' : 'No se pudo subir ninguna diapositiva');
+  if(subidas) showToast(subidas+' diapositivas agregadas'+(saltadas?' ('+saltadas+' ya estaban, no se repitieron)':'')+' — escribe tus notas a la derecha de cada una');
+  else if(saltadas) showToast('Ya estaban las '+saltadas+' diapositivas de este PDF — no se agregó nada nuevo');
+  else showToast('No se pudo subir ninguna diapositiva');
 }
 
 /* ============ Checklists: plantillas + historial ============ */

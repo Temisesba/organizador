@@ -4474,34 +4474,56 @@ async function closeNoteEditor(){
 let _speechRecognition = null;
 let _transcribing = false;
 let _transcribeFinalText = ''; // vive fuera de startTranscription() para poder vaciarla desde cutTranscriptSegment() sin tener que parar/reiniciar el reconocimiento
-let _transcribeTargetNoteId = null; // la nota donde se guarda — sigue siendo esa aunque la cierres y abras/navegues a otras
-/* Pedido explícito ("que se pegue dnd esté el cursor") — mismo mecanismo
-   que _aiInsertRange/captureAiInsertRange del Asistente IA: se guarda el
-   cursor exacto de la nota en el momento de abrir 🎙️, para que el texto
-   transcrito se inserte ahí en vez de siempre al final. Se revalida en
-   el momento de insertar (document.contains) por si mientras tanto se
-   cerró esa nota o se abrió otra — ahí cae de vuelta a agregar al final. */
+let _transcribeTargetNoteId = null; // la nota donde se guarda — ver más abajo, ahora sigue a la nota que tengas abierta
+/* Corrección de rumbo explícita (2026-09-01): la primera versión fijaba
+   el destino UNA vez, al abrir 🎙️, y ya no se movía aunque abrieras otra
+   nota — "no quiero que sea literal dnd está el cursor sin importar si
+   es otra nota". Ahora es al revés, a propósito: mientras el panel de
+   Transcribir siga abierto, tanto _transcribeTargetNoteId (A CUÁL nota)
+   como _transcribeInsertRange (EN QUÉ PARTE de esa nota) se actualizan
+   solos cada vez que escribes/clicas dentro de CUALQUIER nota abierta
+   (updateTranscribeInsertRangeIfRelevant, por selectionchange) o abres
+   una nueva (bindEditorEvents la llama) — así Cortar/guardar siempre cae
+   en la nota que tengas abierta AHORA MISMO, la que sea. Si cierras
+   todas las notas, se queda apuntando a la última que estuvo abierta
+   (mismo mecanismo appendHtmlToNoteById de siempre para ese caso). */
 let _transcribeInsertRange = null;
+function refreshTranscribeTargetLabel(){
+  const label = document.getElementById('transcribeTargetLabel'); if(!label) return;
+  const note = getNote(_transcribeTargetNoteId);
+  label.textContent = note ? (note.Titulo||'(sin título)') : '(nota)';
+  label.setAttribute('onclick', "openNoteEditor('"+(_transcribeTargetNoteId||'')+"')");
+}
+/* Se llama al abrir/restaurar el panel Y cada vez que se abre una nota
+   nueva mientras el panel ya está abierto (ver bindEditorEvents) — ambos
+   casos "cuentan" como el destino cambiando a la nota que se ve ahora. */
 function captureTranscribeInsertRange(slot){
   const mainArea = document.getElementById(eid('mainArea',slot));
   const sel = window.getSelection();
   _transcribeInsertRange = (mainArea && sel.rangeCount && mainArea.contains(sel.anchorNode)) ? sel.getRangeAt(0).cloneRange() : null;
+  const id = slotEditingId(slot);
+  if(id) _transcribeTargetNoteId = id;
+  refreshTranscribeTargetLabel();
 }
-/* Corrección explícita: "dónde está el cursor en el momento que doy
-   Cortar, no dónde estaba cuando empecé a grabar" — una sola captura al
-   abrir el panel no alcanza si la sesión de transcripción dura un rato
-   y mueves el cursor mientras tanto (revisas otra parte de la nota,
-   etc.). Mientras el panel de Transcribir siga abierto, cada vez que la
-   selección cambie DENTRO de la nota destino, _transcribeInsertRange se
-   actualiza solo — así al momento real de insertar (Cortar o cerrar el
-   panel) ya tiene la posición más reciente, no la del inicio. */
+/* Mientras el panel de Transcribir siga abierto, cada cambio de
+   selección dentro de CUALQUIER nota abierta (primaria o secundaria de
+   Vista Dividida) actualiza tanto el destino como la posición exacta —
+   así Cortar cae donde estás AHORA, sin importar si es otra nota
+   distinta a la de cuando abriste el panel. */
 function updateTranscribeInsertRangeIfRelevant(){
-  if(!document.getElementById('transcribePanel') || !_transcribeTargetNoteId) return;
-  const slot = editingNoteId2===_transcribeTargetNoteId ? 'secondary' : (editingNoteId===_transcribeTargetNoteId ? undefined : null);
-  if(slot===null) return; // la nota destino ni siquiera está abierta ahorita
-  const mainArea = document.getElementById(eid('mainArea',slot));
-  const sel = window.getSelection();
-  if(mainArea && sel.rangeCount && mainArea.contains(sel.anchorNode)) _transcribeInsertRange = sel.getRangeAt(0).cloneRange();
+  if(!document.getElementById('transcribePanel')) return;
+  const sel = window.getSelection(); if(!sel.rangeCount) return;
+  const mainEl2 = document.getElementById('mainArea2');
+  if(mainEl2 && editingNoteId2 && mainEl2.contains(sel.anchorNode)){
+    if(_transcribeTargetNoteId!==editingNoteId2){ _transcribeTargetNoteId=editingNoteId2; refreshTranscribeTargetLabel(); }
+    _transcribeInsertRange = sel.getRangeAt(0).cloneRange();
+    return;
+  }
+  const mainEl = document.getElementById('mainArea');
+  if(mainEl && editingNoteId && mainEl.contains(sel.anchorNode)){
+    if(_transcribeTargetNoteId!==editingNoteId){ _transcribeTargetNoteId=editingNoteId; refreshTranscribeTargetLabel(); }
+    _transcribeInsertRange = sel.getRangeAt(0).cloneRange();
+  }
 }
 document.addEventListener('selectionchange', updateTranscribeInsertRangeIfRelevant);
 /* "🔴 Grabar audio" — pedido explícito: además de transcribir a texto,
@@ -4520,9 +4542,10 @@ let _recordStartMs = 0;
 /* El panel vive suelto en document.body (posición fija, no dentro de
    #editorOverlay) precisamente para que cerrar la nota NO se lo lleve
    consigo — puedes cerrar la nota donde empezaste a dictar, abrir o
-   navegar a cualquier otra, y sigue escuchando/grabando hacia la MISMA
-   nota original hasta que tú cierres el panel con ✕. Este botón del
-   toolbar solo abre uno nuevo si no existe ya uno corriendo; si ya hay
+   navegar a cualquier otra, y sigue escuchando/grabando (el DESTINO se
+   cambia solo a la nota que abras, ver _transcribeTargetNoteId más
+   abajo) hasta que tú cierres el panel con ✕. Este botón del toolbar
+   solo abre uno nuevo si no existe ya uno corriendo; si ya hay
    uno (de esta nota o de otra que cerraste), lo restaura en vez de
    tocar el "escuchar/detener" — así no se detiene sin querer una
    transcripción en curso solo por abrir otra nota y tocar el ícono. */
@@ -4558,7 +4581,7 @@ function openOrRestoreTranscribePanel(slot){
       </select>
       <p class="hint" style="color:var(--text-dim);font-size:11px;margin:4px 0 8px">El navegador no detecta el idioma solo — elígelo antes de darle a escuchar.</p>
       <div id="transcribeCaptureArea" contenteditable="true" style="flex:1;min-height:0;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:10px"></div>
-      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0 0">Se agrega a la nota donde le diste clic a 🎙️ (como #transcripcion) al cerrar este panel, o de una vez con "✂️ Cortar" — aunque cierres esa nota o abras otra, sigue grabando hacia la misma hasta que le des ✕ aquí.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:6px 0 0">Se agrega (como #transcripcion) a la nota que tengas abierta al momento de cerrar este panel, o de una vez con "✂️ Cortar" — si abres otra nota mientras sigue escuchando, el destino se cambia solo a esa (mira "📌 Va hacia" arriba).</p>
       <div style="display:flex;gap:6px;margin-top:8px">
         <button class="btn" id="transcribeToggleBtn" style="flex:1" onclick="toggleTranscription()">🎙️ Empezar a escuchar</button>
         <button class="btn secondary" onclick="cutTranscriptSegment()" title="Guarda lo transcrito hasta aquí en la nota y sigue escuchando desde cero — para ir usando el texto por partes, en vez de esperar hasta cerrar el panel">✂️ Cortar</button>
@@ -5608,6 +5631,10 @@ function bindEditorEvents(note, slot){
   });
   const mainEl = document.getElementById(eid('mainArea',slot));
   if(mainEl){
+    // Si el panel de Transcribir sigue abierto, abrir esta nota (la que sea)
+    // la vuelve el destino de la transcripción en curso — ver el comentario
+    // extenso junto a _transcribeTargetNoteId.
+    if(document.getElementById('transcribePanel')) captureTranscribeInsertRange(slot);
     wrapRtTables(mainEl);
     badgeifyInlineTags(mainEl);
     attachPinchZoom(mainEl);

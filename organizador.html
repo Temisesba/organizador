@@ -9556,13 +9556,13 @@ function openFieldTemplateModal(existingId){
   const existing = existingId ? DATA.plantillas_prop.find(p=>p.ID===existingId) : null;
   let campos = []; if(existing){ try{ campos = JSON.parse(existing.CamposJSON||'[]'); }catch(e){} }
   const tipos = templateFieldTypes(existing);
-  const tipoSuffix = { fecha:' | fecha', fecha_anual:' | fecha-anual' };
+  const tipoSuffix = { fecha:' | fecha', fecha_anual:' | fecha-anual', foto:' | foto' };
   const camposText = campos.map(c => c + (tipoSuffix[tipos[c]]||'')).join('\n');
   const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
   overlay.innerHTML = `<div class="modal">
     <div class="modal-head"><b>${existing?'✏️ Editar':'+'} Plantilla de campos</b><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></div>
     <div class="modal-body">
-      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Esta misma lista de campos la puedes insertar después como texto (#campo debajo del otro), como columna izquierda de una tabla Cornell, o llenarla directo con el formulario rápido (⚡) — eliges al momento de usarla. Agrega " | fecha" (día/mes/año, ej. vencimiento de un documento) o " | fecha-anual" (solo día y mes, se repite cada año — para cumpleaños y cosas así) al final de un campo para poder sincronizarlo con Google Calendar más tarde.</p>
+      <p class="hint" style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Esta misma lista de campos la puedes insertar después como texto (#campo debajo del otro), como columna izquierda de una tabla Cornell, o llenarla directo con el formulario rápido (⚡) — eliges al momento de usarla. Agrega " | fecha" (día/mes/año, ej. vencimiento de un documento), " | fecha-anual" (solo día y mes, se repite cada año — para cumpleaños y cosas así) o " | foto" (el formulario rápido ⚡ deja elegir/subir una foto para ese campo) al final de un campo.</p>
       <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Nombre</label>
       <input type="text" id="ftplNombre" value="${existing?escAttr(existing.Nombre):''}" placeholder="ej. Enfermedad">
       <label style="font-weight:600;font-size:13px;display:block;margin:14px 0 6px">Campos (uno por línea, sin #)</label>
@@ -9597,6 +9597,7 @@ function saveFieldTemplate(btn, existingId){
     const tipoTxt = parts[1] ? parts[1].toLowerCase().replace(/\s+/g,'-') : '';
     if(tipoTxt==='fecha') tipos[slug] = 'fecha';
     else if(tipoTxt==='fecha-anual') tipos[slug] = 'fecha_anual';
+    else if(tipoTxt==='foto') tipos[slug] = 'foto';
   });
   const usaPersona = document.getElementById('ftplUsaPersona').checked ? '1' : '';
   const recordatorio = document.getElementById('ftplRecordatorio').value;
@@ -9689,7 +9690,10 @@ function openQuickFieldFill(id){
       <input type="text" id="qffTitle" value="${escAttr(pt.Nombre+' — '+fmtDateWithWeekday(new Date().toISOString()))}">
       ${campos.map((c,i)=>`
         <label style="font-size:12px;font-weight:600;display:block;margin:12px 0 4px">${escHtml(prettyFieldLabel(c))}${tipos[c]==='fecha_anual'?' <span style="font-weight:400;color:var(--text-dim);font-size:11px">(solo día y mes, se repite cada año)</span>':''}</label>
-        ${tipos[c]==='fecha' ? `<input type="date" id="qffField${i}">` : tipos[c]==='fecha_anual' ? fechaAnualSelectHTML(i) : `<textarea id="qffField${i}" rows="2" style="width:100%;resize:vertical"></textarea>`}`).join('')}
+        ${tipos[c]==='fecha' ? `<input type="date" id="qffField${i}">`
+          : tipos[c]==='fecha_anual' ? fechaAnualSelectHTML(i)
+          : tipos[c]==='foto' ? `<input type="file" accept="image/*" id="qffField${i}" onchange="handleQffPhotoChange(this,${i})"><div id="qffField${i}_preview" style="margin-top:6px"></div>`
+          : `<textarea id="qffField${i}" rows="2" style="width:100%;resize:vertical"></textarea>`}`).join('')}
       <div style="margin-top:14px"><button class="btn" id="qffSaveBtn">Guardar</button></div>
     </div>
   </div>`;
@@ -9710,6 +9714,26 @@ function fechaAnualSelectHTML(i){
     <select id="qffField${i}_day" style="width:auto">${dayOpts}</select>
     <select id="qffField${i}_month" style="width:auto">${monthOpts}</select>
   </div>`;
+}
+/* Campo tipo "foto" en el formulario rápido — pedido explícito ("que
+   las plantillas también puedan agregar fotos"). Se sube al Drive de
+   siempre (mismo uploadImage que ya usa insertImage) apenas se elige el
+   archivo, no hasta Guardar, para que se vea el avance/error de una vez
+   — la URL queda en el propio <input> (dataset.uploadedUrl), que es de
+   donde saveQuickFieldFill la lee al armar la celda de la tabla. */
+async function handleQffPhotoChange(input, i){
+  const file = input.files[0]; if(!file) return;
+  const preview = document.getElementById('qffField'+i+'_preview');
+  if(preview) preview.textContent = 'Subiendo…';
+  const base64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=rej; r.readAsDataURL(file); });
+  const up = await apiPost('uploadImage', { imageBase64: base64, mimeType: file.type, fileName: file.name||'foto' });
+  if(up && up.ok){
+    input.dataset.uploadedUrl = up.url;
+    if(preview) preview.innerHTML = '<img src="'+escAttr(up.url)+'" style="max-width:140px;border-radius:8px;display:block">';
+  } else {
+    delete input.dataset.uploadedUrl;
+    if(preview) preview.textContent = 'No se pudo subir'+(up&&up.error?': '+up.error:'');
+  }
 }
 async function handleQffPersonaChange(sel){
   if(sel.value==='__new__'){
@@ -9738,15 +9762,21 @@ async function saveQuickFieldFill(pt, campos, overlay){
     const personaName = pt.UsaPersona ? ((DATA.personas.find(p=>p.ID===personaSel.value)||{}).Nombre||'') : '';
     let trs = pt.UsaPersona ? ('<tr><td class="cornell-cue-cell">#persona</td><td><p>'+escHtml(personaName)+'</p></td></tr>') : '';
     trs += campos.map((c,i)=>{
-      let val;
+      let cellHtml;
       if(tipos[c]==='fecha_anual'){
         const day = document.getElementById('qffField'+i+'_day').value;
         const month = document.getElementById('qffField'+i+'_month').value;
-        val = (day && month) ? (String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0')) : '';
+        const val = (day && month) ? (String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0')) : '';
+        cellHtml = val ? '<p>'+escHtml(val)+'</p>' : '<br>';
+      } else if(tipos[c]==='foto'){
+        const input = document.getElementById('qffField'+i);
+        const url = input && input.dataset.uploadedUrl;
+        cellHtml = url ? '<img src="'+escAttr(url)+'" alt="foto" style="max-width:100%;display:block">' : '<br>';
       } else {
-        val = (document.getElementById('qffField'+i).value||'').trim();
+        const val = (document.getElementById('qffField'+i).value||'').trim();
+        cellHtml = val ? '<p>'+escHtml(val).replace(/\n/g,'</p><p>')+'</p>' : '<br>';
       }
-      return '<tr><td class="cornell-cue-cell">#'+escHtml(c)+'</td><td>'+(val?'<p>'+escHtml(val).replace(/\n/g,'</p><p>')+'</p>':'<br>')+'</td></tr>';
+      return '<tr><td class="cornell-cue-cell">#'+escHtml(c)+'</td><td>'+cellHtml+'</td></tr>';
     }).join('');
     const nb = (pt.Notebook && DATA.notebooks.find(n=>n.Nombre===pt.Notebook)) || await ensureRegistroPersonalNotebook();
     const note = newBlankNote();

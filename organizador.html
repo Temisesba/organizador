@@ -10410,13 +10410,21 @@ function openAIDrawer(){
         <input type="text" id="aiFollowUpInput" placeholder="Seguir pidiendo sobre la última respuesta…" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();runFollowUpAI();}">
         <button class="btn secondary" onclick="runFollowUpAI()" title="Le sigue pidiendo a la IA sobre su última respuesta, en vez de empezar de cero">↩️ Responder</button>
       </div>
-      <h3 style="margin-top:20px">📖 Diccionario personal</h3>
-      <div style="display:flex;gap:6px"><input type="text" id="dicTerm" placeholder="palabra"><input type="text" id="dicTrans" placeholder="traducción"><button class="icon-btn" onclick="addDicManual()">+</button></div>
-      <div id="dicList" style="margin-top:8px;max-height:160px;overflow-y:auto"></div>
-      <h3 style="margin-top:20px">🧠 Historial de respuestas</h3>
-      <div id="fbList" style="max-height:160px;overflow-y:auto"></div>
-      <h3 style="margin-top:20px">🇬🇧 Historial de correcciones de inglés</h3>
-      <div id="englishLessonList" style="max-height:160px;overflow-y:auto"></div>
+      <h3 style="margin-top:20px;display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none" onclick="toggleAiSection('dic',this)"><span class="ai-sec-caret">${aiSectionCollapsed('dic')?'▸':'▾'}</span> 📖 Diccionario personal</h3>
+      <div id="aiSec_dic" class="${aiSectionCollapsed('dic')?'hidden':''}">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <input type="text" id="dicTerm" placeholder="palabra" style="flex:1;min-width:80px">
+          <input type="text" id="dicTrans" placeholder="traducción" style="flex:1;min-width:80px">
+          <select id="dicIdioma" style="width:auto">${DIC_IDIOMAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+          <button class="icon-btn" onclick="addDicManual()">+</button>
+        </div>
+        <select id="dicFiltroIdioma" onchange="renderDicList()" style="width:auto;font-size:12px;margin-top:6px"><option value="">Todos los idiomas</option>${DIC_IDIOMAS.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+        <div id="dicList" style="margin-top:8px;max-height:160px;overflow-y:auto"></div>
+      </div>
+      <h3 style="margin-top:20px;display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none" onclick="toggleAiSection('fb',this)"><span class="ai-sec-caret">${aiSectionCollapsed('fb')?'▸':'▾'}</span> 🧠 Historial de respuestas</h3>
+      <div id="aiSec_fb" class="${aiSectionCollapsed('fb')?'hidden':''}"><div id="fbList" style="max-height:160px;overflow-y:auto"></div></div>
+      <h3 style="margin-top:20px;display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none" onclick="toggleAiSection('eng',this)"><span class="ai-sec-caret">${aiSectionCollapsed('eng')?'▸':'▾'}</span> 🇬🇧 Historial de correcciones de inglés</h3>
+      <div id="aiSec_eng" class="${aiSectionCollapsed('eng')?'hidden':''}"><div id="englishLessonList" style="max-height:160px;overflow-y:auto"></div></div>
     </div>`;
   document.body.appendChild(panel);
   bringToFront(panel);
@@ -10591,15 +10599,55 @@ function toggleNoteFavoriteUI(id){
   note.Pinned = note.Pinned ? '' : '1';
   saveEntity('NOTAS', note);
 }
+/* Pedido explícito: las tres secciones de abajo del panel del Asistente
+   (Diccionario, Historial de respuestas, Historial de inglés) ocupaban
+   mucho scroll — ahora cada una se puede plegar, y el estado se guarda
+   por sección (no por todo el panel) así que se acuerda cuáles quieres
+   ver siempre desplegadas. */
+function aiSectionCollapsed(key){ return localStorage.getItem('org_ai_collapse_'+key)==='1'; }
+function toggleAiSection(key, headerEl){
+  const collapsed = !aiSectionCollapsed(key);
+  localStorage.setItem('org_ai_collapse_'+key, collapsed?'1':'');
+  const body = document.getElementById('aiSec_'+key);
+  if(body) body.classList.toggle('hidden', collapsed);
+  const caret = headerEl.querySelector('.ai-sec-caret');
+  if(caret) caret.textContent = collapsed?'▸':'▾';
+}
+/* Pedido explícito: "el diccionario no solo inglés, poder elegir
+   japonés etc" — antes cada entrada era implícitamente español↔inglés
+   (nada lo decía, solo se asumía). Lista fija de opciones, mismo
+   criterio que transcribeLangSelect (no es un catálogo que ella cree y
+   edite, es un idioma real del mundo). Las entradas viejas sin Idioma
+   se tratan como Inglés (mismo comportamiento de siempre). */
+const DIC_IDIOMAS = [['en','🇬🇧 Inglés'],['ja','🇯🇵 Japonés'],['fr','🇫🇷 Francés'],['pt','🇵🇹 Portugués'],['de','🇩🇪 Alemán'],['it','🇮🇹 Italiano'],['other','🌐 Otro']];
+function dicIdiomaLabel(code){ return (DIC_IDIOMAS.find(([v])=>v===code)||DIC_IDIOMAS[0])[1]; }
 function renderEnglishLessonHistory(){
   const el = document.getElementById('englishLessonList'); if(!el) return;
   const notes = activeNotes().filter(n=>n.Notebook==='Inglés')
     .sort((a,b)=>(b.Pinned?1:0)-(a.Pinned?1:0) || String(b.Fecha).localeCompare(String(a.Fecha)))
     .slice(0,15);
-  el.innerHTML = notes.map(n=>`<div class="settings-row" style="align-items:center">
+  el.innerHTML = notes.map(n=>{
+    const full = stripHtmlToText(n.Contenido||'');
+    return `<div class="settings-row" style="align-items:center">
     <button class="icon-btn" style="padding:2px 4px" onclick="event.stopPropagation();toggleNoteFavoriteUI('${escAttr(n.ID)}');renderEnglishLessonHistory()" title="${n.Pinned?'Quitar de favoritos':'Marcar como favorita'}">${n.Pinned?'⭐':'☆'}</button>
-    <span style="flex:1;font-size:12.5px;cursor:pointer" onclick="openNoteEditor('${n.ID}')">${escHtml(stripHtmlToText(n.Contenido||'').slice(0,90))}</span>
-  </div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Aún no hay lecciones</p>';
+    <span style="flex:1;font-size:12.5px;cursor:pointer" onclick="openEnglishLessonModal('${escAttr(n.ID)}')" title="Ver completa">${escHtml(full.slice(0,90))}${full.length>90?'…':''}</span>
+  </div>`;
+  }).join('') || '<p class="hint" style="color:var(--text-dim)">Aún no hay lecciones</p>';
+}
+/* Pedido explícito: "en esta columna poder ver completa la lección" —
+   antes el único texto visible era el recorte de 90 caracteres de la
+   lista, sin ninguna forma de ver el resto sin abrir la nota entera en
+   modo edición. Mismo patrón que openFeedbackEntryModal: un modal de
+   solo lectura con el contenido completo, con un ✏️ aparte por si sí
+   quiere editarla de verdad. */
+function openEnglishLessonModal(id){
+  const n = getNote(id); if(!n) return;
+  const overlay = document.createElement('div'); overlay.className='modal-overlay no-print';
+  overlay.innerHTML = `<div class="modal">
+    <div class="modal-head"><b>🇬🇧 ${escHtml(n.Titulo||fmtDate(n.Fecha))}</b><span><button class="icon-btn" onclick="this.closest('.modal-overlay').remove();openNoteEditor('${escAttr(id)}')" title="Editar esta nota">✏️</button><button class="icon-btn" onclick="this.closest('.modal-overlay').remove()">✕</button></span></div>
+    <div class="modal-body">${n.Contenido||''}</div>
+  </div>`;
+  document.body.appendChild(overlay);
 }
 /* Inserta EXACTAMENTE donde estaba el cursor cuando se abrió el panel
    (_aiInsertRange, ver captureAiInsertRange) en vez de al final/inicio.
@@ -10628,13 +10676,14 @@ function insertAiEntryIntoNote(i){
 function sendAiEntryToDic(i){
   const entry = aiConversation[i]; if(!entry) return;
   const term = entry.original.split('\n')[0].slice(0,60);
-  saveEntity('DICCIONARIO', { ID:uid(), Termino:term, Traduccion:entry.result.split('\n')[0].slice(0,60), Notas:'', Fecha:new Date().toISOString() });
+  saveEntity('DICCIONARIO', { ID:uid(), Termino:term, Traduccion:entry.result.split('\n')[0].slice(0,60), Notas:'', Fecha:new Date().toISOString(), Idioma:'en' });
   showToast('Enviado al diccionario'); renderDicList();
 }
 function addDicManual(){
   const t = document.getElementById('dicTerm').value.trim(); const tr = document.getElementById('dicTrans').value.trim();
   if(!t||!tr) return;
-  saveEntity('DICCIONARIO', { ID:uid(), Termino:t, Traduccion:tr, Notas:'', Fecha:new Date().toISOString() });
+  const idioma = (document.getElementById('dicIdioma')||{}).value || 'en';
+  saveEntity('DICCIONARIO', { ID:uid(), Termino:t, Traduccion:tr, Notas:'', Fecha:new Date().toISOString(), Idioma:idioma });
   document.getElementById('dicTerm').value=''; document.getElementById('dicTrans').value='';
   renderDicList();
 }
@@ -10651,9 +10700,11 @@ function toggleDicFavoriteUI(id){
 }
 function renderDicList(){
   const el = document.getElementById('dicList'); if(!el) return;
-  const sorted = DATA.diccionario.slice().reverse().sort((a,b)=>(b.Favorito?1:0)-(a.Favorito?1:0));
+  const filtroVal = (document.getElementById('dicFiltroIdioma')||{}).value || '';
+  let sorted = DATA.diccionario.slice().reverse().sort((a,b)=>(b.Favorito?1:0)-(a.Favorito?1:0));
+  if(filtroVal) sorted = sorted.filter(d=>(d.Idioma||'en')===filtroVal);
   el.innerHTML = sorted.map(d=>`<div style="display:flex;align-items:center;gap:4px;justify-content:space-between;border-bottom:1px solid var(--border);padding:3px 0;font-size:13px">
-    <span style="flex:1;min-width:0"><button class="icon-btn" style="padding:2px 4px" onclick="toggleDicFavoriteUI('${escAttr(d.ID)}')" title="${d.Favorito?'Quitar de favoritos':'Marcar como favorito'}">${d.Favorito?'⭐':'☆'}</button> ${escHtml(d.Termino)} → ${escHtml(d.Traduccion)}</span>
+    <span style="flex:1;min-width:0"><button class="icon-btn" style="padding:2px 4px" onclick="toggleDicFavoriteUI('${escAttr(d.ID)}')" title="${d.Favorito?'Quitar de favoritos':'Marcar como favorito'}">${d.Favorito?'⭐':'☆'}</button> <span title="${escAttr(dicIdiomaLabel(d.Idioma||'en'))}">${dicIdiomaLabel(d.Idioma||'en').split(' ')[0]}</span> ${escHtml(d.Termino)} → ${escHtml(d.Traduccion)}</span>
     <button class="icon-btn" onclick="deleteDicEntryUI('${d.ID}')">🗑️</button>
   </div>`).join('') || '<p class="hint" style="color:var(--text-dim)">Vacío</p>';
 }

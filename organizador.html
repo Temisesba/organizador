@@ -640,7 +640,25 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 </style>
 </head>
 <body>
-<button onclick="location.href='https://temisesba.github.io/app-completa/'" title="Volver a App Completa" style="position:fixed;top:calc(8px + env(safe-area-inset-top,0px));left:8px;z-index:99999;width:34px;height:34px;border-radius:50%;border:none;background:rgba(0,0,0,.45);color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(6px);box-shadow:0 1px 4px rgba(0,0,0,.3);">🏠</button>
+<button id="acHomeBtn" title="Volver a App Completa (arrástrame para cambiarme de lugar)" style="position:fixed;top:calc(8px + env(safe-area-inset-top,0px));left:8px;z-index:99999;width:34px;height:34px;border-radius:50%;border:none;background:rgba(0,0,0,.45);color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(6px);box-shadow:0 1px 4px rgba(0,0,0,.3);touch-action:none;user-select:none;-webkit-user-select:none;">🏠</button>
+<script>
+/* Botón 🏠 arrastrable: se puede mover si estorba (ej. tapa el menú). La
+   posición se guarda en localStorage como fracción de la pantalla — todas
+   las sub-apps viven en el mismo origen (temisesba.github.io), así que el
+   lugar elegido se respeta en todas. Tocar sin arrastrar = volver. */
+(function(){
+  var b=document.getElementById('acHomeBtn'); if(!b) return;
+  var K='ac_home_btn_pos', S=34, moved=false, drag=null;
+  function place(x,y){ x=Math.max(2,Math.min(innerWidth-S-2,x)); y=Math.max(2,Math.min(innerHeight-S-2,y)); b.style.left=x+'px'; b.style.top=y+'px'; return [x,y]; }
+  function load(){ try{ var p=JSON.parse(localStorage.getItem(K)||'null'); if(p&&isFinite(p.fx)&&isFinite(p.fy)) place(p.fx*innerWidth,p.fy*innerHeight); }catch(e){} }
+  load(); addEventListener('resize',load);
+  b.addEventListener('pointerdown',function(e){ var r=b.getBoundingClientRect(); drag={sx:e.clientX,sy:e.clientY,ox:e.clientX-r.left,oy:e.clientY-r.top,on:false}; moved=false; try{b.setPointerCapture(e.pointerId);}catch(_){} });
+  b.addEventListener('pointermove',function(e){ if(!drag) return; if(!drag.on && Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy)<8) return; drag.on=true; moved=true; place(e.clientX-drag.ox,e.clientY-drag.oy); e.preventDefault(); });
+  function end(){ if(drag&&drag.on){ var r=b.getBoundingClientRect(); try{ localStorage.setItem(K,JSON.stringify({fx:r.left/innerWidth,fy:r.top/innerHeight})); }catch(_){} } drag=null; }
+  b.addEventListener('pointerup',end); b.addEventListener('pointercancel',end);
+  b.addEventListener('click',function(e){ if(moved){ moved=false; e.preventDefault(); return; } location.href='https://temisesba.github.io/app-completa/'; });
+})();
+</script>
 
 <div id="setupScreen">
   <div class="setup-card">
@@ -772,7 +790,7 @@ mark.mk-y{background:var(--mark-y)} mark.mk-g{background:var(--mark-g)} mark.mk-
 // Configuración → Conexión se puede confirmar que estás viendo la versión
 // más reciente y no una copia vieja en caché (mismo truco que en Gastos,
 // pero aquí con lugares turísticos del mundo en vez de nombres).
-const BUILD_VERSION = 'Cornell';
+const BUILD_VERSION = 'Alhambra';
 // El cuaderno de Mejoras vive SOLO en Configuración → Mejoras — no debe
 // aparecer en el panel lateral ni como opción al archivar una nota normal,
 // para no confundirlo con un cuaderno de verdad.
